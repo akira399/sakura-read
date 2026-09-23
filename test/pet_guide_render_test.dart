@@ -201,8 +201,10 @@ void main() {
     await tester.pumpWidget(_host(c));
     await tester.pump(const Duration(milliseconds: 200));
 
-    // 模拟「被新页面盖住」：控制器应收到 covered 回调
-    c.onAnchorCovered(shelfAnchor);
+    // 模拟「被新页面盖住」（如进入搜索页）：本步目标暂不可见时引导应让路，
+    // 而不是用全屏遮罩去堵一个看不见的目标（曾把页面整个堵死）。
+    c.unregisterAnchor(shelfAnchor);
+    await tester.pump(const Duration(milliseconds: 200));
     expect(tester.takeException(), isNull);
 
     await _teardown(tester, c);
@@ -223,7 +225,7 @@ void main() {
     expect(find.text('小樱'), findsOneWidget);
 
     // 面板打开 → 引导收起（不再画遮罩/气泡，免得挡住面板）
-    c.onAnchorCovered(id);
+    c.onTargetTapped(id);
     expect(c.suppressed, isTrue);
     await tester.pump(const Duration(milliseconds: 200));
     expect(tester.takeException(), isNull);

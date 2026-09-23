@@ -128,69 +128,80 @@ class PetGuideOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final full = Offset.zero & media.size;
+    final step = controller.step;
     final target = controller.anchorRect?.inflate(10);
 
-    // 面板打开期间（本步骤配置了 hideWhileOpen）：临时收起引导，
-    // 免得遮罩挡住面板上的操作；面板关闭后会自动进入下一步。
+    // ── 让路原则（功能要符合直觉，绝不把页面堵死）──
+    // 1) 面板打开期间（hideWhileOpen）：完全收起，用户自由操作面板；
+    // 2) 需要目标但目标暂不可见、也未"软化"：收起等待（目标出现即恢复；
+    //    目标随页面消失则由 onAnchorCovered / onAnchorGone 接管推进）——
+    //    之前这里会铺**全屏遮罩**去堵一个看不见的目标，把页面整个堵死；
+    // 3) 自由参观（freeRoam）：只高亮 + 旁白，不铺遮罩、不计"不听话"。
     if (controller.suppressed) {
-      return const Positioned.fill(
-        child: IgnorePointer(child: SizedBox.shrink()),
-      );
+      return const Positioned.fill(child: SizedBox.shrink());
+    }
+    final needsTarget = step.hasAnchor;
+    if (needsTarget &&
+        target == null &&
+        !controller.softened &&
+        !step.freeRoam) {
+      return const Positioned.fill(child: SizedBox.shrink());
+    }
+
+    // 遮罩：freeRoam 不铺；目标缺失（已软化）铺全屏（点任意处继续）；
+    // 正常情况铺四块、给目标留孔（手势穿透到真实控件）。
+    final List<Widget> barriers;
+    if (step.freeRoam) {
+      barriers = const [];
+    } else if (target == null) {
+      barriers = [_Barrier(rect: full, onTap: _onBarrierTap)];
+    } else {
+      barriers = [
+        _Barrier(
+          rect: Rect.fromLTRB(0, 0, full.width, target.top),
+          onTap: _onBarrierTap,
+        ),
+        _Barrier(
+          rect: Rect.fromLTRB(0, target.bottom, full.width, full.height),
+          onTap: _onBarrierTap,
+        ),
+        _Barrier(
+          rect: Rect.fromLTRB(0, target.top, target.left, target.bottom),
+          onTap: _onBarrierTap,
+        ),
+        _Barrier(
+          rect: Rect.fromLTRB(
+            target.right,
+            target.top,
+            full.width,
+            target.bottom,
+          ),
+          onTap: _onBarrierTap,
+        ),
+      ];
     }
 
     return Positioned.fill(
       child: Stack(
         children: [
-          // ---- 遮罩（四块，留出目标孔洞，手势可穿透） ----
-          if (target == null)
-            _Barrier(rect: full, onTap: _onBarrierTap)
-          else ...[
-            _Barrier(
-              rect: Rect.fromLTRB(0, 0, full.width, target.top),
-              onTap: _onBarrierTap,
-            ),
-            _Barrier(
-              rect: Rect.fromLTRB(0, target.bottom, full.width, full.height),
-              onTap: _onBarrierTap,
-            ),
-            _Barrier(
-              rect: Rect.fromLTRB(0, target.top, target.left, target.bottom),
-              onTap: _onBarrierTap,
-            ),
-            _Barrier(
-              rect: Rect.fromLTRB(
-                target.right,
-                target.top,
-                full.width,
-                target.bottom,
-              ),
-              onTap: _onBarrierTap,
-            ),
+          ...barriers,
+          if (target != null)
             // 目标高亮环（不吃手势）
             // 注意：Positioned 是 ParentDataWidget，必须是 Stack 的**直接子级**；
             // 所以 IgnorePointer 要放在 Positioned 里面（顺序反过来会抛断言，
-            // 导致整个引导层渲染崩溃 —— 见 pet_guide_overlay_test 回归用例）。
+            // 导致整个引导层渲染崩溃 —— 见 pet_guide_render_test 回归用例）。
             Positioned.fromRect(
               rect: target,
               child: const IgnorePointer(child: _SpotlightRing()),
             ),
-          ],
           // ---- 小樱 + 气泡 ----
           _Bubble(
             target: target,
             full: full,
-            text:
-                controller.nagLine ??
-                (controller.suppressed
-                    ? (controller.step.waitNote ?? controller.step.text)
-                    : controller.step.text),
-            hint: controller.suppressed
-                ? '看完关掉它就好'
-                : (controller.step.hasAnchor
-                      ? (controller.nagLine == null
-                            ? controller.step.hint
-                            : '……')
-                      : controller.step.hint),
+            text: controller.nagLine ?? controller.step.text,
+            hint: controller.step.hasAnchor
+                ? (controller.nagLine == null ? controller.step.hint : '……')
+                : controller.step.hint,
             nagging: controller.nagLine != null,
             face:
                 _nagFaces[math.min(controller.nagCount, _nagFaces.length - 1)],
@@ -231,8 +242,9 @@ class PetGuideOverlay extends StatelessWidget {
   }
 
   void _onBarrierTap() {
-    // 无目标步骤：点任意处推进；有目标步骤：点错地方 → 劝导
-    if (controller.step.hasAnchor) {
+    // 无目标步骤 / 目标已"软化"（锚点缺失）：点任意处都算继续；
+    // 有目标步骤：点到非目标处 → 记一次"不听话"（劝导）。
+    if (controller.step.hasAnchor && controller.anchorRect != null) {
       controller.reportWrong();
     } else {
       controller.advance();
@@ -367,7 +379,11 @@ class _Bubble extends StatelessWidget {
       bottom: bottom,
       width: width,
       child: IgnorePointer(
-        ignoring: false,
+        // 气泡自身**不吃手势**：点击穿透到下面的遮罩，走统一逻辑
+        // （无目标步骤 → 继续；有目标步骤 → 记"点错地方"）。
+        // 之前这里是 false，气泡把点击吞掉却什么都不做——
+        // 用户点"点一下继续"的对话框毫无反应（曾被反馈"不符合直觉"）。
+        ignoring: true,
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 220),
           child: KeyedSubtree(
@@ -502,10 +518,11 @@ class _PetGuideAnchorState extends State<PetGuideAnchor> with RouteAware {
 
   @override
   void didPushNext() {
-    // 本页被新页面 / 弹出面板盖住（如点放大镜进入搜索页、点「＋」弹出导入面板）
+    // 本页被新页面 / 弹出面板盖住（如点放大镜进入搜索页）
+    // 注意：面板步骤的"收起"由 onTargetTapped 驱动（点击即收起），
+    // 这里只处理锚点位置的注销。
     _covered = true;
     widget.controller.unregisterAnchor(widget.id);
-    widget.controller.onAnchorCovered(widget.id);
     if (mounted) setState(() {});
   }
 
@@ -524,6 +541,9 @@ class _PetGuideAnchorState extends State<PetGuideAnchor> with RouteAware {
   void dispose() {
     guideRouteObserver.unsubscribe(this);
     widget.controller.unregisterAnchor(widget.id);
+    // 目标控件被销毁（所在页面关闭）→ 若引导正指着它，视为完成。
+    // 典型场景：要你点搜索页返回箭头，你却用了系统返回键。
+    widget.controller.onAnchorGone(widget.id);
     super.dispose();
   }
 
@@ -542,13 +562,11 @@ class _PetGuideAnchorState extends State<PetGuideAnchor> with RouteAware {
     if (!_covered) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _report());
     }
-    final isCurrent = widget.controller.step.anchorId == widget.id;
     return Listener(
-      onPointerDown: (_) {
-        if (widget.controller.active && isCurrent) {
-          widget.controller.advance();
-        }
-      },
+      // 判定必须在点击当下做（controller 内部读取当前步骤）。
+      // 之前在 build 里缓存 isCurrent，引导推进时锚点组件不重建 →
+      // 缓存过期，用户点对了却被漏判（曾造成"点了放大镜却卡在原地"）。
+      onPointerDown: (_) => widget.controller.onTargetTapped(widget.id),
       child: KeyedSubtree(key: _key, child: widget.child),
     );
   }

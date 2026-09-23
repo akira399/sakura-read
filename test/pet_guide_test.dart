@@ -153,4 +153,70 @@ void main() {
     c.unregisterAnchor(id);
     expect(c.anchorRect, isNull);
   });
+
+  group('直觉交互（回归：曾把用户操作误判为"不听话"）', () {
+    test('点中目标应立即推进（判定在点击当下做，不看缓存）', () {
+      final c = PetGuideController();
+      addTearDown(c.dispose);
+      c.start();
+      c.advance(); // 第一个带锚点的步骤（放大镜）
+      final id = c.step.anchorId!;
+      expect(id, 'shelf_search');
+
+      // 模拟"点击当下"回调（锚点 Listener 调用）
+      c.onTargetTapped(id);
+      expect(
+        c.step.id,
+        'search_return',
+        reason: '点了目标（放大镜）应立即进入下一步——曾因缓存过期被漏判',
+      );
+      expect(c.nagCount, 0, reason: '点对目标不应记"不听话"');
+    });
+
+    test('点目标后切页 + 用系统返回键关页 → 视为完成，不算不听话', () {
+      final c = PetGuideController();
+      addTearDown(c.dispose);
+      c.start();
+      c.advance();
+      c.onTargetTapped('shelf_search'); // 进入搜索页
+      expect(c.step.id, 'search_return');
+
+      // 用户没点"返回箭头"，直接用系统返回键 → 锚点销毁
+      c.onAnchorGone('search_back');
+      expect(c.step.id, 'import', reason: '目标随页面关闭 → 这一步应视为完成（返回键也是返回）');
+      expect(c.nagCount, 0);
+    });
+
+    test('自由参观（freeRoam）步骤：点非目标处不计"不听话"', () {
+      final c = PetGuideController();
+      addTearDown(c.dispose);
+      c.start();
+      c.goToStep('search_return');
+      expect(c.step.freeRoam, isTrue, reason: '搜索页应是自由参观步骤');
+
+      c.registerAnchor('search_back', const Rect.fromLTWH(1, 2, 3, 4));
+      // 模拟"点到页面别处"（自由参观下不该有遮罩，但即便记到也应直接推进）
+      c.reportWrong();
+      expect(c.nagCount, 0, reason: '自由参观不该累计劝导次数');
+    });
+
+    test('面板入口（＋）：点击后收起引导，面板关闭后自动继续', () {
+      final c = PetGuideController();
+      addTearDown(c.dispose);
+      c.start();
+      c.goToStep('import');
+      expect(c.step.hideWhileOpen, isTrue);
+      final id = c.step.anchorId!;
+      c.registerAnchor(id, const Rect.fromLTWH(300, 600, 60, 60));
+
+      final before = c.stepIndex;
+      c.onTargetTapped(id); // 面板打开（锚点被盖住）
+      expect(c.suppressed, isTrue, reason: '面板打开时引导应立即让路');
+      expect(c.stepIndex, before, reason: '面板未关闭前不推进');
+
+      c.onAnchorRevealed(id); // 面板关闭
+      expect(c.suppressed, isFalse);
+      expect(c.stepIndex, before + 1, reason: '面板看完自动进入下一步');
+    });
+  });
 }
