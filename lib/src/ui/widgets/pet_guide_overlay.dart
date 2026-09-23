@@ -149,11 +149,12 @@ class PetGuideOverlay extends StatelessWidget {
               onTap: _onBarrierTap,
             ),
             // 目标高亮环（不吃手势）
-            IgnorePointer(
-              child: Positioned.fromRect(
-                rect: target,
-                child: const _SpotlightRing(),
-              ),
+            // 注意：Positioned 是 ParentDataWidget，必须是 Stack 的**直接子级**；
+            // 所以 IgnorePointer 要放在 Positioned 里面（顺序反过来会抛断言，
+            // 导致整个引导层渲染崩溃 —— 见 pet_guide_overlay_test 回归用例）。
+            Positioned.fromRect(
+              rect: target,
+              child: const IgnorePointer(child: _SpotlightRing()),
             ),
           ],
 
