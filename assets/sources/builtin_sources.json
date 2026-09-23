@@ -1,0 +1,70 @@
+[
+  {
+    "bookSourceName": "中文维基文库（公版古籍）",
+    "bookSourceGroup": "内置 · 公版",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https://zh.wikisource.org",
+    "enabled": true,
+    "bookSourceComment": "内置公版内容源：只收录已进入公有领域的古籍与文献（《论语》《红楼梦》《三国演义》等），内容由维基文库社区校对，CC BY-SA 授权，无版权风险。搜索「论语」「红楼梦」「唐诗」等即可找到条目；加入书架后按篇/回阅读。需要现代网文时，请在「书源管理」里导入你自己的书源。",
+    "legacyBuiltinUrls": [
+      "https://www.hkmtxt.cc",
+      "https://www.bqgiu.cc"
+    ],
+    "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122.0 Mobile Safari/537.36\"}",
+    "searchUrl": "/w/api.php?action=query&generator=search&gsrsearch={{key}}&gsrlimit=20&prop=info%7Cextracts%7Cpageimages&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=240&inprop=url&format=json",
+    "ruleSearch": {
+      "bookList": "$.query.pages.*",
+      "name": "$.title",
+      "intro": "$.extract",
+      "bookUrl": "$.fullurl",
+      "coverUrl": "$.thumbnail.source"
+    },
+    "ruleBookInfo": {
+      "name": "tag.h1@text || meta[property='og:title']@content",
+      "intro": "div#headerContainer table.1@tag.td@text || meta[property='og:description']@content || tag.p.0@text",
+      "coverUrl": "meta[property='og:image']@content",
+      "kind": "公版古籍",
+      "lastChapter": "dl li.0@text"
+    },
+    "ruleToc": {
+      "chapterList": "dl li || div.mw-parser-output ul li",
+      "chapterName": "tag.a@text",
+      "chapterUrl": "tag.a@href"
+    },
+    "ruleContent": {
+      "content": "tag.p@text"
+    }
+  },
+  {
+    "bookSourceName": "中文维基文库（移动版）",
+    "bookSourceGroup": "内置 · 公版",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https://zh.m.wikisource.org",
+    "enabled": true,
+    "bookSourceComment": "内置公版内容源（移动版镜像）：与「中文维基文库（公版古籍）」内容相同，作为备用线路——某个域名不通时可切换到该来源继续阅读。",
+    "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122.0 Mobile Safari/537.36\"}",
+    "searchUrl": "/w/api.php?action=query&generator=search&gsrsearch={{key}}&gsrlimit=20&prop=info%7Cextracts%7Cpageimages&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=240&inprop=url&format=json",
+    "ruleSearch": {
+      "bookList": "$.query.pages.*",
+      "name": "$.title",
+      "intro": "$.extract",
+      "bookUrl": "$.fullurl",
+      "coverUrl": "$.thumbnail.source"
+    },
+    "ruleBookInfo": {
+      "name": "tag.h1@text || meta[property='og:title']@content",
+      "intro": "tag.p.0@text || meta[property='og:description']@content",
+      "coverUrl": "meta[property='og:image']@content",
+      "kind": "公版古籍",
+      "lastChapter": "dl li.0@text"
+    },
+    "ruleToc": {
+      "chapterList": "dl li || div.mw-parser-output ul li",
+      "chapterName": "tag.a@text",
+      "chapterUrl": "tag.a@href"
+    },
+    "ruleContent": {
+      "content": "tag.p@text"
+    }
+  }
+]
