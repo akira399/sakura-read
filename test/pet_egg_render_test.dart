@@ -4,6 +4,9 @@
 // ErrorWidget），说明构建时抛了异常。此前引导层已经因为 `Positioned` 误用
 // 崩过一次，这里用同样的方式把它钉住：
 //   每个用例都断言「无异常 + 不存在 ErrorWidget」。
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sakura_read/src/ui/widgets/pet_egg.dart';
@@ -35,6 +38,40 @@ bool _isAssetNoise(Object? e) =>
     e == null || e.toString().contains('Unable to load asset');
 
 void main() {
+  test('素材回归：pet_rage.png 右上角不应有「AI 画歪的星号」', () async {
+    // 背景：AI 生成的"怒气符号"经常画成六角星（用户截图证实）。
+    // 现在改为代码绘制（_AngerMark），素材里的星号已由
+    // tool/erase_anger_star.dart 擦除。换素材后必须重跑该工具，
+    // 否则这张测试会红——防止星号被悄悄画回来。
+    final bytes = File('assets/images/pet_rage.png').readAsBytesSync();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final image = (await codec.getNextFrame()).image;
+    final data = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+    final px = data.buffer.asUint8List();
+    final w = image.width;
+
+    // 只检查「原星号所在区域」（erase 工具报告的 bbox 226..297, 24..97）。
+    // 不检查整个象限——那里有腮红/唇色等合法橙红像素。
+    var orange = 0;
+    for (var y = 20; y < 100; y++) {
+      for (var x = 222; x < 302; x++) {
+        final i = (y * w + x) * 4;
+        if (px[i + 3] <= 16) continue; // 透明像素不算
+        final r = px[i], g = px[i + 1], b = px[i + 2];
+        if (r >= 150 && g <= r * 0.85 && b <= r * 0.7 && ((r - g) > 45)) {
+          orange++;
+        }
+      }
+    }
+    expect(
+      orange,
+      lessThan(30),
+      reason:
+          '原星号位置有 $orange 个橙红像素——素材里可能又出现了'
+          '「怒气星号」，请运行 tool/erase_anger_star.dart 清除',
+    );
+  });
+
   testWidgets('彩蛋未激活：不渲染任何东西，也不报错', (tester) async {
     final egg = ValueNotifier<bool>(false);
     addTearDown(egg.dispose);
@@ -68,6 +105,9 @@ void main() {
     // 内容确实渲染出来了
     expect(find.text('你以为我是好惹的？'), findsOneWidget);
     expect(find.text('小樱禁止你使用该软件'), findsOneWidget);
+    // 生气标记（💢）由 CustomPaint 绘制——回归背景：
+    // AI 画的"怒气符号"经常画歪成星号，改为代码精确绘制
+    expect(find.byType(CustomPaint), findsWidgets, reason: '缺少代码绘制的生气十字标记（💢）');
   });
 
   testWidgets('彩蛋铺满全屏（尺寸等于屏幕）', (tester) async {
