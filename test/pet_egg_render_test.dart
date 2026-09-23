@@ -38,37 +38,63 @@ bool _isAssetNoise(Object? e) =>
     e == null || e.toString().contains('Unable to load asset');
 
 void main() {
-  test('素材回归：pet_rage.png 右上角不应有「AI 画歪的星号」', () async {
-    // 背景：AI 生成的"怒气符号"经常画成六角星（用户截图证实）。
-    // 现在改为代码绘制（_AngerMark），素材里的星号已由
-    // tool/erase_anger_star.dart 擦除。换素材后必须重跑该工具，
-    // 否则这张测试会红——防止星号被悄悄画回来。
+  test('素材回归：pet_rage.png 图像本身不应含任何"怒气符号"', () async {
+    // 背景（三次踩坑）：
+    //   1) AI 画的"怒气符号"经常画成六角星（用户截图证实）；
+    //   2) 按颜色擦除只删了填充，**黑色描边**留下 → 屏幕上仍是黑色星号；
+    //   3) 改用连通域擦除又把人物头发一起删了。
+    // 最终方案：**从源头解决** —— 要求 AI 生成"画面上没有任何符号"的图
+    // （见 tool/vlm_check_clean.py 质检），💢 完全由代码绘制。
+    //
+    // 本测试守住这个前提：素材里不能出现橙红填充 + 深色描边组成的
+    // "符号状小块"。判定方式：统计**孤立小连通域**（被透明包围的小块）。
     final bytes = File('assets/images/pet_rage.png').readAsBytesSync();
     final codec = await ui.instantiateImageCodec(bytes);
     final image = (await codec.getNextFrame()).image;
     final data = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
     final px = data.buffer.asUint8List();
-    final w = image.width;
+    final w = image.width, h = image.height;
 
-    // 只检查「原星号所在区域」（erase 工具报告的 bbox 226..297, 24..97）。
-    // 不检查整个象限——那里有腮红/唇色等合法橙红像素。
-    var orange = 0;
-    for (var y = 20; y < 100; y++) {
-      for (var x = 222; x < 302; x++) {
-        final i = (y * w + x) * 4;
-        if (px[i + 3] <= 16) continue; // 透明像素不算
-        final r = px[i], g = px[i + 1], b = px[i + 2];
-        if (r >= 150 && g <= r * 0.85 && b <= r * 0.7 && ((r - g) > 45)) {
-          orange++;
+    // 收集所有不透明像素，做 8 连通聚类，找出「远离主体的小块」
+    final opaque = <int>{};
+    for (var i = 0; i < w * h; i++) {
+      if (px[i * 4 + 3] > 40) opaque.add(i);
+    }
+
+    final seen = <int>{};
+    final clusters = <List<int>>[];
+    for (final start in opaque) {
+      if (seen.contains(start)) continue;
+      final cluster = <int>[];
+      final stack = <int>[start];
+      seen.add(start);
+      while (stack.isNotEmpty) {
+        final i = stack.removeLast();
+        cluster.add(i);
+        final x = i % w, y = i ~/ w;
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            final nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            final ni = ny * w + nx;
+            if (opaque.contains(ni) && seen.add(ni)) stack.add(ni);
+          }
         }
       }
+      clusters.add(cluster);
     }
+
+    clusters.sort((a, b) => b.length.compareTo(a.length));
+    // 主体必然最大；除主体外，任何超过 200px 的独立块都可能是残留符号
+    final stray = clusters.skip(1).where((c) => c.length > 200).toList();
     expect(
-      orange,
-      lessThan(30),
+      stray,
+      isEmpty,
       reason:
-          '原星号位置有 $orange 个橙红像素——素材里可能又出现了'
-          '「怒气星号」，请运行 tool/erase_anger_star.dart 清除',
+          '主人物之外还有 ${stray.length} 个较大独立块'
+          '（尺寸 ${stray.map((c) => c.length).take(5).toList()}）——'
+          '素材里可能残留了星号/符号，请换用"无符号"的干净素材',
     );
   });
 

@@ -180,10 +180,10 @@ class _RagePet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 立绘原始比例 319x512，height=292 时显示宽度 ≈ 182，
-    // Align(bottomCenter) 后立绘左边缘在 x≈55。
-    // 💢 位置 = 原图星号中心 (261,60) 按 0.571 缩放 + 立绘偏移 → (204, 34)
-    // （原星号已由 tool/erase_anger_star.dart 从素材中擦除）
+    // 立绘 313x512，height=292 时显示宽度 ≈ 178.6，
+    // Align(bottomCenter) 后在 292 宽容器里居中 → 左边缘 x≈56.7。
+    // 💢 放在头部右上方的空白处（素材本身已不含任何符号，
+    // 见 tool/vlm_check_clean.py 的"无符号"质检 + CHANGELOG v1.3.12）。
     return SizedBox(
       height: 292,
       width: 292,
@@ -199,8 +199,8 @@ class _RagePet extends StatelessWidget {
               filterQuality: FilterQuality.high,
             ),
           ),
-          // 💢 生气十字标记（贴着头部右上，替换 AI 画歪的"星号"）
-          const Positioned(left: 182, top: 12, child: _AngerMark()),
+          // 💢 生气十字标记（头部右上方，纯代码绘制，形状确定）
+          const Positioned(left: 186, top: 8, child: _AngerMark()),
         ],
       ),
     );

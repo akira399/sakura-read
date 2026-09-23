@@ -144,7 +144,7 @@ CI（`.github/workflows/ci.yml`）会在 push / PR 时执行同样的检查并�
 
 ## 安装
 
->APK 位于 `Download/樱读-v1.3.11.apk`，安装后：
+>APK 位于 `Download/樱读-v1.3.12.apk`，安装后：
 
 1. 跟随引导授予「所有文件访问」权限
 2. 点「＋」导入 TXT / EPUB（或扫描常见目录）
