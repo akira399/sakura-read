@@ -127,15 +127,12 @@ void main() {
       reason: '彩蛋激活时渲染抛异常（真机表现就是整屏灰色）',
     );
     expect(find.byType(ErrorWidget), findsNothing, reason: '彩蛋层出现错误块');
-
     // 内容确实渲染出来了
     expect(find.text('你以为我是好惹的？'), findsOneWidget);
     expect(find.text('小樱禁止你使用该软件'), findsOneWidget);
-    // 生气标记（💢）由 CustomPaint 绘制——回归背景：
-    // AI 画的"怒气符号"经常画歪成星号，改为代码精确绘制
-    expect(find.byType(CustomPaint), findsWidgets, reason: '缺少代码绘制的生气十字标记（💢）');
+    // 注：彩蛋界面**故意不含"怒气符号"**（💢 画过四版都不理想，
+    // 详见 pet_egg.dart 的 _RagePet 注释）。情绪由立绘自身表情表达。
   });
-
   testWidgets('彩蛋铺满全屏（尺寸等于屏幕）', (tester) async {
     final egg = ValueNotifier<bool>(true);
     addTearDown(egg.dispose);
