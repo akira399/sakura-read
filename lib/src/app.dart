@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import 'data/book_store.dart';
 import 'data/pet_guide.dart';
 import 'data/pet_store.dart';
@@ -40,6 +39,9 @@ class SakuraApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           // 根导航键：全局覆盖层（桌宠）用它打开面板（覆盖层 context 无 Navigator）
           navigatorKey: kRootNavigatorKey,
+          // 路由观察者：引导锚点靠它感知「被其它页面盖住 / 重新露出」，
+          // 从而支持跨页引导（放大镜 → 搜索页 → 返回 → 书架「＋」）
+          navigatorObservers: [guideRouteObserver],
           theme: SakuraTheme.build(prefs.accent, Brightness.light),
           darkTheme: SakuraTheme.build(prefs.accent, Brightness.dark),
           themeMode: prefs.themeMode,

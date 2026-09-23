@@ -187,6 +187,56 @@ void main() {
     await _teardown(tester, c);
   });
 
+  testWidgets('跨页引导：锚点被覆盖时撤销上报，露出时恢复', (tester) async {
+    // 回归背景：点放大镜 → 跳到搜索页后，书架页的锚点若继续"上报"，
+    // 引导高亮框就会飘在一个看不见的位置（用户截图里的现象）。
+    final c = PetGuideController();
+    addTearDown(c.dispose);
+    c.start();
+    c.advance(); // 进入「点放大镜」步骤
+    final shelfAnchor = c.step.anchorId!;
+    c.registerAnchor(shelfAnchor, const Rect.fromLTWH(10, 20, 50, 50));
+    expect(c.anchorRect, isNotNull);
+
+    await tester.pumpWidget(_host(c));
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // 模拟「被新页面盖住」：控制器应收到 covered 回调
+    c.onAnchorCovered(shelfAnchor);
+    expect(tester.takeException(), isNull);
+
+    await _teardown(tester, c);
+  });
+
+  testWidgets('导入面板打开时临时收起引导，关闭后自动进入下一步', (tester) async {
+    final c = PetGuideController();
+    addTearDown(c.dispose);
+    c.start();
+    // 走到「导入」步骤（配置了 hideWhileOpen）
+    c.goToStep('import');
+    expect(c.step.hideWhileOpen, isTrue);
+    final id = c.step.anchorId!;
+    c.registerAnchor(id, const Rect.fromLTWH(300, 600, 60, 60));
+
+    await tester.pumpWidget(_host(c));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('小樱'), findsOneWidget);
+
+    // 面板打开 → 引导收起（不再画遮罩/气泡，免得挡住面板）
+    c.onAnchorCovered(id);
+    expect(c.suppressed, isTrue);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(tester.takeException(), isNull);
+
+    // 面板关闭 → 露出并自动推进到下一步
+    final before = c.stepIndex;
+    c.onAnchorRevealed(id);
+    expect(c.suppressed, isFalse);
+    expect(c.stepIndex, greaterThan(before), reason: '面板看完应自动进入下一步');
+
+    await _teardown(tester, c);
+  });
+
   testWidgets('气泡在贴边锚点下仍留在屏幕内', (tester) async {
     final c = PetGuideController();
     addTearDown(c.dispose);

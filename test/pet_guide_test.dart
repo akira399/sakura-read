@@ -6,7 +6,7 @@ import 'package:sakura_read/src/data/pet_mood.dart';
 
 void main() {
   test('引导流程：覆盖核心入口且不过长', () {
-    expect(petGuideSteps.length, lessThanOrEqualTo(6), reason: '流程不宜过长');
+    expect(petGuideSteps.length, lessThanOrEqualTo(8), reason: '流程不宜过长');
     expect(petGuideSteps.length, greaterThanOrEqualTo(3));
     final ids = petGuideSteps.map((s) => s.id).toList();
     expect(ids.first, 'intro');
@@ -18,37 +18,39 @@ void main() {
     }
   });
 
-  test('结构约束：只允许指向「常驻导航栏」的锚点', () {
-    // 回归背景（v1.3.5）：曾让用户点击书架右上角的放大镜 → 跳到搜索页后，
-    // 后续步骤的锚点（书架页的「＋」）随页面一起消失，引导必然卡死。
-    // 因此规定：要求用户点击的锚点只允许是底部常驻导航项。
-    const allowed = {'nav_shelf', 'nav_recent', 'nav_settings'};
-    for (final s in petGuideSteps) {
-      final id = s.anchorId;
-      if (id == null) continue;
-      expect(
-        allowed.contains(id),
-        isTrue,
-        reason:
-            '步骤「${s.id}」指向了 $id：会跳页/弹层的控件不能作为点击目标，'
-            '否则后续锚点会消失导致引导卡死',
-      );
-    }
+  test('流程覆盖关键功能：搜书 → 返回 → 导入 → 最近 → 设置', () {
+    // 这是「不砍功能」的保障：跨页引导必须完整表达
+    // 「点放大镜 → 进搜索页 → 点返回 → 回书架 → 点＋」这条链路。
+    final ids = petGuideSteps.map((s) => s.id).toList();
+    expect(ids, contains('search'));
+    expect(ids, contains('search_return')); // 必须引导用户点返回
+    expect(ids, contains('import'));
+    expect(ids, contains('recent'));
+    expect(ids, contains('settings'));
+
+    // 「返回」步骤必须排在「进入搜索页」之后
+    expect(ids.indexOf('search_return'), greaterThan(ids.indexOf('search')));
+    // 「导入」应排在返回之后（此时已回到书架）
+    expect(ids.indexOf('import'), greaterThan(ids.indexOf('search_return')));
   });
 
-  test('结构约束：不要求点击「会打开页面或面板」的入口', () {
-    // 这些 id 曾经被用作锚点，属于已知危险目标
-    const dangerous = {
-      'shelf_search', // 打开搜索页
-      'shelf_add', // 打开导入面板
-      'shelf_arrange', // 打开排列面板
+  test('锚点 id 与页面注册保持一致', () {
+    // 这些 id 在页面里通过 PetGuideTarget(id: ...) 注册；
+    // 若改了名字却忘了同步，引导会找不到目标（曾导致流程卡死）。
+    final used = petGuideSteps
+        .map((s) => s.anchorId)
+        .whereType<String>()
+        .toSet();
+    const known = {
+      'shelf_search', // 书架右上角放大镜
+      'shelf_add', // 书架右下角「＋」
+      'search_back', // 搜索页左上角返回
+      'nav_shelf',
+      'nav_recent',
+      'nav_settings',
     };
-    for (final s in petGuideSteps) {
-      expect(
-        dangerous.contains(s.anchorId),
-        isFalse,
-        reason: '步骤「${s.id}」指向了会跳页/弹层的 $s.anchorId',
-      );
+    for (final id in used) {
+      expect(known.contains(id), isTrue, reason: '未知锚点 $id（页面里没有注册）');
     }
   });
 
