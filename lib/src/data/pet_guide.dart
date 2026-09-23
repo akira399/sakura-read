@@ -15,14 +15,25 @@ import 'pet_mood.dart';
 /// 引导是否进行中（全局通知：桌宠本体在此间隐藏，由引导层自己摆位）。
 final ValueNotifier<bool> kPetGuideActive = ValueNotifier<bool>(false);
 
-/// 引导的一步。
+/// 引导步骤。
+///
+/// 支持**跨页面引导**（点放大镜 → 搜索页 → 点返回 → 回书架 → 点「＋」）：
+///  - 锚点自带路由感知（[guideRouteObserver]）：本页被盖住时自动撤销上报，
+///    避免高亮框飘在看不见的位置；
+///  - 引导层挂在 MaterialApp 之上，因此**跳页后依然可见**，可以继续指向新页面
+///    上的锚点（如搜索页的返回箭头）；
+///  - 若跳转的是**弹出面板**（不占满屏幕，如导入面板），用
+///    [PetGuideStep.hideWhileOpen] 在面板打开期间收起遮罩，免得挡住面板操作。
 class PetGuideStep {
   const PetGuideStep({
     required this.id,
     required this.text,
     this.anchorId,
     this.hint,
+    this.hideWhileOpen = false,
+    this.waitNote,
   });
+
   final String id;
 
   /// 小樱要指的目标（页面上注册的锚点 id）；null = 无目标，任意点击推进。
@@ -34,29 +45,45 @@ class PetGuideStep {
   /// 气泡下方的操作提示。
   final String? hint;
 
+  /// 本步骤点击后会打开**弹出面板**：面板打开期间隐藏遮罩与气泡，
+  /// 等面板关闭后自动进入下一步（点它会跳整页时不需要这个，见类文档）。
+  final bool hideWhileOpen;
+
+  /// 面板 / 新页面打开期间给小樱的旁白（配合 [hideWhileOpen]）。
+  final String? waitNote;
+
   bool get hasAnchor => anchorId != null;
 }
 
-/// 引导步骤。
-///
-/// 设计原则（踩坑后的硬约束）：
-///  - **只让用户点「不会切换页面 / 不会弹层」的控件**。一旦某一步要求点的按钮
-///    会跳页（如放大镜进搜索页）或弹面板，后续步骤的锚点就会随页面一起消失，
-///    引导必然卡死。
-///  - 因此「会跳页的入口」只做**口头介绍**（无锚点，点任意处继续），
-///    真正要求点击的只有底部三个常驻导航项。
 const List<PetGuideStep> petGuideSteps = [
   PetGuideStep(
     id: 'intro',
     text: '呀，终于见到你啦！\n我是小樱，这本书城的看板娘～\n以后你看书的时候，我都会待在屏幕边上陪着你哦。',
     hint: '点一下继续',
   ),
+  // ── 第 1 站：在线搜书（跳到搜索页 → 用小樱提示引导点返回） ──
   PetGuideStep(
-    id: 'shelf',
-    anchorId: 'nav_shelf',
-    text: '这里是你的书架，导入的书都会摆在这儿。右下角的「＋」可以导入本地小说，\n右上角的放大镜能在线搜书～',
-    hint: '点一下「书架」',
+    id: 'search',
+    anchorId: 'shelf_search',
+    text: '想找书看，就点这个放大镜——里面是「在线搜书」，能搜到网络上的公版名著。',
+    hint: '点一下这个放大镜',
   ),
+  PetGuideStep(
+    id: 'search_return',
+    anchorId: 'search_back',
+    text: '这里就是搜索页，输入书名就能搜～\n看完啦，点左上角的箭头回到书架。',
+    hint: '点左上角箭头返回',
+  ),
+  // ── 第 2 站：导入本地书（打开导入面板，关闭后继续） ──
+  PetGuideStep(
+    id: 'import',
+    anchorId: 'shelf_add',
+    text: '手机里的 TXT / EPUB 小说，从这个「＋」导入，我会帮你整整齐齐摆上书架。',
+    hint: '点一下这个「＋」',
+    hideWhileOpen: true,
+    waitNote: '选择文件、扫描文件夹都在这里～\n看完关掉它，我们继续。',
+  ),
+  // ── 第 3 站：底部两个常驻入口 ──
   PetGuideStep(
     id: 'recent',
     anchorId: 'nav_recent',
@@ -104,6 +131,7 @@ class PetGuideController extends ChangeNotifier {
   String? _nagLine;
   bool _exhausted = false;
   bool _softened = false;
+  bool _suppressed = false;
   Timer? _idleTimer;
   Timer? _anchorTimer;
 
@@ -179,6 +207,49 @@ class PetGuideController extends ChangeNotifier {
     _armAnchorWatch();
     notifyListeners();
   }
+
+  /// 跳到指定 id 的步骤（保留给「需要指定落点」的场景）。
+  void goToStep(String id) {
+    if (!_active) return;
+    final i = petGuideSteps.indexWhere((s) => s.id == id);
+    if (i < 0 || i == _stepIndex) return;
+    _stepIndex = i;
+    _nagCount = 0;
+    _nagLine = null;
+    _softened = false;
+    _armIdle();
+    _armAnchorWatch();
+    notifyListeners();
+  }
+
+  /// 锚点所在页面被新页面/面板盖住时回调控制器。
+  void onAnchorCovered(String anchorId) {
+    if (!_active) return;
+    if (step.anchorId != anchorId) return;
+    // 只有「会打开弹出面板」的步骤需要临时收起引导（面板不占满屏幕，
+    // 遮罩会挡住面板上的操作）。整页跳转时引导层继续工作：新页面会注册
+    // 自己的锚点，遮罩自动把孔留到新目标上。
+    if (step.hideWhileOpen) {
+      _suppressed = true;
+      _idleTimer?.cancel();
+      notifyListeners();
+    }
+  }
+
+  /// 遮盖层已退出、锚点重新露出。
+  void onAnchorRevealed(String anchorId) {
+    if (!_active) return;
+    if (step.anchorId != anchorId) return;
+    if (_suppressed) {
+      _suppressed = false;
+      advance(); // 面板看完了 → 进入下一步
+      return;
+    }
+    notifyListeners();
+  }
+
+  /// 引导是否处于「临时收起」状态（面板打开期间）。
+  bool get suppressed => _suppressed;
 
   /// 用户点了别处 / 迟迟不动 → 劝导。
   ///

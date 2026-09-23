@@ -92,6 +92,16 @@ void _enterEgg() {
   kPetEggActive.value = true;
 }
 
+/// 引导用的路由观察者。
+///
+/// 作用：让锚点知道自己**是否被新页面盖住**（push）或**重新露出**（pop）。
+/// 有了它，引导就能安全地跨页面进行，例如：
+///   点放大镜 →（跳到搜索页）→ 点返回 →（回书架）→ 点「＋」
+/// 关键在于：搜索页盖住书架时，书架的锚点必须**撤销上报**，否则引导会指向
+/// 一个"看不见的位置"（曾经踩过的坑，见 CHANGELOG v1.3.6）。
+final RouteObserver<ModalRoute<void>> guideRouteObserver =
+    RouteObserver<ModalRoute<void>>();
+
 /// 引导层：聚光灯 + 小樱指引气泡 + 跳过。
 ///
 /// 实现要点：遮罩由「目标矩形之外的四块」组成，因此目标区域的手势会
@@ -119,6 +129,14 @@ class PetGuideOverlay extends StatelessWidget {
     final media = MediaQuery.of(context);
     final full = Offset.zero & media.size;
     final target = controller.anchorRect?.inflate(10);
+
+    // 面板打开期间（本步骤配置了 hideWhileOpen）：临时收起引导，
+    // 免得遮罩挡住面板上的操作；面板关闭后会自动进入下一步。
+    if (controller.suppressed) {
+      return const Positioned.fill(
+        child: IgnorePointer(child: SizedBox.shrink()),
+      );
+    }
 
     return Positioned.fill(
       child: Stack(
@@ -157,20 +175,26 @@ class PetGuideOverlay extends StatelessWidget {
               child: const IgnorePointer(child: _SpotlightRing()),
             ),
           ],
-
           // ---- 小樱 + 气泡 ----
           _Bubble(
             target: target,
             full: full,
-            text: controller.nagLine ?? controller.step.text,
-            hint: controller.step.hasAnchor
-                ? (controller.nagLine == null ? controller.step.hint : '……')
-                : controller.step.hint,
+            text:
+                controller.nagLine ??
+                (controller.suppressed
+                    ? (controller.step.waitNote ?? controller.step.text)
+                    : controller.step.text),
+            hint: controller.suppressed
+                ? '看完关掉它就好'
+                : (controller.step.hasAnchor
+                      ? (controller.nagLine == null
+                            ? controller.step.hint
+                            : '……')
+                      : controller.step.hint),
             nagging: controller.nagLine != null,
             face:
                 _nagFaces[math.min(controller.nagCount, _nagFaces.length - 1)],
           ),
-
           // ---- 跳过按钮 ----
           // 放在**顶部居中**：右上角会和书架的放大镜/排列按钮重叠，
           // 容易造成误点与视觉遮挡（见 CHANGELOG v1.3.5）。
@@ -453,23 +477,58 @@ class PetGuideAnchor extends StatefulWidget {
   State<PetGuideAnchor> createState() => _PetGuideAnchorState();
 }
 
-class _PetGuideAnchorState extends State<PetGuideAnchor> {
+class _PetGuideAnchorState extends State<PetGuideAnchor> with RouteAware {
   final GlobalKey _key = GlobalKey();
+
+  /// 当前是否被其它页面盖住（盖住时不上报锚点，避免高亮框飘在看不见的位置）。
+  bool _covered = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _subscribeRoute();
+      _report();
+    });
+  }
+
+  /// 订阅路由事件（进入 / 返回本页时更新遮挡状态）。
+  void _subscribeRoute() {
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      guideRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPushNext() {
+    // 本页被新页面 / 弹出面板盖住（如点放大镜进入搜索页、点「＋」弹出导入面板）
+    _covered = true;
+    widget.controller.unregisterAnchor(widget.id);
+    widget.controller.onAnchorCovered(widget.id);
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didPopNext() {
+    // 上层页面 / 面板退出，本页重新露出（如从搜索页返回、关掉导入面板）
+    _covered = false;
+    if (mounted) {
+      setState(() {});
+      _report();
+    }
+    widget.controller.onAnchorRevealed(widget.id);
   }
 
   @override
   void dispose() {
+    guideRouteObserver.unsubscribe(this);
     widget.controller.unregisterAnchor(widget.id);
     super.dispose();
   }
 
   void _report() {
-    if (!mounted) return;
+    if (!mounted || _covered) return;
     final ctx = _key.currentContext;
     final box = ctx?.findRenderObject();
     if (box is! RenderBox || !box.hasSize) return;
@@ -480,7 +539,9 @@ class _PetGuideAnchorState extends State<PetGuideAnchor> {
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+    if (!_covered) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+    }
     final isCurrent = widget.controller.step.anchorId == widget.id;
     return Listener(
       onPointerDown: (_) {
