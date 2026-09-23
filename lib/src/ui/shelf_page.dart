@@ -18,7 +18,6 @@ import 'source/source_search_page.dart';
 import 'widgets/book_cover.dart';
 import 'widgets/cute.dart';
 import 'widgets/kanban_mascot.dart';
-import 'widgets/pet_guide_overlay.dart';
 import 'widgets/sakura_petals.dart';
 
 class ShelfPage extends StatefulWidget {
@@ -65,13 +64,10 @@ class _ShelfPageState extends State<ShelfPage> {
         final books = widget.store.books.toList();
         _sortBooks(books);
         return Scaffold(
-          floatingActionButton: PetGuideTarget(
-            id: 'shelf_add',
-            child: FloatingActionButton(
-              onPressed: () => _showAddSheet(context),
-              tooltip: '导入书籍',
-              child: const Icon(Icons.add_rounded, size: 30),
-            ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () => _showAddSheet(context),
+            tooltip: '导入书籍',
+            child: const Icon(Icons.add_rounded, size: 30),
           ),
           body: CustomScrollView(
             slivers: [
@@ -231,13 +227,10 @@ class _ShelfPageState extends State<ShelfPage> {
                 ],
               ),
             ),
-            PetGuideTarget(
-              id: 'shelf_search',
-              child: IconButton(
-                onPressed: () => _openSearch(context),
-                icon: const Icon(Icons.search_rounded, color: Colors.white),
-                tooltip: '搜索',
-              ),
+            IconButton(
+              onPressed: () => _openSearch(context),
+              icon: const Icon(Icons.search_rounded, color: Colors.white),
+              tooltip: '搜索',
             ),
             IconButton(
               onPressed: _showArrangeSheet,
