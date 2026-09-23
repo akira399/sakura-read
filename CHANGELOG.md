@@ -2,6 +2,27 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.7] - 2026-09-23
+
+### 修复
+- **彩蛋（全屏锁定）界面整屏变灰**（严重）：触发彩蛋时只看到一片灰色，
+  台词、血字、桌宠全部不显示。
+  - 根因：`ui.ImageFilter.matrix` **要求 4×4 = 16 个元素（列主序）**，
+    代码里误写成行主序的 4×5（20 个），运行时抛
+    `ArgumentError: "matrix4" must have 16 entries` →
+    构建失败 → Flutter 渲染 `ErrorWidget`（即用户看到的灰屏）。
+  - 这是 v1.3.3 修「`List<double>` 无法赋给 `Float64List`」时引入的：
+    当时补了 `Float64List.fromList` 却把矩阵维度写错了。
+  - 修复：改为正确的 4×4 列主序矩阵，并补注释说明排布规则。
+
+### 测试
+- 新增 `pet_egg_render_test`（5 项）：模拟 app.dart 的真实层级
+  （`Stack → ValueListenableBuilder → PetEggOverlay`），断言彩蛋激活时
+  **无异常、无 ErrorWidget**，并验证全屏尺寸、内容文案、多次开关稳定。
+  - 该用例在修复前 4 项全红（已实测复现灰屏），修复后全绿。
+- 全仓复查了所有 `ImageFilter.*` 调用，无同类参数问题。
+- 累计 **184 项全部通过**。
+
 ## [1.3.6] - 2026-09-23
 
 ### 修复

@@ -137,13 +137,21 @@ class _RagePet extends StatelessWidget {
         alignment: Alignment.center,
         children: [
           // 立绘（略微压暗 + 降饱和，营造阴冷）
+          // 注意：ImageFilter.matrix 需要 4×4 = **16 个**元素，且为**列主序**。
+          // 之前误写成行主序的 4×5（20 个），release 下直接抛 ArgumentError
+          // → 整屏变灰（见 pet_egg_render_test 回归用例）。
+          //
+          // 列主序排布：m[col*4 + row]
+          //   列0 = R 通道系数，列1 = G，列2 = B，列3 = A
+          //   每列的第 4 项是「偏移量」（这里全 0）
           ImageFiltered(
             imageFilter: ui.ImageFilter.matrix(
               Float64List.fromList(<double>[
-                0.82, 0, 0, 0, 0, //
-                0, 0.72, 0, 0, 0, //
-                0, 0, 0.78, 0, 0, //
-                0, 0, 0, 1, 0, //
+                // R      G      B      A       ← 该行在各列中的位置
+                0.82, 0.0, 0.0, 0.0, // 第 0 行
+                0.0, 0.72, 0.0, 0.0, // 第 1 行
+                0.0, 0.0, 0.78, 0.0, // 第 2 行
+                0.0, 0.0, 0.0, 1.0, // 第 3 行
               ]),
             ),
             child: Image.asset(
