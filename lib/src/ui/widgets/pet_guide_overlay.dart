@@ -171,25 +171,34 @@ class PetGuideOverlay extends StatelessWidget {
                 _nagFaces[math.min(controller.nagCount, _nagFaces.length - 1)],
           ),
 
-          // ---- 跳过 ----
+          // ---- 跳过按钮 ----
+          // 放在**顶部居中**：右上角会和书架的放大镜/排列按钮重叠，
+          // 容易造成误点与视觉遮挡（见 CHANGELOG v1.3.5）。
           Positioned(
-            top: media.padding.top + 10,
-            right: 14,
-            child: TextButton.icon(
-              onPressed: controller.skip,
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.black.withValues(alpha: .55),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 8,
+            top: media.padding.top + 8,
+            left: 0,
+            right: 0,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: TextButton.icon(
+                onPressed: controller.skip,
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: .58),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
+                icon: const Icon(Icons.fast_forward_rounded, size: 17),
+                label: const Text(
+                  '跳过引导',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                 ),
               ),
-              icon: const Icon(Icons.fast_forward_rounded, size: 17),
-              label: const Text('跳过引导', style: TextStyle(fontSize: 13)),
             ),
           ),
         ],

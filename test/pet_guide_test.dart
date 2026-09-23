@@ -18,6 +18,40 @@ void main() {
     }
   });
 
+  test('结构约束：只允许指向「常驻导航栏」的锚点', () {
+    // 回归背景（v1.3.5）：曾让用户点击书架右上角的放大镜 → 跳到搜索页后，
+    // 后续步骤的锚点（书架页的「＋」）随页面一起消失，引导必然卡死。
+    // 因此规定：要求用户点击的锚点只允许是底部常驻导航项。
+    const allowed = {'nav_shelf', 'nav_recent', 'nav_settings'};
+    for (final s in petGuideSteps) {
+      final id = s.anchorId;
+      if (id == null) continue;
+      expect(
+        allowed.contains(id),
+        isTrue,
+        reason:
+            '步骤「${s.id}」指向了 $id：会跳页/弹层的控件不能作为点击目标，'
+            '否则后续锚点会消失导致引导卡死',
+      );
+    }
+  });
+
+  test('结构约束：不要求点击「会打开页面或面板」的入口', () {
+    // 这些 id 曾经被用作锚点，属于已知危险目标
+    const dangerous = {
+      'shelf_search', // 打开搜索页
+      'shelf_add', // 打开导入面板
+      'shelf_arrange', // 打开排列面板
+    };
+    for (final s in petGuideSteps) {
+      expect(
+        dangerous.contains(s.anchorId),
+        isFalse,
+        reason: '步骤「${s.id}」指向了会跳页/弹层的 $s.anchorId',
+      );
+    }
+  });
+
   test('start → 逐步推进 → 最后一步结束并回调 onFinished', () {
     var finished = 0;
     final c = PetGuideController(onFinished: () => finished++);
@@ -84,7 +118,8 @@ void main() {
     c.advance();
     c.reportWrong();
     expect(c.nagCount, 1);
-    c.registerAnchor('shelf_search', const Rect.fromLTWH(0, 0, 10, 10));
+    // 用「当前步骤真正的锚点 id」上报，避免硬编码（锚点会随流程调整）
+    c.registerAnchor(c.step.anchorId!, const Rect.fromLTWH(0, 0, 10, 10));
     c.advance();
     expect(c.nagCount, 0);
     expect(c.nagLine, isNull);
@@ -110,9 +145,10 @@ void main() {
     c.start();
     c.advance();
     const r = Rect.fromLTWH(12, 34, 56, 78);
-    c.registerAnchor('shelf_search', r);
+    final id = c.step.anchorId!;
+    c.registerAnchor(id, r);
     expect(c.anchorRect, r);
-    c.unregisterAnchor('shelf_search');
+    c.unregisterAnchor(id);
     expect(c.anchorRect, isNull);
   });
 }

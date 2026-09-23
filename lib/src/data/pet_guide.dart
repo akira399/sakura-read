@@ -37,7 +37,14 @@ class PetGuideStep {
   bool get hasAnchor => anchorId != null;
 }
 
-/// 引导步骤（刻意精简：只覆盖最重要的四个入口）。
+/// 引导步骤。
+///
+/// 设计原则（踩坑后的硬约束）：
+///  - **只让用户点「不会切换页面 / 不会弹层」的控件**。一旦某一步要求点的按钮
+///    会跳页（如放大镜进搜索页）或弹面板，后续步骤的锚点就会随页面一起消失，
+///    引导必然卡死。
+///  - 因此「会跳页的入口」只做**口头介绍**（无锚点，点任意处继续），
+///    真正要求点击的只有底部三个常驻导航项。
 const List<PetGuideStep> petGuideSteps = [
   PetGuideStep(
     id: 'intro',
@@ -45,22 +52,22 @@ const List<PetGuideStep> petGuideSteps = [
     hint: '点一下继续',
   ),
   PetGuideStep(
-    id: 'search',
-    anchorId: 'shelf_search',
-    text: '想看书的话，点这个放大镜，就能用「在线搜书」把想要的书找出来。',
-    hint: '点一下这个放大镜',
+    id: 'shelf',
+    anchorId: 'nav_shelf',
+    text: '这里是你的书架，导入的书都会摆在这儿。右下角的「＋」可以导入本地小说，\n右上角的放大镜能在线搜书～',
+    hint: '点一下「书架」',
   ),
   PetGuideStep(
-    id: 'import',
-    anchorId: 'shelf_add',
-    text: '手机里的 TXT / EPUB 小说，从这个「＋」导入，我会帮你整整齐齐摆上书架。',
-    hint: '点一下这个「＋」',
+    id: 'recent',
+    anchorId: 'nav_recent',
+    text: '「最近」里记着你读到哪儿了，想接着上次的地方读，从这里点最快。',
+    hint: '点一下「最近」',
   ),
   PetGuideStep(
     id: 'settings',
     anchorId: 'nav_settings',
-    text: '书源、朗读、还有我的各种开关，都藏在底部的「设置」里，记得去看看。',
-    hint: '点一下底部的「设置」',
+    text: '书源、朗读、还有我的各种开关，都藏在「设置」里，记得去看看。',
+    hint: '点一下「设置」',
   ),
   PetGuideStep(
     id: 'done',

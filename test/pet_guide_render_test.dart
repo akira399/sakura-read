@@ -135,6 +135,58 @@ void main() {
     await _teardown(tester, c);
   });
 
+  testWidgets('跳过按钮不与锚点重叠（回归：曾压住书架放大镜）', (tester) async {
+    final c = PetGuideController();
+    addTearDown(c.dispose);
+    c.start();
+    c.advance();
+    // 模拟底部导航栏第 3 格（屏幕最下方）
+    final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+    c.registerAnchor(
+      c.step.anchorId!,
+      Rect.fromLTWH(size.width * 2 / 3, size.height - 80, size.width / 3, 80),
+    );
+
+    await tester.pumpWidget(_host(c));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final skip = tester.getRect(find.text('跳过引导'));
+    final anchor = c.anchorRect!;
+    expect(
+      skip.overlaps(anchor),
+      isFalse,
+      reason: '跳过按钮 $skip 与锚点 $anchor 重叠，会遮挡用户要点的位置',
+    );
+
+    await _teardown(tester, c);
+  });
+
+  testWidgets('跳过按钮位于顶部，不会落在书架的头部操作区（y<180）', (tester) async {
+    final c = PetGuideController();
+    addTearDown(c.dispose);
+    c.start();
+
+    await tester.pumpWidget(_host(c));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final skip = tester.getRect(find.text('跳过引导'));
+    // 书架头部（含放大镜 / 排列按钮）大约在 y=60~150 的右上区域，
+    // 跳过按钮必须避开右上角，否则会遮挡真实按钮。
+    final topRight = Rect.fromLTWH(
+      tester.view.physicalSize.width / tester.view.devicePixelRatio * 0.6,
+      50,
+      tester.view.physicalSize.width / tester.view.devicePixelRatio * 0.4,
+      120,
+    );
+    expect(
+      skip.overlaps(topRight),
+      isFalse,
+      reason: '跳过按钮 $skip 落在右上角操作区，会遮挡放大镜',
+    );
+
+    await _teardown(tester, c);
+  });
+
   testWidgets('气泡在贴边锚点下仍留在屏幕内', (tester) async {
     final c = PetGuideController();
     addTearDown(c.dispose);
