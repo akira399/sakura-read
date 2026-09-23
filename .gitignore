@@ -1,0 +1,91 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# 樱读项目补充
+.operit/
+.backup/
+tool/shots/
+tool/artwork/candidates/
+tool/probe_out/
+*.apk
+android/local.properties
+android/.gradle/
+
+# 本地环境 / 密钥（绝不入库）
+/tmp/sf_key
+*.key
+.env
+.env.*
+local.properties
+
+# 构建与临时产物
+.kotlin/
+*.jks
+*.keystore
+key.properties
+
+# 本机（ARM64 Linux 主机）构建补丁：aapt2 / gen_snapshot 等平台专用二进制，
+# 属于开发者本地环境适配产物，不入库（见 README「ARM64 主机环境补丁」）
+android/tools/
+
+# 编辑器
+*.orig
+*.rej
+
+# iOS / macOS 构建期生成物
+ios/Flutter/ephemeral/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Runner/GeneratedPluginRegistrant.*
+macos/Flutter/ephemeral/
+macos/Flutter/GeneratedPluginRegistrant.swift
+**/xcuserdata/
+**/Pods/
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+android/app/src/main/kotlin/**/GeneratedPluginRegistrant.kt
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+.dart_tool/build/
