@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -124,64 +122,25 @@ class _EggView extends StatelessWidget {
   }
 }
 
-/// 阴沉脸立绘：在图片上叠一层"上半脸阴影"，强化病娇压迫感
-/// （AI 素材的表情不够狠时，用渲染手段补足）。
+/// 彩蛋立绘：直接使用「生气差分」原图表达情绪。
+///
+/// 为什么不做滤镜加工：
+/// 之前试过在图片上叠「上半脸黑色阴影带」+ 降饱和来硬凑压迫感，
+/// 结果是一条生硬的黑条压在脸上，既不像阴影也很难看（用户明确反馈）。
+/// 正确做法是让**素材本身**表达情绪（皱眉 / 鼓脸 / 怒气符号），
+/// 渲染层只做轻微的氛围烘托（背景血色光晕 + 呼吸缩放）。
 class _RagePet extends StatelessWidget {
   const _RagePet();
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 260,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // 立绘（略微压暗 + 降饱和，营造阴冷）
-          // 注意：ImageFilter.matrix 需要 4×4 = **16 个**元素，且为**列主序**。
-          // 之前误写成行主序的 4×5（20 个），release 下直接抛 ArgumentError
-          // → 整屏变灰（见 pet_egg_render_test 回归用例）。
-          //
-          // 列主序排布：m[col*4 + row]
-          //   列0 = R 通道系数，列1 = G，列2 = B，列3 = A
-          //   每列的第 4 项是「偏移量」（这里全 0）
-          ImageFiltered(
-            imageFilter: ui.ImageFilter.matrix(
-              Float64List.fromList(<double>[
-                // R      G      B      A       ← 该行在各列中的位置
-                0.82, 0.0, 0.0, 0.0, // 第 0 行
-                0.0, 0.72, 0.0, 0.0, // 第 1 行
-                0.0, 0.0, 0.78, 0.0, // 第 2 行
-                0.0, 0.0, 0.0, 1.0, // 第 3 行
-              ]),
-            ),
-            child: Image.asset(
-              'assets/images/pet_rage.png',
-              height: 260,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.medium,
-            ),
-          ),
-          // 上半脸阴影带（覆盖额头到眼睛区域）
-          Positioned(
-            top: 38,
-            child: Container(
-              width: 150,
-              height: 62,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    const Color(0xFF000000).withValues(alpha: .92),
-                    const Color(0xFF000000).withValues(alpha: .55),
-                    Colors.transparent,
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(28),
-              ),
-            ),
-          ),
-        ],
+      height: 292,
+      child: Image.asset(
+        'assets/images/pet_rage.png',
+        height: 292,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
       ),
     );
   }
