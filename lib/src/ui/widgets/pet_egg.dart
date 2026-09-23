@@ -122,86 +122,27 @@ class _EggView extends StatelessWidget {
   }
 }
 
-/// 生气标记（💢）：动漫风格四臂十字。
+/// 彩蛋立绘。
 ///
-/// 为什么用代码画而不是素材：
-/// AI 画的"怒气符号"经常画歪（六角星/星号）。
-/// 为什么不用复杂 Path：
-/// 之前用 quadraticBezierTo 手写十字轮廓，控制点算错画成了六角星（用户截图证实）。
-/// 这里改用「矩形 + 圆形」最简单的图元拼十字——形状 100% 可控，绝不会画歪。
-class _AngerMark extends StatelessWidget {
-  const _AngerMark();
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(size: const Size(44, 44), painter: _AngerMarkPainter());
-  }
-}
-
-class _AngerMarkPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final paint = Paint()..color = const Color(0xFFD22B2B);
-
-    // ── 十字：两条矩形（竖臂比横臂略长，经典 💢 比例） ──
-    canvas.drawRect(
-      Rect.fromCenter(center: Offset(cx, cy), width: 13, height: 52),
-      paint,
-    );
-    canvas.drawRect(
-      Rect.fromCenter(center: Offset(cx, cy), width: 44, height: 13),
-      paint,
-    );
-
-    // ── 臂端圆帽（让十字末端圆润） ──
-    const tipR = 7.5;
-    canvas.drawCircle(Offset(cx, cy - 25), tipR, paint);
-    canvas.drawCircle(Offset(cx, cy + 25), tipR, paint);
-    canvas.drawCircle(Offset(cx - 21, cy), tipR, paint);
-    canvas.drawCircle(Offset(cx + 21, cy), tipR, paint);
-
-    // 中心小圆（交点更饱满）
-    canvas.drawCircle(Offset(cx, cy), 8, paint);
-  }
-
-  @override
-  bool shouldRepaint(_AngerMarkPainter oldDelegate) => false;
-}
-
-/// 彩蛋立绘：直接使用「生气差分」原图表达情绪。
+/// **故意不加任何"怒气符号"**：情绪由素材本身表达（皱眉 / 瞪眼 / 鼓脸）。
 ///
-/// 之前用「上半脸黑色阴影带」+ 降饱和硬凑压迫感，结果是生硬黑条压在脸上，
-/// 很难看（用户明确反馈）。正确做法：情绪由**素材本身**表达（皱眉/鼓脸），
-/// 渲染层只做轻微氛围烘托（背景血色光晕 + 呼吸缩放）。
+/// 历史（为什么不加）：
+/// 曾尝试让 AI 画 💢 符号（画歪成六角星），又用代码绘制过三次
+/// （贝塞尔路径画成六角星 → 矩形拼接但比例失衡像"医疗十字"），
+/// 都无法稳定做出动漫风格的 💢。最终决定**去掉该符号**——
+/// 立绘的生气表情已经足够清楚，符号是画蛇添足。
 class _RagePet extends StatelessWidget {
   const _RagePet();
 
   @override
   Widget build(BuildContext context) {
-    // 立绘 313x512，height=292 时显示宽度 ≈ 178.6，
-    // Align(bottomCenter) 后在 292 宽容器里居中 → 左边缘 x≈56.7。
-    // 💢 放在头部右上方的空白处（素材本身已不含任何符号，
-    // 见 tool/vlm_check_clean.py 的"无符号"质检 + CHANGELOG v1.3.12）。
     return SizedBox(
       height: 292,
-      width: 292,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Image.asset(
-              'assets/images/pet_rage.png',
-              height: 292,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.high,
-            ),
-          ),
-          // 💢 生气十字标记（头部右上方，纯代码绘制，形状确定）
-          const Positioned(left: 186, top: 8, child: _AngerMark()),
-        ],
+      child: Image.asset(
+        'assets/images/pet_rage.png',
+        height: 292,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
       ),
     );
   }
