@@ -157,12 +157,12 @@ CI（`.github/workflows/ci.yml`）会在 push / PR 时执行同样的检查并�
 ## 测试
 
 - `flutter analyze`：No issues found
-- `flutter test`：**164 项全部通过**
+- `flutter test`：**193 项全部通过**
   - 桌宠状态机（`pet_mood`）：频繁点击判定、**第 4 次生气的锁屏门槛与递增概率**、拖动低概率、台词池完整性
   - 桌宠资源（`pet_store`）：亲密度 / 点心 / 每日上限 / 位置记忆 / 阅读时长兑换
   - 新手引导（`pet_guide`）：**流程长度、逐步推进、跳过、劝导 5 次、第 6 次锁屏、锚点缺失软化**
-  - 内置书源合规（`source_legal_builtin`）：**只含公版源、盗版源已清除、对真实页面/接口夹具解析有效**
-  - 书源升级（`source_store_legacy`）：首启全量导入、**旧盗版源自动清理（用户自建源不受影响）**、幂等、保留用户启停
+  - 内置书源（`source_builtin`）：**「令牌 + POST」搜索链路（Mock 复刻站点校验）、四个内置源的真实页面/接口夹具解析**
+  - 书源升级（`source_store_legacy`）：首启全量导入、legacy 清理机制、幂等、保留用户启停
   - 书源引擎：规则拆分 / CSS / JSONPath / XPath / 正则 / URL 模板 夹具测试
   - 书源网络层：编码探测 / 超时 / Cookie / 限流 / 多源并发（MockClient 离线测试）
   - TXT：UTF-8 / GBK 编码探测、章节切分、无章节回退、误报防护
@@ -170,6 +170,9 @@ CI（`.github/workflows/ci.yml`）会在 push / PR 时执行同样的检查并�
   - 覆盖翻页像素级回归测试（钉住页裁剪 / 前缘投影）
   - 翻页吸附物理（固定速率 300ms/页、短距 110ms 收敛、无二次微调循环）
   - 应用启动 widget 测试
+
+> 另有**真实联网冒烟**（人工执行，不随 CI 跑）：`flutter test tool/live/live_sources_test.dart`
+> —— 对内置源跑一次真实搜索，验证线上链路可用（无网络时自动跳过）。
 
 ## 看板娘 & AI 素材
 
@@ -188,6 +191,8 @@ CI（`.github/workflows/ci.yml`）会在 push / PR 时执行同样的检查并�
 - **代码**：MIT License（见 `LICENSE`）
 - **字体**：内置「霞鹜文楷 Lite」（LXGW WenKai Lite，作者 LXGW），遵循 SIL Open Font License 1.1（全文见 `assets/fonts/OFL.txt`）
 - **AI 生成素材**：由上述生成模型产出，随本仓库一并以 MIT 许可分发
-- **内置书源**：仅收录**已进入公有领域**的文献索引规则（中文维基文库，内容 CC BY-SA 4.0）；
-  本仓库**不内置任何有版权风险的第三方聚合书源**。用户自行导入的书源由其自行承担合规责任。
+- **内置书源**：当前内置 4 个——**公版内容源**（中文维基文库 ×2，内容 CC BY-SA 4.0）
+  与 **第三方聚合源**（好看吗 / 笔趣阁，搜索采用「令牌 + POST」链路）。
+  第三方源内容版权归原站所有，仅供索引与个人阅读使用；站点失效时可在「书源管理」
+  停用或删除，用户自行导入的书源由用户自行承担合规责任。
 - **开源仓库**中的 `tool/artwork/candidates`、`tool/probe_out`、`tool/shots` 等**中间产物不入库**（见 `.gitignore`）

@@ -1,15 +1,83 @@
 [
   {
+    "bookSourceName": "好看吗 (hkmtxt)",
+    "bookSourceGroup": "内置 · 第三方",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https://www.hkmtxt.cc",
+    "enabled": true,
+    "bookSourceComment": "内置在线阅读源：搜索 → 详情 → 目录 → 正文。注意：搜索接口要求「先访问令牌页（preRequest）→ 再 POST 表单」，且必须携带表单 Content-Type——缺失任一条件，站点会静默返回 1 个字符（旧的 GET 写法已因此失效）。正文经隐藏浏览器渲染读取。站点改版失效时可在「书源管理」中停用或删除。",
+    "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122.0 Mobile Safari/537.36\"}",
+    "searchUrl": "/user/search.html,{\"method\":\"POST\",\"body\":\"q={{key}}\",\"headers\":{\"Content-Type\":\"application/x-www-form-urlencoded\"}}",
+    "preRequest": ["/user/hm.html?q={{key}}"],
+    "webView": true,
+    "gatewayPath": "/userverify",
+    "ruleSearch": {
+      "bookList": "$[*]",
+      "name": "$.articlename",
+      "author": "$.author",
+      "intro": "$.intro",
+      "bookUrl": "$.url_list",
+      "coverUrl": "$.url_img"
+    },
+    "ruleBookInfo": {
+      "name": "meta[property='og:title']@content || tag.h1@text",
+      "author": "meta[property='og:novel:author']@content",
+      "intro": "meta[property='og:description']@content##[ 　]*[0-9]+w[0-9]+-[0-9]+[ 　]*$##",
+      "coverUrl": "meta[property='og:image']@content",
+      "kind": "meta[property='og:novel:category']@content"
+    },
+    "ruleToc": {
+      "chapterList": "dl.1@tag.dd",
+      "chapterName": "tag.a@text",
+      "chapterUrl": "tag.a@href"
+    },
+    "ruleContent": {
+      "content": "id.chaptercontent@text || id.content@text"
+    }
+  },
+  {
+    "bookSourceName": "笔趣阁 (bqgiu)",
+    "bookSourceGroup": "内置 · 第三方",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https://www.bqgiu.cc",
+    "enabled": true,
+    "bookSourceComment": "内置在线阅读源：搜索 → 详情 → 目录 → 正文。注意：搜索接口要求「先访问令牌页（preRequest）→ 再 POST 表单」，且必须携带表单 Content-Type。正文经隐藏浏览器渲染读取。站点改版失效时可在「书源管理」中停用或删除。",
+    "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122.0 Mobile Safari/537.36\"}",
+    "searchUrl": "/user/search.html,{\"method\":\"POST\",\"body\":\"q={{key}}\",\"headers\":{\"Content-Type\":\"application/x-www-form-urlencoded\"}}",
+    "preRequest": ["/user/hm.html?q={{key}}"],
+    "webView": true,
+    "gatewayPath": "/userverify",
+    "ruleSearch": {
+      "bookList": "$[*]",
+      "name": "$.articlename",
+      "author": "$.author",
+      "intro": "$.intro",
+      "bookUrl": "$.url_list",
+      "coverUrl": "$.url_img"
+    },
+    "ruleBookInfo": {
+      "name": "meta[property='og:title']@content || tag.h1@text",
+      "author": "meta[property='og:novel:author']@content",
+      "intro": "meta[property='og:description']@content##[ 　]*[0-9]+w[0-9]+-[0-9]+[ 　]*$##",
+      "coverUrl": "meta[property='og:image']@content",
+      "kind": "meta[property='og:novel:category']@content"
+    },
+    "ruleToc": {
+      "chapterList": "dl.1@tag.dd",
+      "chapterName": "tag.a@text",
+      "chapterUrl": "tag.a@href"
+    },
+    "ruleContent": {
+      "content": "id.chaptercontent@text || id.content@text"
+    }
+  },
+  {
     "bookSourceName": "中文维基文库（公版古籍）",
     "bookSourceGroup": "内置 · 公版",
     "bookSourceType": 0,
     "bookSourceUrl": "https://zh.wikisource.org",
     "enabled": true,
-    "bookSourceComment": "内置公版内容源：只收录已进入公有领域的古籍与文献（《论语》《红楼梦》《三国演义》等），内容由维基文库社区校对，CC BY-SA 授权，无版权风险。搜索「论语」「红楼梦」「唐诗」等即可找到条目；加入书架后按篇/回阅读。需要现代网文时，请在「书源管理」里导入你自己的书源。",
-    "legacyBuiltinUrls": [
-      "https://www.hkmtxt.cc",
-      "https://www.bqgiu.cc"
-    ],
+    "bookSourceComment": "内置公版内容源：只收录已进入公有领域的古籍与文献（《论语》《红楼梦》《三国演义》等），内容由维基文库社区校对，CC BY-SA 授权，无版权风险。搜索「论语」「红楼梦」「唐诗」等即可找到条目；加入书架后按篇/回阅读。",
     "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122.0 Mobile Safari/537.36\"}",
     "searchUrl": "/w/api.php?action=query&generator=search&gsrsearch={{key}}&gsrlimit=20&prop=info%7Cextracts%7Cpageimages&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=240&inprop=url&format=json",
     "ruleSearch": {
