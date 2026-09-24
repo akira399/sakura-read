@@ -1,4 +1,4 @@
-// 书源仓库升级逻辑：内置源更新 + 历史盗版源清理。
+// 书源仓库升级逻辑：内置源全量导入 / 同地址更新 / legacy 清理机制。
 import 'dart:convert';
 import 'dart:io';
 
@@ -23,7 +23,7 @@ Directory _tmpDir(String tag) {
 AppDirs _dirsOf(Directory d) => AppDirs(files: d.path, cache: d.path);
 
 void main() {
-  test('首次启动：全量导入内置（公版）源', () async {
+  test('首次启动：全量导入内置源（公版 + 第三方）', () async {
     final dir = _tmpDir('first');
     final store = SourceStore(dirsOverride: _dirsOf(dir));
     await store.load();
@@ -37,10 +37,10 @@ void main() {
     await store.flush();
 
     expect(report.added, greaterThan(0));
-    expect(
-      store.sources.every((s) => s.bookSourceUrl.contains('wikisource')),
-      isTrue,
-    );
+    final urls = store.sources.map((s) => s.bookSourceUrl).toList();
+    expect(urls, contains('https://zh.wikisource.org'));
+    expect(urls, contains('https://www.hkmtxt.cc'));
+    expect(urls, contains('https://www.bqgiu.cc'));
     // 落盘为文件（下次启动可读回）
     final saved = File('${dir.path}/book_sources.json');
     expect(saved.existsSync(), isTrue);
@@ -48,21 +48,21 @@ void main() {
     expect((decoded['sources'] as List), isNotEmpty);
   });
 
-  test('升级：旧的内置盗版源被清理，用户自建源不受影响', () async {
-    final dir = _tmpDir('upgrade');
-    // 预置一份「老版本」书源文件：两个盗版内置源 + 一个用户自己导入的源
+  test('legacy 清理机制：登记过的地址会被移除，用户自建源不受影响', () async {
+    final dir = _tmpDir('legacy');
+    // 预置一份书源文件：两个「将被登记为 legacy」的源 + 一个用户自建源
     final old = File('${dir.path}/book_sources.json');
     await old.writeAsString(
       jsonEncode({
         'version': 1,
         'sources': [
           BookSource(
-            bookSourceUrl: 'https://www.hkmtxt.cc',
-            bookSourceName: '好看吗 (hkmtxt)',
+            bookSourceUrl: 'https://legacy-a.example',
+            bookSourceName: '退役源 A',
           ).toJson(),
           BookSource(
-            bookSourceUrl: 'https://www.bqgiu.cc',
-            bookSourceName: '笔趣阁 (bqgiu)',
+            bookSourceUrl: 'https://legacy-b.example',
+            bookSourceName: '退役源 B',
           ).toJson(),
           BookSource(
             bookSourceUrl: 'https://my-own-source.example',
@@ -80,24 +80,37 @@ void main() {
     final builtinJson = await File(
       'assets/sources/builtin_sources.json',
     ).readAsString();
-    final legacy = <String>{};
-    for (final item in jsonDecode(builtinJson) as List) {
-      final v = (item as Map)['legacyBuiltinUrls'];
-      if (v is List) legacy.addAll(v.map((e) => e.toString()));
-    }
-    expect(legacy, isNotEmpty, reason: '内置资产应带 legacy 清单');
-
-    for (final url in legacy) {
+    // 当前内置资产**未登记**任何 legacy 地址（hkmtxt / bqgiu 已恢复为内置源，
+    // 不能再被清掉）。这里用一份模拟清单单独验证清理机制本身可用。
+    const simulatedLegacy = [
+      'https://legacy-a.example',
+      'https://legacy-b.example',
+    ];
+    for (final url in simulatedLegacy) {
       store.remove(url);
     }
     store.importFromText(builtinJson);
     await store.flush();
 
     final urls = store.sources.map((s) => s.bookSourceUrl).toList();
-    expect(urls, isNot(contains('https://www.hkmtxt.cc')));
-    expect(urls, isNot(contains('https://www.bqgiu.cc')));
+    expect(urls, isNot(contains('https://legacy-a.example')));
+    expect(urls, isNot(contains('https://legacy-b.example')));
     expect(urls, contains('https://my-own-source.example'));
     expect(urls, contains('https://zh.wikisource.org'));
+    expect(urls, contains('https://www.hkmtxt.cc'), reason: '恢复的内置源不应被清理');
+  });
+
+  test('当前内置资产不应再登记 hkmtxt / bqgiu 为待清理（防止自删）', () async {
+    final builtinJson = await File(
+      'assets/sources/builtin_sources.json',
+    ).readAsString();
+    final legacy = <String>{};
+    for (final item in jsonDecode(builtinJson) as List) {
+      final v = (item as Map)['legacyBuiltinUrls'];
+      if (v is List) legacy.addAll(v.map((e) => e.toString()));
+    }
+    expect(legacy, isNot(contains('https://www.hkmtxt.cc')));
+    expect(legacy, isNot(contains('https://www.bqgiu.cc')));
   });
 
   test('重复升级是幂等的（不会重复添加内置源）', () async {

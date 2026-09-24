@@ -62,10 +62,12 @@ flutter test                   # 全部通过
 
 ## 关于书源与素材合规（重要）
 
-- **不要**向 `assets/sources/builtin_sources.json` 添加有版权风险的第三方聚合书源。
-  内置源只收录**公有领域**或**明确授权**的内容站（当前为中文维基文库，CC BY-SA）。
-- 需要下线旧内置源时，在资产的 `legacyBuiltinUrls` 里登记地址，
-  `SourceStore.ensureBuiltinSources()` 会在升级时清理（用户自建源不受影响）。
+- 内置源分为两类：**公版内容源**（中文维基文库，CC BY-SA）与**第三方聚合源**
+  （好看吗 / 笔趣阁——搜索链路为「令牌页 + POST 表单」，见
+  `assets/sources/builtin_sources.json` 的 `preRequest` / `searchUrl` 注释）。
+  第三方源失效时在资产的 `legacyBuiltinUrls` 里登记地址即可下线
+  （`SourceStore.ensureBuiltinSources()` 升级时清理，用户自建源不受影响）——
+  注意：**已恢复为内置源的地址不要再登记**，否则会被自动清掉。
 - AI 生成素材请只提交**最终入库**的那一张；中间候选图属于 `tool/artwork/candidates/`，已在 `.gitignore` 中。
 - API Key 等凭据**绝不入库**：管线工具统一从 `/tmp/sf_key` 读取。
 

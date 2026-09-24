@@ -68,7 +68,7 @@ const List<PetGuideStep> petGuideSteps = [
   PetGuideStep(
     id: 'search',
     anchorId: 'shelf_search',
-    text: '想找书看，就点这个放大镜——里面是「在线搜书」，能搜到网络上的公版名著。',
+    text: '想找书看，就点这个放大镜——里面是「在线搜书」，公版名著、热门网文都能搜到。',
     hint: '点一下这个放大镜',
   ),
   PetGuideStep(

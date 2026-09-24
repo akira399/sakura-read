@@ -193,8 +193,8 @@ class SourceStore extends ChangeNotifier {
   /// - 首次启动（书源为空）：全量导入；
   /// - 已有书源：同地址的源以版本内置内容为准更新（保留用户启停状态），
   ///   并补齐版本升级新增的内置源；
-  /// - 版本升级时，清掉历史内置的**盗版聚合源**（见内置资产的
-  ///   `legacyBuiltinUrls` 元数据）——这些源版权风险高、稳定性差。
+  /// - 版本升级时，可清理「历史内置、现已下线」的源（见内置资产的
+  ///   `legacyBuiltinUrls` 元数据；当前资产未登记任何地址）。
   Future<int> ensureBuiltinSources() async {
     try {
       final text = await rootBundle.loadString(
