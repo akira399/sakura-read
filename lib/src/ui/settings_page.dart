@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_info.dart';
 import '../data/book_store.dart';
+import '../data/pet_guide.dart';
 import '../data/pet_store.dart';
 import '../data/prefs.dart';
 import '../data/stats_store.dart';
@@ -95,6 +96,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _sourceCard(context),
               const SizedBox(height: 14),
               _storageCard(context),
+              const SizedBox(height: 14),
+              _helpCard(context),
               const SizedBox(height: 14),
               _aboutCard(context),
             ],
@@ -467,6 +470,43 @@ class _SettingsPageState extends State<SettingsPage> {
             label: const Text('清除缓存'),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _helpCard(BuildContext context) {
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle(icon: Icons.school_rounded, title: '帮助'),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.replay_rounded),
+            title: const Text('重看新手引导', style: TextStyle(fontSize: 14)),
+            subtitle: const Text(
+              '小樱再带你走一遍搜书、导入等功能',
+              style: TextStyle(fontSize: 12),
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: _replayGuide,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 重看新手引导：先切回书架（主界面监听该信号），再请求引导层重播。
+  ///
+  /// 引导按设计只在首次启动自动出现一次；这是用户**主动重看**的入口，
+  /// 处理旧版本「已看过」标记导致升级后见不到引导的困惑。
+  void _replayGuide() {
+    final already = kPetGuideActive.value;
+    petGuideRequestReplay();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(already ? '小樱正在给你带路呢～' : '小樱马上就来找你～'),
+        duration: const Duration(seconds: 2),
       ),
     );
   }

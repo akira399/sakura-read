@@ -27,7 +27,16 @@ class AgreementGate extends StatelessWidget {
           if (!prefs.agreementAccepted)
             Positioned.fill(
               child: _AgreementView(
-                onAccept: () => prefs.setAgreementAccepted(true),
+                onAccept: () {
+                  // 全新开始：把「已看过引导」标记一并重置。
+                  //
+                  // 为什么：引导设计上只自动播一次，但旧版本遗留的 guideSeen=true
+                  // 会把引导永久压住——从旧版本升级的用户同意新条款后也见不到
+                  // 引导（用户反馈过这个问题）。重置后保证「同意 → 引导」对
+                  // 全新用户与升级用户一致成立。
+                  prefs.setGuideSeen(false);
+                  prefs.setAgreementAccepted(true);
+                },
               ),
             ),
         ],
