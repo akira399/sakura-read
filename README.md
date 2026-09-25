@@ -11,7 +11,7 @@
 [![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-lightgrey?logo=android)]()
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Tests](https://img.shields.io/badge/tests-205%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-210%20passed-brightgreen)]()
 [![Analyze](https://img.shields.io/badge/analyze-0%20issues-brightgreen)]()
 
 [功能特性](#-功能特性) · [截图预览](#-截图预览) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
@@ -27,7 +27,7 @@
 - 🎀 **她是活的** —— 一位粉发看板娘陪着你：会跟你打招呼、被你拖来拖去、看书时在你书页上跑来跑去，惹急了还会……（彩蛋自己找）
 - 🌸 **她是漂亮的** —— 图标、开屏、封面、空书架，一整套日系赛璐璐上色的二次元皮肤（AI 出图 + 人工筛选）
 - 📖 **她是很能干的** —— TXT / EPUB 全格式、4 种翻页、TTS 朗读、书签统计、多源搜书、一键换源，该有的一个不少
-- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（205 项自动化测试），欢迎你来改
+- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（210 项自动化测试），欢迎你来改
 
 ---
 
@@ -169,7 +169,7 @@ flutter pub get
 # 2) 静态检查
 flutter analyze
 
-# 3) 运行测试（205 项）
+# 3) 运行测试（210 项）
 flutter test
 
 # 4) 构建 release APK（单架构 arm64 体积最小）
@@ -188,7 +188,7 @@ flutter build apk --release --target-platform android-arm64
 | 项目 | 状态 |
 | --- | --- |
 | `flutter analyze` | ✅ No issues found |
-| `flutter test` | ✅ **205 项全部通过** |
+| `flutter test` | ✅ **210 项全部通过** |
 
 覆盖范围：
 

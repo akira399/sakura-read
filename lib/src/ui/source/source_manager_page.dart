@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../source/http_client.dart';
+import '../../source/source_export.dart';
 import '../../source/source_store.dart';
+import '../../util/format.dart';
 import '../folder_picker_page.dart';
 import '../widgets/cute.dart';
 
@@ -19,15 +21,8 @@ class SourceManagerPage extends StatelessWidget {
         title: const Text('书源管理'),
         actions: [
           IconButton(
-            tooltip: '导出（复制到剪贴板）',
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: store.exportJson()));
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('已复制全部书源 JSON 到剪贴板')),
-                );
-              }
-            },
+            tooltip: '导出书源',
+            onPressed: () => _export(context),
             icon: const Icon(Icons.ios_share_rounded),
           ),
           IconButton(
@@ -254,6 +249,35 @@ class SourceManagerPage extends StatelessWidget {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(r.summary)));
+  }
+
+  /// 导出全部书源。
+  ///
+  /// 小数据（≤ 200KB）复制到剪贴板；更大的数据（书源很多时 JSON 可达数 MB，
+  /// 超出 Android 剪贴板 ~1MB 上限）自动保存为文件。无论成败都有明确提示
+  /// （旧实现把大 JSON 塞剪贴板抛异常、且无捕获 → 点击"没反应"）。
+  Future<void> _export(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (store.sources.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('还没有书源可导出')));
+      return;
+    }
+    final json = store.exportJson();
+    try {
+      final result = await exportSourcesJson(
+        json,
+        copyToClipboard: (text) => Clipboard.setData(ClipboardData(text: text)),
+      );
+      final text = result.savedToFile
+          ? '书源较多（${formatBytes(result.byteLength)}），'
+                '已保存到文件：\n${result.path}'
+          : '已复制全部书源 JSON 到剪贴板';
+      messenger.showSnackBar(
+        SnackBar(content: Text(text), duration: const Duration(seconds: 4)),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    }
   }
 
   Future<void> _importFromPaste(BuildContext context) async {
