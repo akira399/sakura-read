@@ -5,6 +5,9 @@ import 'natural_sort.dart';
 /// 支持的小说扩展名。
 const Set<String> kNovelExtensions = {'txt', 'epub'};
 
+/// 书源文件的扩展名（阅读 3.0 书源为 JSON；也允许用户存成 .txt）。
+const Set<String> kSourceFileExtensions = {'json', 'txt'};
+
 const Set<String> _skippedNames = {
   '.thumbnails',
   '.git',

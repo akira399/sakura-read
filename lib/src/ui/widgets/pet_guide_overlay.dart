@@ -536,8 +536,29 @@ class _PetGuideAnchorState extends State<PetGuideAnchor> with RouteAware {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       _subscribeRoute();
       _report();
+      _schedulePositionTracking();
+    });
+  }
+
+  /// 帧级位置跟踪（引导进行期间生效）。
+  ///
+  /// 为什么需要：锚点只在 build / 路由回调时上报一次位置，而目标控件
+  /// 的位置可能在其后变化——最典型的是**键盘收放**：从搜索页（键盘）
+  /// 返回书架时，「＋」还停在"被键盘顶起"的位置就被上报；之后键盘收起、
+  /// 「＋」落回右下角，却无人重新上报，高亮框于是定格在屏幕中间
+  /// （用户截图反馈的「＋号错位」）。
+  ///
+  /// 这里逐帧重报位置；位置未变时 controller 内部会去重（不会额外重建）。
+  /// 说明：postFrameCallback **不会**主动驱动新帧（仅在有帧时执行），
+  /// 因此不会空转；引导结束（[kPetGuideActive] 为 false）后循环自然停止。
+  void _schedulePositionTracking() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _report();
+      if (kPetGuideActive.value) _schedulePositionTracking();
     });
   }
 
