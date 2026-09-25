@@ -51,6 +51,7 @@ class _PetGuideHostState extends State<PetGuideHost> {
   void initState() {
     super.initState();
     widget.hostReady.addListener(_maybeStart);
+    kPetGuideReplay.addListener(_onReplayRequest);
     _maybeStart();
   }
 
@@ -58,11 +59,15 @@ class _PetGuideHostState extends State<PetGuideHost> {
   void didUpdateWidget(covariant PetGuideHost oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.enabled && !oldWidget.enabled) _maybeStart();
+    // 「已看过」被重新打开（如同意条款时重置 guideSeen）：也允许开始，
+    // 保证无论两个标记的更新次序如何，引导都能及时出现。
+    if (!widget.seen && oldWidget.seen) _maybeStart();
   }
 
   @override
   void dispose() {
     widget.hostReady.removeListener(_maybeStart);
+    kPetGuideReplay.removeListener(_onReplayRequest);
     _c.dispose();
     super.dispose();
   }
@@ -78,6 +83,14 @@ class _PetGuideHostState extends State<PetGuideHost> {
 
   /// 测试 / 调试用开关（正常流程始终为 false）。
   final bool _forceShow = false;
+
+  /// 设置页点了「重看新手引导」：绕过「已看过」限制，再播一遍。
+  void _onReplayRequest() {
+    if (!mounted || _c.active) return;
+    if (!widget.enabled || !widget.hostReady.value) return;
+    _started = true;
+    _c.start();
+  }
 
   void _onFinished() => widget.onSeen();
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/book_store.dart';
+import '../data/pet_guide.dart';
 import '../data/pet_store.dart';
 import '../data/prefs.dart';
 import '../data/stats_store.dart';
@@ -39,7 +40,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 「重看新手引导」：切回书架页（引导从书架开始，后续锚点也在书架 / 导航栏）
+    kPetGuideReplay.addListener(_onGuideReplay);
     _check();
+  }
+
+  /// 收到「重看新手引导」请求：把底部导航切回书架（第 1 格）。
+  void _onGuideReplay() {
+    if (mounted && _index != 0) setState(() => _index = 0);
   }
 
   Future<void> _check() async {
@@ -58,6 +66,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    kPetGuideReplay.removeListener(_onGuideReplay);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

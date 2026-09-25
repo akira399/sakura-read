@@ -11,7 +11,7 @@
 [![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-lightgrey?logo=android)]()
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Tests](https://img.shields.io/badge/tests-197%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-201%20passed-brightgreen)]()
 [![Analyze](https://img.shields.io/badge/analyze-0%20issues-brightgreen)]()
 
 [功能特性](#-功能特性) · [截图预览](#-截图预览) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
@@ -27,7 +27,7 @@
 - 🎀 **她是活的** —— 一位粉发看板娘陪着你：会跟你打招呼、被你拖来拖去、看书时在你书页上跑来跑去，惹急了还会……（彩蛋自己找）
 - 🌸 **她是漂亮的** —— 图标、开屏、封面、空书架，一整套日系赛璐璐上色的二次元皮肤（AI 出图 + 人工筛选）
 - 📖 **她是很能干的** —— TXT / EPUB 全格式、4 种翻页、TTS 朗读、书签统计、多源搜书、一键换源，该有的一个不少
-- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（197 项自动化测试），欢迎你来改
+- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（201 项自动化测试），欢迎你来改
 
 ---
 
@@ -169,7 +169,7 @@ flutter pub get
 # 2) 静态检查
 flutter analyze
 
-# 3) 运行测试（197 项）
+# 3) 运行测试（201 项）
 flutter test
 
 # 4) 构建 release APK（单架构 arm64 体积最小）
@@ -188,7 +188,7 @@ flutter build apk --release --target-platform android-arm64
 | 项目 | 状态 |
 | --- | --- |
 | `flutter analyze` | ✅ No issues found |
-| `flutter test` | ✅ **197 项全部通过** |
+| `flutter test` | ✅ **201 项全部通过** |
 
 覆盖范围：
 
@@ -262,9 +262,9 @@ tool/
 </details>
 
 <details>
-<summary><b>怎么关闭「新手引导」？</b></summary>
+<summary><b>新手引导跳过了，还能再看吗？</b></summary>
 
-引导只在首次启动出现，右上角有「跳过引导」按钮。跳过或看完后都不会再出现。
+可以。「设置 → 帮助 → 重看新手引导」随时能再看一遍（默认只在首次启动自动出现一次，右上角「跳过引导」可随时结束）。
 </details>
 
 ---

@@ -15,6 +15,17 @@ import 'pet_mood.dart';
 /// 引导是否进行中（全局通知：桌宠本体在此间隐藏，由引导层自己摆位）。
 final ValueNotifier<bool> kPetGuideActive = ValueNotifier<bool>(false);
 
+/// 「重看新手引导」请求信号（自增计数）：设置页入口触发。
+///
+/// 引导设计上只自动出现一次（`guideSeen`，看完 / 跳过即落盘）；
+/// 这是用户**主动**重看一遍的入口——宿主监听它、绕过「已看过」限制。
+final ValueNotifier<int> kPetGuideReplay = ValueNotifier<int>(0);
+
+/// 请求重看新手引导（由设置页「重看新手引导」入口调用）。
+void petGuideRequestReplay() {
+  kPetGuideReplay.value++;
+}
+
 /// 引导步骤。
 ///
 /// 支持**跨页面引导**（点放大镜 → 搜索页 → 点返回 → 回书架 → 点「＋」）：

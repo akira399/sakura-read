@@ -411,7 +411,7 @@ void main() {
     await _capture(tester, 'recent');
     await _finish(tester);
   });
-// ---------- 7. 设置 ----------
+  // ---------- 7. 设置 ----------
   testWidgets('shot: 设置', (tester) async {
     configureView(tester);
     final ctx = await _setup(tester);
@@ -452,7 +452,6 @@ void main() {
     await _capture(tester, 'settings_about');
     await _finish(tester);
   });
-
 
   // ---------- 8. 在线搜书（待输入） ----------
   testWidgets('shot: 在线搜书', (tester) async {
