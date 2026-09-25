@@ -72,6 +72,11 @@ class MainActivity : FlutterActivity() {
                     map["charging"] = charging
                     result.success(map)
                 }
+                // ---------- 打开链接（设置页「项目主页」等） ----------
+                "openUrl" -> {
+                    val url = call.arguments as? String ?: ""
+                    result.success(openUrl(url))
+                }
                 // ---------- 朗读（TTS） ----------
                 "ttsEngines" -> result.success(listTtsEngines())
                 "ttsInit" -> {
@@ -227,6 +232,21 @@ class MainActivity : FlutterActivity() {
         tts = null
         ttsReady = false
         ttsInitRequested = false
+    }
+
+    /** 用系统浏览器打开链接（失败时返回 false，由 Dart 侧提示）。 */
+    private fun openUrl(url: String): Boolean {
+        if (url.isEmpty()) return false
+        return try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK,
+                ),
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun onDestroy() {

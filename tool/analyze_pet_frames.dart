@@ -76,10 +76,18 @@ void main() {
       return (vr + vg + vb) / 3;
     }
 
-    print('  top    edge variance: ${edgeVariance(true, true).toStringAsFixed(1)}');
-    print('  bottom edge variance: ${edgeVariance(true, false).toStringAsFixed(1)}');
-    print('  left   edge variance: ${edgeVariance(false, true).toStringAsFixed(1)}');
-    print('  right  edge variance: ${edgeVariance(false, false).toStringAsFixed(1)}');
+    print(
+      '  top    edge variance: ${edgeVariance(true, true).toStringAsFixed(1)}',
+    );
+    print(
+      '  bottom edge variance: ${edgeVariance(true, false).toStringAsFixed(1)}',
+    );
+    print(
+      '  left   edge variance: ${edgeVariance(false, true).toStringAsFixed(1)}',
+    );
+    print(
+      '  right  edge variance: ${edgeVariance(false, false).toStringAsFixed(1)}',
+    );
 
     // 中心 40x40 平均色（人物区域）
     var cr = 0, cg = 0, cb = 0, cn = 0;

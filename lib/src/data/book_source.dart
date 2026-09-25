@@ -119,9 +119,11 @@ class OnlineBookContent implements BookContent {
   final OnlineBookService _service = OnlineBookService();
   final Map<int, String> _memo = {};
 
+  /// 缓存文件名带 v2 前缀：旧版本曾把「站点导航整页文本」当作正文缓存下来，
+  /// 换名后老缓存自然失效，重新抓取即可得到干净正文。
   File _cacheFile(int index) => File(
     '${store.chapterCacheDir(book.id).path}/'
-    'ch_${index.toString().padLeft(4, '0')}.txt',
+    'ch_v2_${index.toString().padLeft(4, '0')}.txt',
   );
 
   @override

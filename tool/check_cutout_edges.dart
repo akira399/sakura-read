@@ -91,9 +91,7 @@ void _inspect(String path, img.Image im) {
   final ratio = edge == 0 ? 0.0 : (darkEdge + brightEdge) * 100.0 / edge;
   final verdict = edge == 0
       ? '⚠️ 没有半透明边缘（可能抠得太硬，边缘会有锯齿）'
-      : (ratio < 15
-            ? '✅ 边缘干净'
-            : '❌ 边缘残留明显（暗边 $darkEdge / 亮边 $brightEdge）');
+      : (ratio < 15 ? '✅ 边缘干净' : '❌ 边缘残留明显（暗边 $darkEdge / 亮边 $brightEdge）');
 
   print(
     '$path ${w}x$h  主体色=(${mr.round()},${mg.round()},${mb.round()})\n'

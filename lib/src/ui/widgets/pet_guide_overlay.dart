@@ -19,6 +19,7 @@ class PetGuideHost extends StatefulWidget {
     required this.hostReady,
     required this.seen,
     required this.onSeen,
+    this.enabled = true,
   });
 
   final PetStore pet;
@@ -31,6 +32,9 @@ class PetGuideHost extends StatefulWidget {
 
   /// 标记「已看过」。
   final VoidCallback onSeen;
+
+  /// 是否允许开始引导（首次启动需先同意使用条款）。
+  final bool enabled;
 
   @override
   State<PetGuideHost> createState() => _PetGuideHostState();
@@ -51,6 +55,12 @@ class _PetGuideHostState extends State<PetGuideHost> {
   }
 
   @override
+  void didUpdateWidget(covariant PetGuideHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.enabled && !oldWidget.enabled) _maybeStart();
+  }
+
+  @override
   void dispose() {
     widget.hostReady.removeListener(_maybeStart);
     _c.dispose();
@@ -59,6 +69,7 @@ class _PetGuideHostState extends State<PetGuideHost> {
 
   void _maybeStart() {
     if (_started || !mounted) return;
+    if (!widget.enabled) return; // 未同意首启条款：先不打扰
     if (!widget.hostReady.value) return;
     if (widget.seen && !_forceShow) return;
     _started = true;
@@ -182,61 +193,70 @@ class PetGuideOverlay extends StatelessWidget {
     }
 
     return Positioned.fill(
-      child: Stack(
-        children: [
-          ...barriers,
-          if (target != null)
-            // 目标高亮环（不吃手势）
-            // 注意：Positioned 是 ParentDataWidget，必须是 Stack 的**直接子级**；
-            // 所以 IgnorePointer 要放在 Positioned 里面（顺序反过来会抛断言，
-            // 导致整个引导层渲染崩溃 —— 见 pet_guide_render_test 回归用例）。
-            Positioned.fromRect(
-              rect: target,
-              child: const IgnorePointer(child: _SpotlightRing()),
+      // 必须包一层 Material：引导层挂在 MaterialApp 之上，
+      // 若直接放裸 Text，会继承 MaterialApp 最外层的调试用 DefaultTextStyle
+      // （红字 + 黄色双下划线），气泡文案下方就会出现"双黄线"。
+      child: Material(
+        type: MaterialType.transparency,
+        child: Stack(
+          children: [
+            ...barriers,
+            if (target != null)
+              // 目标高亮环（不吃手势）
+              // 注意：Positioned 是 ParentDataWidget，必须是 Stack 的**直接子级**；
+              // 所以 IgnorePointer 要放在 Positioned 里面（顺序反过来会抛断言，
+              // 导致整个引导层渲染崩溃 —— 见 pet_guide_render_test 回归用例）。
+              Positioned.fromRect(
+                rect: target,
+                child: const IgnorePointer(child: _SpotlightRing()),
+              ),
+            // ---- 小樱 + 气泡 ----
+            _Bubble(
+              target: target,
+              full: full,
+              text: controller.nagLine ?? controller.step.text,
+              hint: controller.step.hasAnchor
+                  ? (controller.nagLine == null ? controller.step.hint : '……')
+                  : controller.step.hint,
+              nagging: controller.nagLine != null,
+              face:
+                  _nagFaces[math.min(
+                    controller.nagCount,
+                    _nagFaces.length - 1,
+                  )],
             ),
-          // ---- 小樱 + 气泡 ----
-          _Bubble(
-            target: target,
-            full: full,
-            text: controller.nagLine ?? controller.step.text,
-            hint: controller.step.hasAnchor
-                ? (controller.nagLine == null ? controller.step.hint : '……')
-                : controller.step.hint,
-            nagging: controller.nagLine != null,
-            face:
-                _nagFaces[math.min(controller.nagCount, _nagFaces.length - 1)],
-          ),
-          // ---- 跳过按钮 ----
-          // 放在**顶部居中**：右上角会和书架的放大镜/排列按钮重叠，
-          // 容易造成误点与视觉遮挡（见 CHANGELOG v1.3.5）。
-          Positioned(
-            top: media.padding.top + 8,
-            left: 0,
-            right: 0,
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: TextButton.icon(
-                onPressed: controller.skip,
-                style: TextButton.styleFrom(
-                  backgroundColor: Colors.black.withValues(alpha: .58),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
+            // ---- 跳过按钮 ----
+            // 放在**顶部居中**：右上角会和书架的放大镜/排列按钮重叠，
+            // 容易造成误点与视觉遮挡（见 CHANGELOG v1.3.5）。
+            Positioned(
+              top: media.padding.top + 8,
+              left: 0,
+              right: 0,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: TextButton.icon(
+                  onPressed: controller.skip,
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.black.withValues(alpha: .58),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+                  icon: const Icon(Icons.fast_forward_rounded, size: 17),
+                  label: const Text(
+                    '跳过引导',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                   ),
-                ),
-                icon: const Icon(Icons.fast_forward_rounded, size: 17),
-                label: const Text(
-                  '跳过引导',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

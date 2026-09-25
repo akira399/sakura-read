@@ -189,130 +189,135 @@ void main() {
           // 主题级字体：一次指定，全局生效（测试环境没有字体回退链，
           // 不指定的话中文会渲染成方框）
           theme: ThemeData(fontFamily: 'LXGWWenKai'),
-          home: SizedBox(
-            width: _bannerW,
-            height: _bannerH,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // 1) 立绘铺底 + 压暗
-                _file('assets/images/splash_girl.jpg'),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [
-                        Color(0xF0170F1E),
-                        Color(0xC7231526),
-                        Color(0x992E1A33),
-                      ],
-                      stops: [0.0, 0.52, 1.0],
+          home: Scaffold(
+            // Material 底：避免裸 Text 继承 MaterialApp 最外层的调试用
+            // DefaultTextStyle（红字 + 黄色双下划线，即"双黄线"）
+            backgroundColor: Colors.black,
+            body: SizedBox(
+              width: _bannerW,
+              height: _bannerH,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // 1) 立绘铺底 + 压暗
+                  _file('assets/images/splash_girl.jpg'),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          Color(0xF0170F1E),
+                          Color(0xC7231526),
+                          Color(0x992E1A33),
+                        ],
+                        stops: [0.0, 0.52, 1.0],
+                      ),
                     ),
                   ),
-                ),
-                // 2) 右侧三张截图（倾斜排布，右边部分出界更有张力）
-                Positioned(
-                  right: -48,
-                  top: 46,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Transform.rotate(
-                        angle: -0.07,
-                        child: _phone(mascot, 320),
-                      ),
-                      const SizedBox(width: 20),
-                      Transform.translate(
-                        offset: const Offset(0, 42),
-                        child: Transform.rotate(
-                          angle: 0.015,
-                          child: _phone(reader, 320),
+                  // 2) 右侧三张截图（倾斜排布，右边部分出界更有张力）
+                  Positioned(
+                    right: -48,
+                    top: 46,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Transform.rotate(
+                          angle: -0.07,
+                          child: _phone(mascot, 320),
                         ),
-                      ),
-                      const SizedBox(width: 20),
-                      Transform.rotate(angle: 0.09, child: _phone(egg, 320)),
-                    ],
-                  ),
-                ),
-                // 3) 左侧文案
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(54, 0, 0, 0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(22),
-                            child: _file(icon, width: 86, height: 86),
+                        const SizedBox(width: 20),
+                        Transform.translate(
+                          offset: const Offset(0, 42),
+                          child: Transform.rotate(
+                            angle: 0.015,
+                            child: _phone(reader, 320),
                           ),
-                          const SizedBox(width: 20),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                '樱读',
-                                style: TextStyle(
-                                  fontFamily: 'LXGWWenKai',
-                                  color: Colors.white,
-                                  fontSize: 54,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 8,
-                                  height: 1.05,
-                                ),
-                              ),
-                              Text(
-                                'Sakura Read',
-                                style: TextStyle(
-                                  fontFamily: 'LXGWWenKai',
-                                  color: Colors.white.withValues(alpha: .82),
-                                  fontSize: 17,
-                                  letterSpacing: 4,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        '在樱花树下，慢慢读完一本书',
-                        style: TextStyle(
-                          fontFamily: 'LXGWWenKai',
-                          color: Colors.white.withValues(alpha: .94),
-                          fontSize: 22,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 2,
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        '二次元风格 · 开源 Android 小说阅读器',
-                        style: TextStyle(
-                          fontFamily: 'LXGWWenKai',
-                          color: Colors.white.withValues(alpha: .70),
-                          fontSize: 15,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          _chip('TXT / EPUB'),
-                          _chip('阅读 3.0 书源'),
-                          _chip('在线搜书'),
-                          _chip('看板娘桌宠'),
-                          _chip('语音朗读'),
-                        ],
-                      ),
-                    ],
+                        const SizedBox(width: 20),
+                        Transform.rotate(angle: 0.09, child: _phone(egg, 320)),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  // 3) 左侧文案
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(54, 0, 0, 0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(22),
+                              child: _file(icon, width: 86, height: 86),
+                            ),
+                            const SizedBox(width: 20),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '樱读',
+                                  style: TextStyle(
+                                    fontFamily: 'LXGWWenKai',
+                                    color: Colors.white,
+                                    fontSize: 54,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 8,
+                                    height: 1.05,
+                                  ),
+                                ),
+                                Text(
+                                  'Sakura Read',
+                                  style: TextStyle(
+                                    fontFamily: 'LXGWWenKai',
+                                    color: Colors.white.withValues(alpha: .82),
+                                    fontSize: 17,
+                                    letterSpacing: 4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          '在樱花树下，慢慢读完一本书',
+                          style: TextStyle(
+                            fontFamily: 'LXGWWenKai',
+                            color: Colors.white.withValues(alpha: .94),
+                            fontSize: 22,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 2,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          '二次元风格 · 开源 Android 小说阅读器',
+                          style: TextStyle(
+                            fontFamily: 'LXGWWenKai',
+                            color: Colors.white.withValues(alpha: .70),
+                            fontSize: 15,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            _chip('TXT / EPUB'),
+                            _chip('阅读 3.0 书源'),
+                            _chip('在线搜书'),
+                            _chip('看板娘桌宠'),
+                            _chip('语音朗读'),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -361,33 +366,36 @@ void main() {
         MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: ThemeData(fontFamily: 'LXGWWenKai'),
-          home: Container(
-            width: w,
-            height: h,
-            color: const Color(0xFFFFF6FA),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  '樱读 App 图标',
-                  style: TextStyle(
-                    fontFamily: 'LXGWWenKai',
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF3A2B3D),
-                    letterSpacing: 4,
+          home: Scaffold(
+            // Material 底：避免裸 Text 继承调试用 DefaultTextStyle（双黄线）
+            backgroundColor: const Color(0xFFFFF6FA),
+            body: SizedBox(
+              width: w,
+              height: h,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    '樱读 App 图标',
+                    style: TextStyle(
+                      fontFamily: 'LXGWWenKai',
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF3A2B3D),
+                      letterSpacing: 4,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 32),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    tile('tool/artwork/icon_square_512.png', '方形'),
-                    tile('tool/artwork/icon_rounded_512.png', '圆角（默认桌面）'),
-                    tile('tool/artwork/icon_round_512.png', '圆形'),
-                  ],
-                ),
-              ],
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      tile('tool/artwork/icon_square_512.png', '方形'),
+                      tile('tool/artwork/icon_rounded_512.png', '圆角（默认桌面）'),
+                      tile('tool/artwork/icon_round_512.png', '圆形'),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

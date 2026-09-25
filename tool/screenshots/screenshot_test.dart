@@ -101,6 +101,7 @@ Future<_Ctx> _setup(WidgetTester tester) async {
     final prefs = AppPrefs(dirsOverride: dirs);
     await prefs.load();
     prefs.setGuideSeen(true); // 不显示新手引导
+    prefs.setAgreementAccepted(true); // 不显示首启条款页
 
     final store = BookStore(dirsOverride: dirs);
     await store.load();
@@ -184,7 +185,11 @@ Future<void> _pumpFrames(WidgetTester tester, {int frames = 8}) async {
 
 /// 一轮「真实异步 + 虚拟时钟」交替推进：
 /// 真实等待让文件 IO / isolate 完成，pump 让 setState / 分页循环落地。
-Future<void> _cycle(WidgetTester tester, {int ms = 250, int frames = 12}) async {
+Future<void> _cycle(
+  WidgetTester tester, {
+  int ms = 250,
+  int frames = 12,
+}) async {
   await tester.runAsync(() => Future<void>.delayed(Duration(milliseconds: ms)));
   await _pumpFrames(tester, frames: frames);
 }
@@ -406,8 +411,7 @@ void main() {
     await _capture(tester, 'recent');
     await _finish(tester);
   });
-
-  // ---------- 7. 设置 ----------
+// ---------- 7. 设置 ----------
   testWidgets('shot: 设置', (tester) async {
     configureView(tester);
     final ctx = await _setup(tester);
@@ -422,6 +426,33 @@ void main() {
     await _capture(tester, 'settings');
     await _finish(tester);
   });
+
+  // ---------- 7b. 设置（底部：开源信息 / Made by akira399） ----------
+  testWidgets('shot: 设置-开源信息', (tester) async {
+    configureView(tester);
+    final ctx = await _setup(tester);
+    _hidePet();
+
+    await tester.pumpWidget(_wrap(_app(ctx)));
+    await _cycle(tester);
+    _hidePet();
+    await tester.tap(find.byIcon(Icons.favorite_outline_rounded));
+    await _pumpFrames(tester, frames: 10);
+    _hidePet();
+    // 滚到底部：把「开源信息」区块滚进视野
+    await tester.scrollUntilVisible(
+      find.text('开源信息'),
+      260,
+      scrollable: find.byType(Scrollable).first,
+      maxScrolls: 40,
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+    await _pumpFrames(tester, frames: 10);
+    _hidePet();
+    await _capture(tester, 'settings_about');
+    await _finish(tester);
+  });
+
 
   // ---------- 8. 在线搜书（待输入） ----------
   testWidgets('shot: 在线搜书', (tester) async {
@@ -510,62 +541,66 @@ void main() {
       _wrap(
         MaterialApp(
           debugShowCheckedModeBanner: false,
-          home: Container(
-            color: const Color(0xFFFFF6FA),
-            padding: const EdgeInsets.symmetric(vertical: 26),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  '看板娘表情差分',
-                  style: TextStyle(
-                    fontFamily: 'LXGWWenKai',
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF3A2B3D),
-                    letterSpacing: 4,
+          home: Scaffold(
+            // Material 底：避免裸 Text 继承 MaterialApp 最外层的调试用
+            // DefaultTextStyle（红字 + 黄色双下划线，即"双黄线"）
+            backgroundColor: const Color(0xFFFFF6FA),
+            body: Container(
+              padding: const EdgeInsets.symmetric(vertical: 26),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    '看板娘表情差分',
+                    style: TextStyle(
+                      fontFamily: 'LXGWWenKai',
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF3A2B3D),
+                      letterSpacing: 4,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 18),
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      for (final face in [
-                        ('assets/images/pet_chibi.png', '常态'),
-                        ('assets/images/pet_wave.png', '挥手'),
-                        ('assets/images/pet_read.png', '看书'),
-                        ('assets/images/pet_cheer.png', '开心'),
-                        ('assets/images/pet_sleep.png', '打瞌睡'),
-                        ('assets/images/pet_shy.png', '害羞'),
-                        ('assets/images/pet_angry.png', '生气'),
-                      ])
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // 用 Image.memory 直接读磁盘：
-                            // Image.asset 在测试环境的首次解码时机不可控，
-                            // 会出现「部分立绘空白」的问题
-                            Image.memory(
-                              File(face.$1).readAsBytesSync(),
-                              height: 150,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              face.$2,
-                              style: const TextStyle(
-                                fontFamily: 'LXGWWenKai',
-                                fontSize: 13,
-                                color: Color(0xFF6B5B72),
+                  const SizedBox(height: 18),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        for (final face in [
+                          ('assets/images/pet_chibi.png', '常态'),
+                          ('assets/images/pet_wave.png', '挥手'),
+                          ('assets/images/pet_read.png', '看书'),
+                          ('assets/images/pet_cheer.png', '开心'),
+                          ('assets/images/pet_sleep.png', '打瞌睡'),
+                          ('assets/images/pet_shy.png', '害羞'),
+                          ('assets/images/pet_angry.png', '生气'),
+                        ])
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // 用 Image.memory 直接读磁盘：
+                              // Image.asset 在测试环境的首次解码时机不可控，
+                              // 会出现「部分立绘空白」的问题
+                              Image.memory(
+                                File(face.$1).readAsBytesSync(),
+                                height: 150,
                               ),
-                            ),
-                          ],
-                        ),
-                    ],
+                              const SizedBox(height: 8),
+                              Text(
+                                face.$2,
+                                style: const TextStyle(
+                                  fontFamily: 'LXGWWenKai',
+                                  fontSize: 13,
+                                  color: Color(0xFF6B5B72),
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -574,6 +609,23 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await _settle(tester);
     await _capture(tester, 'faces');
+    await _finish(tester);
+  });
+
+  // ---------- 12. 首启条款页（同意后进新手引导） ----------
+  testWidgets('shot: 首启条款', (tester) async {
+    configureView(tester);
+    final ctx = await _setup(tester);
+    ctx.prefs.setAgreementAccepted(false); // 展示首启条款页
+    _hidePet();
+
+    await _precacheAll(tester, ['assets/images/pet_chibi.png']);
+
+    await tester.pumpWidget(_wrap(_app(ctx)));
+    _hidePet();
+    await _settle(tester, rounds: 8);
+    _hidePet();
+    await _capture(tester, 'agreement');
     await _finish(tester);
   });
 }
