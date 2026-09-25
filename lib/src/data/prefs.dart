@@ -87,6 +87,10 @@ class AppPrefs extends ChangeNotifier {
   /// 是否已看过新手引导（看完或跳过后都为 true，只首次启动引导一次）。
   bool guideSeen = false;
 
+  // ---- 首次启动 ----
+  /// 是否已同意首启的「使用条款与声明」（同意后才进入新手引导）。
+  bool agreementAccepted = false;
+
   static const List<Color> accents = [
     Color(0xFFFF7EB6), // 樱粉
     Color(0xFF9D8CFF), // 薰衣草
@@ -144,6 +148,8 @@ class AppPrefs extends ChangeNotifier {
           ttsAutoNextChapter = data['ttsAutoNextChapter'] as bool? ?? true;
           // v5：新手引导是否已看过
           guideSeen = data['guideSeen'] as bool? ?? false;
+          // v6：首启使用条款
+          agreementAccepted = data['agreementAccepted'] as bool? ?? false;
         }
       }
     } catch (_) {
@@ -336,6 +342,14 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 标记首启使用条款已同意。
+  void setAgreementAccepted(bool v) {
+    if (agreementAccepted == v) return;
+    agreementAccepted = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void _saveSoon() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 300), () {
@@ -371,6 +385,7 @@ class AppPrefs extends ChangeNotifier {
           'ttsAutoFollow': ttsAutoFollow,
           'ttsAutoNextChapter': ttsAutoNextChapter,
           'guideSeen': guideSeen,
+          'agreementAccepted': agreementAccepted,
         }),
       );
     } catch (_) {

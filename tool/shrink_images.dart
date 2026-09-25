@@ -32,8 +32,11 @@ void main() {
       continue;
     }
     final resized = decoded.width > targetWidth
-        ? img.copyResize(decoded,
-            width: targetWidth, interpolation: img.Interpolation.cubic)
+        ? img.copyResize(
+            decoded,
+            width: targetWidth,
+            interpolation: img.Interpolation.cubic,
+          )
         : decoded;
     final out = img.encodeJpg(
       resized,
@@ -42,9 +45,13 @@ void main() {
     f.writeAsBytesSync(out);
     beforeTotal += before;
     afterTotal += out.length;
-    print('$name: ${(before / 1024).round()}KB -> ${(out.length / 1024).round()}KB');
+    print(
+      '$name: ${(before / 1024).round()}KB -> ${(out.length / 1024).round()}KB',
+    );
   }
-  print('TOTAL: ${(beforeTotal / 1024 / 1024).toStringAsFixed(1)}MB -> '
-      '${(afterTotal / 1024 / 1024).toStringAsFixed(1)}MB');
+  print(
+    'TOTAL: ${(beforeTotal / 1024 / 1024).toStringAsFixed(1)}MB -> '
+    '${(afterTotal / 1024 / 1024).toStringAsFixed(1)}MB',
+  );
   print('SHRINK_DONE');
 }

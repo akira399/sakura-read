@@ -1,14 +1,22 @@
 // 隐藏 WebView 引擎：为「需要 JS 才能出正文」的小说站提供渲染读取。
 //
 // 背景：部分站点（笔趣阁家族等）的正文走 JS 令牌墙 + SPA 路由 + 加密接口，
-// 纯 HTTP 只能拿到「加载中……」壳页；而系统 WebView（Chromium 内核）会把
-// 整条链跑完并渲染出正文。
+// 纯 HTTP 只能拿到「加载中……」壳页；系统 WebView（Chromium 内核）会把整条链
+// 跑完并渲染出正文。
 //
 // 方案：在 App 根挂一个 1×1 像素、不可交互的隐藏 WebView：
 //   1. loadRequest 打开目标章节页（自动跟随 301 / JS 跳转）；
 //   2. 等 onPageFinished（SPA hash 路由不触发时以轮询兜底）；
-//   3. 反复注入抽取脚本，直到正文容器出现且长度达标；
+//   3. 反复注入抽取脚本，直到正文容器出现且**通过质量校验**；
 //   4. 返回纯文本（清洗交给上层）。
+//
+// ★ 抽取严格化（重要教训）★
+// 早期版本在「找不到正文容器」时会**回退到 `document.body.innerText`**，
+// 结果整页导航（「我的书架 / 首页 / 玄幻 / 武侠…」）被当成正文抓进读者
+// 界面。现在改为**绝不回退整页**：
+//   - 只认「明确候选容器」（书源规则给的 CSS 选择器 + 内置猜测）；
+//   - 每个候选还要通过质量校验（正文占比 / 导航词占比 / 段落结构）；
+//   - 全部候选都不合格 → 返回空串，由上层报错重试，而不是喂给用户一堆菜单。
 //
 // 注意：
 // - 用桌面 UA：站点 common.js 会把 Android/iPhone UA 重定向到 m.* 子站，
@@ -108,7 +116,7 @@ class WebViewEngine {
   /// 打开 [url]，等待/轮询渲染结果，返回抽取到的文本（可能为空串）。
   ///
   /// [cssSelectors] 为优先尝试的正文选择器（书源 ruleContent 规则转换而来）；
-  /// 找不到时自动回退到内置候选与「最大文本块」启发式。
+  /// 找不到时回退到内置候选列表。**不会**回退到整页文本。
   Future<String> fetchRenderedText({
     required String url,
     List<String> cssSelectors = const [],
@@ -159,50 +167,91 @@ class WebViewEngine {
     return s;
   }
 
+  /// 注入脚本：只从「明确候选容器」里取正文，并做质量校验。
+  ///
+  /// 质量校验（任一不通过即视为“抓到的不是正文”）：
+  ///   - 纯文本长度 ≥ 80；
+  ///   - 导航行占比 ≤ 35%（导航行 = 短行且命中常见站点栏目词）；
+  ///   - 不能是一堆「短行 + 无长段落」的目录/菜单结构。
   static String _buildExtractScript(List<String> selectors) {
     final sels = jsonEncode(selectors);
     return '''
 (function() {
   try {
     var sels = $sels;
-    function norm(t) { return t ? t.replace(/\\r/g, '') : ''; }
-    function dense(t) { return t.replace(/\\s/g, '').length; }
-    for (var i = 0; i < sels.length; i++) {
-      try {
-        var el = document.querySelector(sels[i]);
-        if (el) {
-          var t = norm(el.innerText || '');
-          if (dense(t) < 80) t = norm(el.textContent || '');
-          if (dense(t) >= 80) return t;
+    // 正文候选：书源规则给的优先，其后是常见站点模板的容器 id / class
+    var guess = ['#chaptercontent', '#content', '#booktxt', '#nr1',
+                 '#htmlContent', '.showtxt', '.Readarea', '#chapter_content',
+                 '.content', '.read-content', '.text', 'article'];
+    var all = sels.concat(guess);
+
+    var NAV_WORDS = ['首页','书架','我的书架','排行榜','玄幻','武侠','都市',
+                     '历史','网游','科幻','女生','完本','分类','排行','登录',
+                     '注册','搜索','作者专区','全部小说','最近更新','本站',
+                     '收藏本站','加入书签','推荐本书','返回目录','上一章',
+                     '下一章','字体','护眼','关灯','大中小','手机版'];
+
+    function norm(t) { return (t || '').replace(/\\r/g, ''); }
+    function lines(t) { return norm(t).split('\\n'); }
+    function dense(t) { return (t || '').replace(/\\s/g, '').length; }
+
+    // 导航行占比：短行（≤8 字）且命中栏目词 → 记作导航
+    function navRatio(t) {
+      var ls = lines(t).filter(function(x) { return x.trim().length > 0; });
+      if (ls.length === 0) return 1;
+      var nav = 0;
+      for (var i = 0; i < ls.length; i++) {
+        var s = ls[i].trim();
+        if (s.length > 8) continue;
+        for (var j = 0; j < NAV_WORDS.length; j++) {
+          if (s.indexOf(NAV_WORDS[j]) >= 0) { nav++; break; }
         }
+      }
+      return nav / ls.length;
+    }
+
+    // 是否像正文：长段落存在、且导航占比低
+    function looksLikeContent(t) {
+      if (dense(t) < 80) return false;
+      var ls = lines(t).filter(function(x) { return x.trim().length > 0; });
+      // 至少要有 2 行「明显是句子」的行（≥18 字）
+      var longLines = 0;
+      for (var i = 0; i < ls.length; i++) {
+        if (ls[i].trim().length >= 18) longLines++;
+      }
+      if (longLines < 2) return false;
+      if (navRatio(t) > 0.35) return false;
+      return true;
+    }
+
+    var best = '';
+    for (var i = 0; i < all.length; i++) {
+      var sel = all[i];
+      if (!sel) continue;
+      try {
+        var el = document.querySelector(sel);
+        if (!el) continue;
+        var t = norm(el.innerText || '');
+        if (dense(t) < 80) t = norm(el.textContent || '');
+        if (!looksLikeContent(t)) continue;
+        if (dense(t) > dense(best)) best = t;
       } catch (e) {}
     }
-    var guess = ['#chaptercontent', '#content', '#booktxt', '#nr1', '.Readarea',
-                 '#htmlContent', '.showtxt', 'article'];
-    for (var j = 0; j < guess.length; j++) {
-      try {
-        var el2 = document.querySelector(guess[j]);
-        if (el2) {
-          var t2 = norm(el2.innerText || el2.textContent || '');
-          if (dense(t2) >= 80) return t2;
-        }
-      } catch (e) {}
-    }
+    if (best) return best;
+
+    // 兜底：在「容器够深、子元素不多」的节点里找最长的合格块，
+    // 仍然要求通过质量校验（绝不回退整页 body）。
     try {
       var nodes = document.querySelectorAll('div,article,section,td');
-      var best = '';
       for (var k = 0; k < nodes.length; k++) {
         var n = nodes[k];
         if (n.children && n.children.length > 2) continue;
-        var t3 = n.innerText || '';
-        if (t3.length > best.length) best = t3;
+        var t3 = norm(n.innerText || '');
+        if (!looksLikeContent(t3)) continue;
+        if (dense(t3) > dense(best)) best = t3;
       }
-      if (dense(best) >= 100) return best;
     } catch (e) {}
-    try {
-      return (document.body && (document.body.innerText || '')) || '';
-    } catch (e) {}
-    return '';
+    return best;
   } catch (e) { return ''; }
 })()
 ''';

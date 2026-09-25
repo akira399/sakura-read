@@ -11,7 +11,7 @@
 [![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-lightgrey?logo=android)]()
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Tests](https://img.shields.io/badge/tests-193%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-197%20passed-brightgreen)]()
 [![Analyze](https://img.shields.io/badge/analyze-0%20issues-brightgreen)]()
 
 [功能特性](#-功能特性) · [截图预览](#-截图预览) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
@@ -22,12 +22,12 @@
 
 ## ✨ 为什么是「樱读」？
 
-市面上的阅读器很多，但我们想做的不只是一款"能看书"的工具：
+阅读器不少，但大多数只有功能，没有"人味"。樱读往里面塞了一个小樱：
 
 - 🎀 **她是活的** —— 一位粉发看板娘陪着你：会跟你打招呼、被你拖来拖去、看书时在你书页上跑来跑去，惹急了还会……（彩蛋自己找）
-- 🌸 **她是漂亮的** —— 从图标、开屏、封面到空书架，整套日系赛璐璐上色的二次元皮肤，由 AI 素材管线精心打磨
+- 🌸 **她是漂亮的** —— 图标、开屏、封面、空书架，一整套日系赛璐璐上色的二次元皮肤（AI 出图 + 人工筛选）
 - 📖 **她是很能干的** —— TXT / EPUB 全格式、4 种翻页、TTS 朗读、书签统计、多源搜书、一键换源，该有的一个不少
-- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（193 项自动化测试），欢迎你来改
+- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（197 项自动化测试），欢迎你来改
 
 ---
 
@@ -109,13 +109,15 @@
 
 <div align="center">
 
-| 书架 | 阅读器（日间） | 阅读器（夜间） |
+| 首次启动 | 书架 | 阅读器（日间） |
 |:---:|:---:|:---:|
-| <img src="docs/images/shelf.png" width="220"/> | <img src="docs/images/reader_day.png" width="220"/> | <img src="docs/images/reader_night.png" width="220"/> |
-| 最近阅读 | 设置 | 在线搜书 |
-| <img src="docs/images/recent.png" width="220"/> | <img src="docs/images/settings.png" width="220"/> | <img src="docs/images/search_idle.png" width="220"/> |
-| 开屏动画 | 空书架看板娘 | 隐藏彩蛋 |
-| <img src="docs/images/splash.png" width="220"/> | <img src="docs/images/shelf_empty.png" width="220"/> | <img src="docs/images/egg.png" width="220"/> |
+| <img src="docs/images/agreement.png" width="220"/> | <img src="docs/images/shelf.png" width="220"/> | <img src="docs/images/reader_day.png" width="220"/> |
+| 阅读器（夜间） | 最近阅读 | 设置 |
+| <img src="docs/images/reader_night.png" width="220"/> | <img src="docs/images/recent.png" width="220"/> | <img src="docs/images/settings.png" width="220"/> |
+| 设置（开源信息） | 在线搜书 | 开屏动画 |
+| <img src="docs/images/settings_about.png" width="220"/> | <img src="docs/images/search_idle.png" width="220"/> | <img src="docs/images/splash.png" width="220"/> |
+| 空书架看板娘 | 隐藏彩蛋 | |
+| <img src="docs/images/shelf_empty.png" width="220"/> | <img src="docs/images/egg.png" width="220"/> | |
 
 </div>
 
@@ -143,9 +145,10 @@ Q 版看板娘头像，三种形态（方形 / 圆角 / 圆形）+ 自适应图�
 
 ### 首次使用
 
-1. 跟随引导授予「所有文件访问」权限
-2. 点右下角「＋」导入本地 TXT / EPUB（或扫描常见目录）
-3. 在线看书：点书架右上角放大镜 → 输入书名 → 点结果进详情页 → 「加入书架」
+1. 阅读并同意「使用条款与声明」（首启一次，说明内容来源与版权归属）
+2. 跟随引导授予「所有文件访问」权限
+3. 点右下角「＋」导入本地 TXT / EPUB（或扫描常见目录）
+4. 在线看书：点书架右上角放大镜 → 输入书名 → 点结果进详情页 → 「加入书架」
 
 ---
 
@@ -166,7 +169,7 @@ flutter pub get
 # 2) 静态检查
 flutter analyze
 
-# 3) 运行测试（193 项）
+# 3) 运行测试（197 项）
 flutter test
 
 # 4) 构建 release APK（单架构 arm64 体积最小）
@@ -185,7 +188,7 @@ flutter build apk --release --target-platform android-arm64
 | 项目 | 状态 |
 | --- | --- |
 | `flutter analyze` | ✅ No issues found |
-| `flutter test` | ✅ **193 项全部通过** |
+| `flutter test` | ✅ **197 项全部通过** |
 
 覆盖范围：
 

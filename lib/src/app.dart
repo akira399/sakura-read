@@ -7,6 +7,7 @@ import 'data/stats_store.dart';
 import 'source/source_store.dart';
 import 'source/webview_engine.dart';
 import 'theme/app_theme.dart';
+import 'ui/agreement_gate.dart';
 import 'ui/home_page.dart';
 import 'ui/splash_gate.dart';
 import 'ui/widgets/pet_egg.dart';
@@ -64,11 +65,13 @@ class SakuraApp extends StatelessWidget {
                           ? const SizedBox.shrink()
                           : PetOverlay(pet: petStore, hostReady: kPetHostReady),
                     ),
-                    // 新手引导（首次启动）：自我介绍 + 指引点击
+                    // 新手引导（首次启动）：自我介绍 + 指引点击。
+                    // 需要先同意首启条款（enabled）才会开始。
                     PetGuideHost(
                       pet: petStore,
                       hostReady: kPetHostReady,
                       seen: prefs.guideSeen,
+                      enabled: prefs.agreementAccepted,
                       onSeen: () => prefs.setGuideSeen(true),
                     ),
                     PetEggOverlay(active: kPetEggActive),
@@ -77,12 +80,16 @@ class SakuraApp extends StatelessWidget {
               ),
             ),
           ),
-          home: SplashGate(
-            child: HomePage(
-              store: store,
-              prefs: prefs,
-              sourceStore: sourceStore,
-              statsStore: statsStore,
+          // 首启条款：开屏之后、进入书架之前弹出（同意后写入设置，仅首启一次）
+          home: AgreementGate(
+            prefs: prefs,
+            child: SplashGate(
+              child: HomePage(
+                store: store,
+                prefs: prefs,
+                sourceStore: sourceStore,
+                statsStore: statsStore,
+              ),
             ),
           ),
         );

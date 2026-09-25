@@ -538,203 +538,221 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 安全边距：弹跳缩放 / 轮廓阴影会超出 _size 一点，留缓冲保证不出屏
-        const margin = 8.0;
-        // 可移动范围（含安全边距）
-        final maxX = constraints.maxWidth - _size - margin;
-        final maxY = constraints.maxHeight - _size - 96 - margin; // 底部导航留空
-        if (!_positioned) {
-          _dx = ((widget.pet.petX * maxX).clamp(0.0, maxX));
-          _dy = ((widget.pet.petY * maxY).clamp(0.0, maxY));
-          _positioned = true;
-        }
-        _dx = _dx.clamp(0.0, maxX);
-        _dy = _dy.clamp(0.0, maxY);
-        // 供蹦跳计算使用（每次布局刷新）
-        _maxX = maxX;
-        _maxY = maxY;
-        // 贴边状态：仅用于决定台词气泡朝哪边长（缩放锚定在下方，不贴边）
-        final snapLeft = _dx < maxX / 2;
-        final nearLeft = _dx <= margin + 1;
-        final nearRight = maxX - _dx <= margin + 1;
+    // 必须包一层 Material：桌宠挂在 MaterialApp.builder 层（Navigator 的兄弟位），
+    // 不在任何页面 Material 之内。若直接放裸 Text，台词气泡会继承 MaterialApp
+    // 最外层的调试用 DefaultTextStyle（红字 + 黄色双下划线），气泡文字下方
+    // 就会出现"双黄线"。透明 Material 不绘制任何内容，只修正文字样式。
+    return Material(
+      type: MaterialType.transparency,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 安全边距：弹跳缩放 / 轮廓阴影会超出 _size 一点，留缓冲保证不出屏
+          const margin = 8.0;
+          // 可移动范围（含安全边距）
+          final maxX = constraints.maxWidth - _size - margin;
+          final maxY = constraints.maxHeight - _size - 96 - margin; // 底部导航留空
+          if (!_positioned) {
+            _dx = ((widget.pet.petX * maxX).clamp(0.0, maxX));
+            _dy = ((widget.pet.petY * maxY).clamp(0.0, maxY));
+            _positioned = true;
+          }
+          _dx = _dx.clamp(0.0, maxX);
+          _dy = _dy.clamp(0.0, maxY);
+          // 供蹦跳计算使用（每次布局刷新）
+          _maxX = maxX;
+          _maxY = maxY;
+          // 贴边状态：仅用于决定台词气泡朝哪边长（缩放锚定在下方，不贴边）
+          final snapLeft = _dx < maxX / 2;
+          final nearLeft = _dx <= margin + 1;
+          final nearRight = maxX - _dx <= margin + 1;
 
-        return ValueListenableBuilder<bool>(
-          valueListenable: widget.hostReady ?? _alwaysReady,
-          builder: (context, ready, _) {
-            if (!ready) return const SizedBox.shrink();
-            // 阅读器内：默认隐藏；用户开启「阅读时显示桌宠」才显示
-            if (widget.pet.readerActive && !widget.pet.showPetInReader) {
-              return const SizedBox.shrink();
-            }
-            return SizedBox(
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
-              child: Stack(
-                children: [
-                  Positioned(
-                    key: const ValueKey('pet_positioned'),
-                    left: snapLeft ? _dx : null,
-                    right: snapLeft ? null : constraints.maxWidth - _dx - _size,
-                    top: _dy,
-                    child: GestureDetector(
-                      onTap: _onTap,
-                      onDoubleTap: _onDoubleTap,
-                      onLongPress: _onLongPress,
-                      onPanStart: (_) {
-                        // 用户开始拖动 → 打断乱跑
-                        _stopRoamIfAny();
-                      },
-                      onPanUpdate: (details) {
-                        setState(() {
-                          _dx += details.delta.dx;
-                          _dy += details.delta.dy;
-                          // 拖拽摇晃：按水平拖动方向倾斜，±0.2 rad
-                          _tilt = (_tilt + details.delta.dx * 0.012).clamp(
-                            -0.2,
-                            0.2,
-                          );
-                        });
-                      },
-                      onPanEnd: (_) {
-                        final nx = maxX <= 0 ? 0.0 : _dx / maxX;
-                        final ny = maxY <= 0 ? 0.0 : _dy / maxY;
-                        widget.pet.setPosition(nx, ny);
-                        setState(() => _tilt = 0); // 松手回正（不做贴边吸附）
-                        _playNudge(); // 落地小跳
-                        _onDragEnd(); // 拖动台词 + 可能的生气
-                      },
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: snapLeft
-                            ? CrossAxisAlignment.start
-                            : CrossAxisAlignment.end,
-                        children: [
-                          if (_line != null)
-                            Container(
-                              constraints: const BoxConstraints(maxWidth: 200),
-                              // 气泡朝屏幕内侧生长：贴右留左距，贴左留右距
-                              margin: EdgeInsets.only(
-                                bottom: 6,
-                                left: snapLeft ? 4 : 0,
-                                right: snapLeft ? 0 : 4,
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 7,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.surface.withValues(alpha: .96),
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: .15),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 3),
-                                  ),
-                                ],
-                              ),
-                              child: Text(
-                                _line!,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
+          return ValueListenableBuilder<bool>(
+            valueListenable: widget.hostReady ?? _alwaysReady,
+            builder: (context, ready, _) {
+              if (!ready) return const SizedBox.shrink();
+              // 阅读器内：默认隐藏；用户开启「阅读时显示桌宠」才显示
+              if (widget.pet.readerActive && !widget.pet.showPetInReader) {
+                return const SizedBox.shrink();
+              }
+              return SizedBox(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                child: Stack(
+                  children: [
+                    Positioned(
+                      key: const ValueKey('pet_positioned'),
+                      left: snapLeft ? _dx : null,
+                      right: snapLeft
+                          ? null
+                          : constraints.maxWidth - _dx - _size,
+                      top: _dy,
+                      child: GestureDetector(
+                        onTap: _onTap,
+                        onDoubleTap: _onDoubleTap,
+                        onLongPress: _onLongPress,
+                        onPanStart: (_) {
+                          // 用户开始拖动 → 打断乱跑
+                          _stopRoamIfAny();
+                        },
+                        onPanUpdate: (details) {
+                          setState(() {
+                            _dx += details.delta.dx;
+                            _dy += details.delta.dy;
+                            // 拖拽摇晃：按水平拖动方向倾斜，±0.2 rad
+                            _tilt = (_tilt + details.delta.dx * 0.012).clamp(
+                              -0.2,
+                              0.2,
+                            );
+                          });
+                        },
+                        onPanEnd: (_) {
+                          final nx = maxX <= 0 ? 0.0 : _dx / maxX;
+                          final ny = maxY <= 0 ? 0.0 : _dy / maxY;
+                          widget.pet.setPosition(nx, ny);
+                          setState(() => _tilt = 0); // 松手回正（不做贴边吸附）
+                          _playNudge(); // 落地小跳
+                          _onDragEnd(); // 拖动台词 + 可能的生气
+                        },
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: snapLeft
+                              ? CrossAxisAlignment.start
+                              : CrossAxisAlignment.end,
+                          children: [
+                            if (_line != null)
+                              Container(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 200,
                                 ),
-                              ),
-                            ),
-                          AnimatedBuilder(
-                            animation: Listenable.merge([_bobber, _celebrate]),
-                            builder: (context, child) => Transform.translate(
-                              // 呼吸浮动 + 奔跑时的上下起伏
-                              offset: Offset(
-                                0,
-                                _bobber.value * 4 -
-                                    2 -
-                                    (_roaming && _runPhase == 1 ? 5 : 0),
-                              ),
-                              child: Transform.rotate(
-                                angle: _tilt,
-                                child: Transform.scale(
-                                  // 庆祝 / 小跳的弹跳缩放（1 → 1.12）；
-                                  // alignment = 缩放锚点（固定不动的边）：
-                                  // 贴右 → 锚右缘（向左/屏幕内扩张）；
-                                  // 贴左 → 锚左缘（向右/屏幕内扩张）——永不出屏
-                                  scale: 1 + _celebrate.value * .12,
-                                  alignment: nearRight
-                                      ? Alignment.bottomRight
-                                      : (nearLeft
-                                            ? Alignment.bottomLeft
-                                            : Alignment.bottomCenter),
-                                  child: child,
+                                // 气泡朝屏幕内侧生长：贴右留左距，贴左留右距
+                                margin: EdgeInsets.only(
+                                  bottom: 6,
+                                  left: snapLeft ? 4 : 0,
+                                  right: snapLeft ? 0 : 4,
                                 ),
-                              ),
-                            ),
-                            child: SizedBox(
-                              width: _size,
-                              height: _size,
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  // 摸头飘心（在人物下方，向上飘 + 淡出）
-                                  if (_showHearts)
-                                    Positioned.fill(
-                                      child: IgnorePointer(
-                                        child: _PetHearts(animation: _hearts),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.surface.withValues(alpha: .96),
+                                  borderRadius: BorderRadius.circular(14),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: .15,
                                       ),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 3),
                                     ),
-                                  AnimatedSwitcher(
-                                    duration: const Duration(milliseconds: 200),
-                                    child: Stack(
-                                      key: ValueKey<int>(_faceIndex),
-                                      fit: StackFit.expand,
-                                      children: [
-                                        // 轮廓阴影：同一张立绘染黑 + 模糊 + 轻微下移。
-                                        // 阴影形状跟随人物剪影（不是矩形投影，避免"黑圈"）。
-                                        Transform.translate(
-                                          offset: const Offset(0, 3),
-                                          child: ImageFiltered(
-                                            imageFilter: ui.ImageFilter.blur(
-                                              sigmaX: 2.5,
-                                              sigmaY: 2.5,
-                                            ),
-                                            child: ColorFiltered(
-                                              colorFilter: ColorFilter.mode(
-                                                Colors.black.withValues(
-                                                  alpha: .13,
-                                                ),
-                                                BlendMode.srcIn,
+                                  ],
+                                ),
+                                child: Text(
+                                  _line!,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            AnimatedBuilder(
+                              animation: Listenable.merge([
+                                _bobber,
+                                _celebrate,
+                              ]),
+                              builder: (context, child) => Transform.translate(
+                                // 呼吸浮动 + 奔跑时的上下起伏
+                                offset: Offset(
+                                  0,
+                                  _bobber.value * 4 -
+                                      2 -
+                                      (_roaming && _runPhase == 1 ? 5 : 0),
+                                ),
+                                child: Transform.rotate(
+                                  angle: _tilt,
+                                  child: Transform.scale(
+                                    // 庆祝 / 小跳的弹跳缩放（1 → 1.12）；
+                                    // alignment = 缩放锚点（固定不动的边）：
+                                    // 贴右 → 锚右缘（向左/屏幕内扩张）；
+                                    // 贴左 → 锚左缘（向右/屏幕内扩张）——永不出屏
+                                    scale: 1 + _celebrate.value * .12,
+                                    alignment: nearRight
+                                        ? Alignment.bottomRight
+                                        : (nearLeft
+                                              ? Alignment.bottomLeft
+                                              : Alignment.bottomCenter),
+                                    child: child,
+                                  ),
+                                ),
+                              ),
+                              child: SizedBox(
+                                width: _size,
+                                height: _size,
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    // 摸头飘心（在人物下方，向上飘 + 淡出）
+                                    if (_showHearts)
+                                      Positioned.fill(
+                                        child: IgnorePointer(
+                                          child: _PetHearts(animation: _hearts),
+                                        ),
+                                      ),
+                                    AnimatedSwitcher(
+                                      duration: const Duration(
+                                        milliseconds: 200,
+                                      ),
+                                      child: Stack(
+                                        key: ValueKey<int>(_faceIndex),
+                                        fit: StackFit.expand,
+                                        children: [
+                                          // 轮廓阴影：同一张立绘染黑 + 模糊 + 轻微下移。
+                                          // 阴影形状跟随人物剪影（不是矩形投影，避免"黑圈"）。
+                                          Transform.translate(
+                                            offset: const Offset(0, 3),
+                                            child: ImageFiltered(
+                                              imageFilter: ui.ImageFilter.blur(
+                                                sigmaX: 2.5,
+                                                sigmaY: 2.5,
                                               ),
-                                              child: Image.asset(
-                                                _petFaces[_faceIndex],
-                                                fit: BoxFit.contain,
+                                              child: ColorFiltered(
+                                                colorFilter: ColorFilter.mode(
+                                                  Colors.black.withValues(
+                                                    alpha: .13,
+                                                  ),
+                                                  BlendMode.srcIn,
+                                                ),
+                                                child: Image.asset(
+                                                  _petFaces[_faceIndex],
+                                                  fit: BoxFit.contain,
+                                                ),
                                               ),
                                             ),
                                           ),
-                                        ),
-                                        Image.asset(
-                                          _petFaces[_faceIndex],
-                                          fit: BoxFit.contain,
-                                        ),
-                                      ],
+                                          Image.asset(
+                                            _petFaces[_faceIndex],
+                                            fit: BoxFit.contain,
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }

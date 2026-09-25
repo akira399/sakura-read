@@ -7,9 +7,7 @@ import 'package:image/image.dart' as img;
 
 void main(List<String> args) {
   final src = args.isNotEmpty ? args[0] : 'docs/images/settings.png';
-  final outDir = args.isNotEmpty && args.length > 1
-      ? args[1]
-      : '/tmp/crops';
+  final outDir = args.isNotEmpty && args.length > 1 ? args[1] : '/tmp/crops';
   final im = img.decodeImage(File(src).readAsBytesSync());
   if (im == null) {
     print('DECODE_FAIL $src');

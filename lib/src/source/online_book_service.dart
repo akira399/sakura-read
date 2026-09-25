@@ -213,11 +213,52 @@ class OnlineBookService {
     '点此报错',
     '加入书签',
     '最新章节',
+    // 站点转载声明（常见于抓取失败的整页文本里）
+    '转载作品',
+    '网友上传',
+    '请记住本书',
+    '首发域名',
   ];
 
   static final RegExp _junkExact = RegExp(
     r'^[　\s]*(上一章|下一章|返回目录|目录|加入书签|章节报错|举报|书页|书架)[\s　]*$',
   );
+
+  /// 「导航短行」特征：≤12 字、且**全是**汉字/字母/数字（无标点、无空格）——
+  /// 站点菜单项都是干净短语，而正文句子几乎必然带标点。
+  static final RegExp _navLikeLine = RegExp(
+    r'^[\u4e00-\u9fa5A-Za-z0-9]{1,12}$',
+  );
+
+  /// 判断是否是站点导航残留（短行 + 命中栏目词）。
+  static bool _isNavResidue(String line) =>
+      _navLikeLine.hasMatch(line) && _navWords.any(line.contains);
+
+  /// 站点栏目词（命中即视为导航残留，仅对「导航短行」生效）。
+  static const List<String> _navWords = [
+    '首页',
+    '书架',
+    '排行榜',
+    '排行',
+    '分类',
+    '玄幻',
+    '武侠',
+    '都市',
+    '历史',
+    '网游',
+    '科幻',
+    '女生',
+    '完本',
+    '全部小说',
+    '最近更新',
+    '登录',
+    '注册',
+    '护眼',
+    '关灯',
+    '大中小',
+    '手机版',
+    '字体',
+  ];
 
   static final RegExp _domainWatermark = RegExp(
     r'([a-z0-9-]+\.)*(bqg\d*|biquge|biqg|qbtr|hkmtxt|shw\d*|ddtxt\d*|qbxs\d*|22biqu)\.[a-z]+',
@@ -226,7 +267,7 @@ class OnlineBookService {
 
   static final RegExp _trailingCode = RegExp(r'\s*\d{1,3}w\d{1,3}-\d{1,6}\s*$');
 
-  /// 清洗：去空行 / 水印行 / 行尾编号，保留段首全角缩进。
+  /// 清洗：去空行 / 水印行 / 导航行 / 行尾编号，保留段首全角缩进。
   static String cleanChapterText(String raw) {
     if (raw.isEmpty) return '';
     final text = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
@@ -244,6 +285,10 @@ class OnlineBookService {
       }
       if (skip) continue;
       if (_junkExact.hasMatch(l)) continue;
+      // 站点阅读器的工具条（“字体：大 中 小 护眼 关灯”）——整行特征明显
+      if (l.contains('护眼') && l.contains('关灯')) continue;
+      // 导航短行兜底：短、无标点、且命中栏目词 → 视为菜单残留
+      if (_isNavResidue(l.trim())) continue;
       if (l.length < 60 && _domainWatermark.hasMatch(l)) continue;
       l = l.replaceAll(_trailingCode, '').trimRight();
       if (l.trim().isEmpty) continue;

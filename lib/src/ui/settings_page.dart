@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../app_info.dart';
 import '../data/book_store.dart';
 import '../data/pet_store.dart';
 import '../data/prefs.dart';
 import '../data/stats_store.dart';
+import '../platform/url_launcher.dart';
 import '../source/source_store.dart';
 import '../util/format.dart';
 import 'reader/reader_page.dart';
@@ -489,7 +491,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 4),
           Text(
-            'v1.3.1 · 本地 + 在线小说阅读器',
+            'v${AppInfo.version} · 本地 + 在线小说阅读器',
             style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
@@ -502,6 +504,63 @@ class _SettingsPageState extends State<SettingsPage> {
               height: 1.6,
             ),
           ),
+          const SizedBox(height: 14),
+          // 开源信息
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: .5),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.code_rounded, size: 15, color: scheme.primary),
+                    const SizedBox(width: 6),
+                    const Text(
+                      '开源信息',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _aboutRow(context, '作者', AppInfo.author),
+                _aboutRow(context, '许可证', AppInfo.license),
+                _aboutRow(
+                  context,
+                  '项目主页',
+                  'github.com/akira399/sakura-read',
+                  onTap: () async {
+                    final ok = await launchUrlString(AppInfo.repo);
+                    if (!context.mounted || ok) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('没有找到可用的浏览器'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            '声明：本软件是阅读工具，不提供、不分发任何书籍内容；\n'
+            '通过书源获取的正文来自第三方网站，版权归原作者所有。',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 10.5,
+              height: 1.7,
+              color: scheme.onSurfaceVariant.withValues(alpha: .8),
+            ),
+          ),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -509,13 +568,55 @@ class _SettingsPageState extends State<SettingsPage> {
               Icon(Icons.favorite_rounded, size: 14, color: scheme.primary),
               const SizedBox(width: 6),
               Text(
-                '用 Flutter 构建 · 由 Operit 制作',
+                '用 Flutter 构建 · Made by ${AppInfo.author}',
                 style: TextStyle(
                   fontSize: 11.5,
                   color: scheme.onSurfaceVariant,
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 关于卡里的一行「键 - 值」（值可按需点击）。
+  Widget _aboutRow(
+    BuildContext context,
+    String label,
+    String value, {
+    VoidCallback? onTap,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final valueStyle = TextStyle(
+      fontSize: 11.5,
+      color: onTap == null ? scheme.onSurfaceVariant : scheme.primary,
+      decoration: onTap == null ? null : TextDecoration.underline,
+      decorationColor: scheme.primary.withValues(alpha: .5),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 58,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: scheme.onSurfaceVariant.withValues(alpha: .75),
+              ),
+            ),
+          ),
+          Expanded(
+            child: onTap == null
+                ? Text(value, style: valueStyle)
+                : GestureDetector(
+                    onTap: onTap,
+                    child: Text(value, style: valueStyle),
+                  ),
           ),
         ],
       ),

@@ -296,6 +296,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       }
       text = lines.join('\n');
     }
+    // 章节标题：在线阅读的正文容器不含标题、部分 EPUB 也不含 →
+    // 正文开头若找不到标题，就在文首补一行（TXT 自带标题时自动去重）。
+    final title = (_book?.chapters[chapterIndex].title ?? '').trim();
+    if (title.isNotEmpty && text.isNotEmpty) {
+      final head = text
+          .split('\n')
+          .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
+      String squash(String s) => s.replaceAll(RegExp(r'[\s\u3000]+'), '');
+      final h = squash(head);
+      final t = squash(title);
+      final probe = t.length < 6 ? t : t.substring(0, 6);
+      if (probe.isNotEmpty && !h.startsWith(probe)) {
+        text = '$title\n\n$text';
+      }
+    }
     _processedCache[key] = text;
     if (_processedCache.length > 6) {
       _processedCache.remove(_processedCache.keys.first);
