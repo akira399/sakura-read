@@ -1,198 +1,316 @@
-# 樱读（Sakura Read）
+<div align="center">
 
-二次元风格的 Android 小说阅读器：支持 TXT / EPUB 本地阅读；兼容「阅读 3.0」书源，搜书 → 详情 → 目录 → 正文全链路在线阅读。基于 Flutter 构建。
+<img src="docs/images/banner.png" alt="樱读 Sakura Read" width="100%"/>
 
-🎀 **自带看板娘**：粉发少女——Q 版 App 图标、樱花树下开屏立绘、空书架互动表情包、时段问候语、6 张 AI 场景默认封面，全部由 AI 素材管线产出（详见下文）。
+# 樱读 · Sakura Read
 
-## 功能一览
+**在樱花树下，慢慢读完一本书。**
 
-- **书架**：网格封面（真实封面 / 6 张 AI 场景默认封面按书名稳定分配）、阅读进度胶囊、搜索、各类排列方式、长按菜单、最近阅读；顶部看板娘头像（点按换台词）+ 时段问候语
-  - **排列方式**（右上角「≡」图标）：6 种排序（最近阅读 / 添加时间 / 书名 / 作者 / 阅读进度 / 字数）× 正序 / 倒序 × 3 种样式（网格 / 小图 / 列表），选择自动记忆
-- **朗读（TTS）**：系统语音合成朗读正文——按段落播报、播放/暂停/停止、上/下一段、语速与音调可调；朗读时自动跟随（翻页/滚动到正在读的位置）；读完整章自动连播下一章；无可用引擎时给出安装引导
-- **看板娘桌宠**（全局悬浮）：**自由拖动**（不自动贴边，拖到哪停在哪；拖动时有倾斜摇晃 + 落地小跳 + 随机台词）、位置记忆、呼吸浮动动画；**点击**在屏幕内随机弧线蹦跳 + 可爱台词 + 亲密度（+1）；**双击**摸头（+2 亲密度 + 害羞差分 + 头顶飘心）；**长按**打开养成面板；深夜或长时间未互动自动打瞌睡（睡容差分，一碰就醒）
-  - **生气系统**：拖动（**概率很低，只有频繁拖动才明显**）/ 睡觉被叫醒（必定）/ 频繁点击 → 生气差分 + 专属台词；**生气不涨亲密度**
-  - **奔跑乱跑**：会自己在屏幕上到处跑（小步起伏 + 弧线路径 + 前倾），主界面低频、**阅读时高频捣乱**（配专属台词）
-  - **隐藏彩蛋**：**第 4 次起**生气才有概率触发（概率随次数递增）→ 全屏黑幕锁定，阴沉脸桌宠 + "你以为我是好惹的？" + 鲜红血字"小樱禁止你使用该软件"（返回键也被拦截）
-  - **透明立绘**：背景已去除（算法抠图 + 边缘羽化），只显示人物本身；轮廓阴影（非矩形投影）
-  - **显示时机**：开屏动画结束 + 权限就绪后才出现（不会提前打扰开屏）
-  - **阅读时也显示**：阅读设置面板 / 软件设置 都有开关（开启后她会在你书页上跑来跑去）
-  - **新手引导**：首次启动小樱带着走一遍核心入口（自我介绍 → **在线搜书** → 点返回 → **导入本地书** → 最近 → 设置），开头可跳过；
-    - 支持**跨页面引导**：点放大镜进搜索页后小樱继续提示返回；搜索页是**自由参观**步——想先搜本书再返回完全 OK，不会被催；
-    - 点目标即推进、**系统返回键关页也算完成**；不按指引点会**劝导 5 次**（语气逐次变差），**第 6 次直接锁屏**
-  - **亲密度系统**：7 级阶梯（初遇 → 相识 → 书友 → 好友 → 知己 → 亲密 → 挚爱）；点击互动 +1/次（每日上限 20）；摸头 +2/次（每日上限 10）；投喂点心 +5~+20
-  - **等级台词**：台词随亲密度等级分档变化（初遇时客气 → 挚爱时亲昵），共 7 档 21 句
-  - **点心获取**：只靠阅读时长兑换——樱饼🍪（20 分钟）/ 团子🍡（1 小时）/ 大福🍓（5 小时）/ 蛋糕🍰（20 小时）；每天首次阅读额外送 1 个团子；点心到手桌宠主动冒泡提醒
-- **导入**：内置文件浏览器多选导入；自动识别编码与章节；支持批量扫描常见目录
-- **书源（阅读 3.0 兼容）**：导入书源 JSON（文件 / 粘贴 / 订阅链接）、启停 / 删除 / 导出；多源并发搜书（8 并发、单源 15s 超时、错误隔离、限流）
-  - **内置源为「公版内容源」**（中文维基文库，已进入公有领域的古籍文献，CC BY-SA，无版权风险）：搜「论语」「红楼梦」「唐诗」等即可阅读；现代网文请自行导入书源
-  - 历史版本内置的第三方聚合源会在升级时**自动清理**（用户自己导入的同地址源不受影响）
-- **在线阅读**：搜到书 → 详情页（封面 / 作者 / 简介 / 完整目录）→ 一键加入书架 → 正文阅读；断点续读 / 进度与本地书一致；正文经隐藏浏览器渲染，可穿透 JS 令牌墙等反爬；**多源搜索结果自动合并 + 相关性排序（完全匹配优先）；搜索详情页 / 书架详情页 / 阅读器内均可一键换源（保留进度）**
-- **TXT 解析**：UTF-8 / UTF-16 / GBK 自动探测；章节正则（第 N 章·回·节·卷·篇·话 + 序章 / 楔子 / 番外 + Chapter N）；正文误报防护
-- **EPUB 解析**：EPUB2（NCX）/ EPUB3（nav）双目录；封面自动提取；HTML 转纯文本
-- **阅读器**：
-  - 四种翻页：滑动 / 覆盖（对照阅读 3.0 CoverPageDelegate 逐行移植：跟手滑出、显式裁剪、前缘 30px 渐变投影；**页面全屏出血，翻页时内容覆盖到屏幕最左 / 最右边缘**）/ 淡入 / 滚动（竖向连续）
-  - 内置字体「霞鹜文楷」（LXGW WenKai Lite，OFL-1.1），另有宋体 / 黑体 / 等宽 / 系统默认
-  - 字号 / 行距 / 字距 / 页边距 / 首行缩进可调；6 种阅读背景（纸白 / 米黄 / 护眼绿 / 浅灰 / 夜间 / 纯黑）
-  - 页眉章节名、页脚「时间 · 页码 / 进度 · 电量」沉浸式状态信息（呼出菜单时自动淡出）
-  - 跨章连页：翻越章界与常规翻页同样顺滑（相邻章节静默预加载，落稳后无痕落章）
-  - 目录跳章、进度滑块、上一章 / 下一章、阅读进度自动保存、屏幕常亮
-  - **日夜一键切换**（阅读设置面板内，阅读背景 + 全局主题同步、记住日间背景）
-  - **书签**：收藏当前位置 / 列表查看 / 一键跳回 / 删除（同位置自动判重），设置页可跨书总览
-  - **阅读统计**：累计时长 / 最近 7 天柱状图 / 连续阅读天数 / 读完书数（前台活跃计时，单次 ≤90s 防挂机）
-- **外观**：樱粉 + 薰衣草主题、5 种主题色、浅 / 深 / 跟随系统（设置页悬浮按钮一键切换）、樱花花瓣飘落；**Q 版看板娘 App 图标**（自适应图标 + Android 13 主题图标）；冷启动「樱花树下美少女」开屏（赛璐璐动画风立绘 + 花瓣飘落 + 标题浮现）；**空书架互动看板娘**（点击切换 6 张 Q 版表情 + 台词气泡）
-- **存储**：书架数据本地 JSON 持久化
+一款**二次元风格的 Android 小说阅读器**：本地 TXT / EPUB 阅读 + 兼容「阅读 3.0」书源的在线搜书，自带一只会撒娇、会生气、还会捣乱的**看板娘桌宠**。
 
-## 技术方案
+[![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-lightgrey?logo=android)]()
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)]()
+[![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-193%20passed-brightgreen)]()
+[![Analyze](https://img.shields.io/badge/analyze-0%20issues-brightgreen)]()
 
-- Flutter stable + Dart 3
-- 依赖：`archive`（EPUB 解包）、`xml` / `html`（EPUB 解析）、`fast_gbk`（GBK 解码）、`http`（书源网络请求）、`webview_flutter`（在线正文渲染）
-- 原生桥（MethodChannel `sakuramanga/native`，见 `android/.../MainActivity.kt`）：
-  - `hasStoragePermission` / `requestStoragePermission`：所有文件访问权限（Android 11+ 走系统设置页）
-  - `setKeepScreenOn`：阅读时常亮（FLAG_KEEP_SCREEN_ON）
-  - `getStorageRoot` / `getDirs`：存储根目录与 App 私有目录
-  - `getBattery`：页脚电量（读取系统粘性广播，无需第三方插件）
-- **隐藏 WebView 正文引擎**（`webview_flutter`）：App 根部挂 1×1 像素、不可交互的 WebView；打开章节页后等待 JS 跑完（令牌墙 / SPA 路由 / 加密接口全由页面自身完成），从渲染后的 DOM 抽取正文并清洗水印
+[功能特性](#-功能特性) · [截图预览](#-截图预览) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
 
-## 目录结构
+</div>
+
+---
+
+## ✨ 为什么是「樱读」？
+
+市面上的阅读器很多，但我们想做的不只是一款"能看书"的工具：
+
+- 🎀 **她是活的** —— 一位粉发看板娘陪着你：会跟你打招呼、被你拖来拖去、看书时在你书页上跑来跑去，惹急了还会……（彩蛋自己找）
+- 🌸 **她是漂亮的** —— 从图标、开屏、封面到空书架，整套日系赛璐璐上色的二次元皮肤，由 AI 素材管线精心打磨
+- 📖 **她是很能干的** —— TXT / EPUB 全格式、4 种翻页、TTS 朗读、书签统计、多源搜书、一键换源，该有的一个不少
+- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（193 项自动化测试），欢迎你来改
+
+---
+
+## 🎀 自带看板娘「小樱」
+
+| 能力 | 说明 |
+| --- | --- |
+| 🌸 **全局悬浮** | 自由拖动（拖到哪停在哪）、位置记忆、呼吸浮动，拖动时有摇晃感 + 落地小跳 + 随机台词 |
+| 💬 **点击互动** | 屏幕内随机弧线蹦跳 + 可爱台词 + 亲密度 +1（每日上限 20） |
+| 🫶 **双击摸头** | 害羞差分 + 头顶飘心 + 亲密度 +2（每日上限 10） |
+| 😴 **打瞌睡** | 深夜时段或长时间无互动自动入睡（睡容差分），一碰就醒 |
+| 😠 **生气系统** | 被反复拖动 / 睡觉被叫醒 / 频繁点击 → 生气表情 + 专属台词（**生气不涨好感度**） |
+| 🏃 **奔跑乱跑** | 会自己在屏幕上到处跑（小步起伏 + 弧线路径 + 前倾），**阅读时高频捣乱** |
+| 🍡 **点心投喂** | 只靠阅读时长兑换：樱饼（20 分）/ 团子（1 时）/ 大福（5 时）/ 蛋糕（20 时） |
+| 💗 **亲密度 7 级** | 初遇 → 相识 → 书友 → 好友 → 知己 → 亲密 → 挚爱，台词随等级变化（7 档 21 句） |
+| 🖤 **隐藏彩蛋** | 生气第 4 次起才有概率触发……触发之后嘛，自己去看（提示：返回键也没用） |
+
+<div align="center">
+
+<img src="docs/images/faces.png" alt="看板娘表情差分" width="96%"/>
+
+</div>
+
+<div align="center">
+<img src="docs/images/mascot.png" alt="桌宠悬浮在书架上" width="28%"/>
+&nbsp;&nbsp;
+<img src="docs/images/shelf_empty.png" alt="空书架的看板娘" width="28%"/>
+</div>
+
+> 看板娘的每一次点击、每一次拖动，都可能换来一个新的表情与台词。
+
+---
+
+## 📖 功能特性
+
+### 📚 书架 & 本地阅读
+
+- **格式支持**：TXT（UTF-8 / UTF-16 / GBK 自动探测）、EPUB（EPUB2 NCX / EPUB3 nav 双目录解析 + 封面提取）
+- **导入方式**：内置文件浏览器多选导入、批量扫描常见目录
+- **排列方式**：6 种排序（最近阅读 / 添加时间 / 书名 / 作者 / 阅读进度 / 字数）× 正序倒序 × 3 种样式（网格 / 小图 / 列表）
+- **智能封面**：优先真实封面；无封面时按书名稳定分配 6 张 AI 场景插画
+
+### 📖 沉浸式阅读器
+
+- **四种翻页**：滑动 / 覆盖（跟手滑出 + 前缘投影，对照阅读 3.0 逐行移植）/ 淡入 / 滚动
+- **排版调节**：字号 / 行距 / 字距 / 页边距 / 首行缩进；内置「霞鹜文楷」字体 + 4 种备选
+- **6 种背景**：纸白 / 米黄 / 护眼绿 / 浅灰 / 夜间 / 纯黑，日夜间一键切换（全局主题同步）
+- **跨章连页**：翻越章界与常规翻页同样顺滑（相邻章节静默预加载）
+- **页眉页脚**：章节名 / 时间 / 页码进度 / 电量，沉浸在状态栏里
+- **书签系统**：阅读器内收藏 + 设置页跨书总览 + 一键跳回
+- **阅读统计**：累计时长 / 最近 7 天柱状图 / 连续阅读天数 / 读完书数
+
+### 🔊 语音朗读（TTS）
+
+- 系统语音合成按段落朗读，播完自动下一段
+- 播放 / 暂停 / 停止、上下一段、**语速与音调实时调节**
+- **朗读自动跟随**：翻页 / 滚动到正在读的位置
+- **读完整章自动连播下一章**
+- 无可用引擎时给出可操作的安装引导
+
+### 🌐 在线搜书（兼容「阅读 3.0」书源）
+
+- **书源管理**：导入 JSON（文件 / 粘贴 / 订阅链接）、启用停用、删除、导出
+- **多源并发搜索**：8 并发、单源 15s 超时、错误隔离、限流
+- **智能合并排序**：同名同作者结果自动合并为一条，按相关性排序（完全匹配优先）
+- **一键换源**：搜索详情页 / 书架详情页 / 阅读器内三处入口，换源保留阅读进度
+- **隐藏浏览器引擎**：1×1 像素的隐藏 WebView 渲染，穿透 JS 令牌墙 / SPA 路由 / 加密接口
+- **内置书源**：公版内容源（中文维基文库）+ 第三方聚合源（好看吗 / 笔趣阁）
+
+### 🎨 外观 & 主题
+
+- 樱粉 + 薰衣草配色，5 种主题色可选，浅色 / 深色 / 跟随系统
+- 樱花花瓣飘落动画、Q 版看板娘 App 图标（含 Android 13+ 主题图标）
+- 冷启动「樱花树下美少女」开屏动画
+
+---
+
+## 📸 截图预览
+
+<div align="center">
+
+| 书架 | 阅读器（日间） | 阅读器（夜间） |
+|:---:|:---:|:---:|
+| <img src="docs/images/shelf.png" width="220"/> | <img src="docs/images/reader_day.png" width="220"/> | <img src="docs/images/reader_night.png" width="220"/> |
+| 最近阅读 | 设置 | 在线搜书 |
+| <img src="docs/images/recent.png" width="220"/> | <img src="docs/images/settings.png" width="220"/> | <img src="docs/images/search_idle.png" width="220"/> |
+| 开屏动画 | 空书架看板娘 | 隐藏彩蛋 |
+| <img src="docs/images/splash.png" width="220"/> | <img src="docs/images/shelf_empty.png" width="220"/> | <img src="docs/images/egg.png" width="220"/> |
+
+</div>
+
+---
+
+## 🖼️ App 图标
+
+<div align="center">
+<img src="docs/images/icon_showcase.png" alt="图标展示" width="80%"/>
+</div>
+
+Q 版看板娘头像，三种形态（方形 / 圆角 / 圆形）+ 自适应图标（前景层 / 背景层）+ Android 13+ 主题图标（纯白剪影）。
+
+---
+
+## 📲 下载安装
+
+### 直接下载 APK
+
+前往 [Releases](../../releases/latest) 页面下载最新版 APK，安装即可。
+
+> 也可以在 `Download/樱读-vX.Y.Z.apk` 找到构建产物（自行构建时）。
+
+**系统要求**：Android 7.0（API 24）及以上
+
+### 首次使用
+
+1. 跟随引导授予「所有文件访问」权限
+2. 点右下角「＋」导入本地 TXT / EPUB（或扫描常见目录）
+3. 在线看书：点书架右上角放大镜 → 输入书名 → 点结果进详情页 → 「加入书架」
+
+---
+
+## 🛠️ 从源码构建
+
+### 环境要求
+
+- [Flutter](https://flutter.dev) stable 分支（Dart 3）
+- Android SDK + NDK
+- Java 17
+
+### 构建步骤
+
+```bash
+# 1) 拉取依赖
+flutter pub get
+
+# 2) 静态检查
+flutter analyze
+
+# 3) 运行测试（193 项）
+flutter test
+
+# 4) 构建 release APK（单架构 arm64 体积最小）
+flutter build apk --release --target-platform android-arm64
+```
+
+产物：`build/app/outputs/flutter-apk/app-release.apk`
+
+> 一键发布脚本：`./tool/release.sh`（格式化 → 检查 → 测试 → 构建）
+> CI：`.github/workflows/ci.yml` 会在 push / PR 时自动跑同样的检查并产出 APK。
+
+---
+
+## 🧪 测试
+
+| 项目 | 状态 |
+| --- | --- |
+| `flutter analyze` | ✅ No issues found |
+| `flutter test` | ✅ **193 项全部通过** |
+
+覆盖范围：
+
+- **书源引擎**：规则拆分 / CSS / JSONPath / XPath / 正则 / URL 模板夹具测试
+- **书源网络层**：编码探测 / 超时 / Cookie / 限流 / 多源并发（MockClient 离线）
+- **内置书源**：「令牌 + POST」搜索链路（Mock 复刻站点校验）+ 4 个源的真实夹具解析
+- **TXT**：编码探测、章节切分、无章节回退、误报防护
+- **EPUB**：EPUB3 元数据 / nav 目录 / 封面 / 正文
+- **桌宠**：状态机（生气门槛与概率）、亲密度、点心、每日上限、时段问候
+- **新手引导**：流程推进 / 跳过 / 劝导 / 跨页锚点
+- **阅读器**：覆盖翻页像素级回归、翻页吸附物理
+- **UI 渲染**：引导层 / 彩蛋层（防止 `Positioned` 类布局崩溃回归）
+
+> 另有**真实联网冒烟**（人工执行，不随 CI 跑）：
+> `flutter test tool/live/live_sources_test.dart`
+
+---
+
+## 🗂️ 项目结构
 
 ```
 lib/
 ├── main.dart
 └── src/
     ├── app.dart                  # MaterialApp / 主题装配
-    ├── data/                     # 数据层
-    │   ├── models.dart           # Book / ChapterRef 模型
-    │   ├── book_store.dart       # 书架存储（JSON 持久化 + 进度）
-    │   ├── book_source.dart      # TXT / EPUB 内容读取
-    │   ├── txt_parser.dart       # TXT 编码探测 + 章节切分
-    │   ├── epub_parser.dart      # EPUB 元数据 / 目录 / 封面 / 正文
-    │   ├── paginator.dart        # 分页测量器（TextPainter 二分测量）
-    │   ├── file_scan.dart        # 常见目录扫描
-    │   ├── natural_sort.dart     # 自然排序（第2章 < 第10章）
-    │   └── prefs.dart            # 应用与阅读设置
+    ├── data/                     # 数据层（书架 / 解析 / 设置 / 桌宠 / 统计）
     ├── platform/native_bridge.dart
-    ├── source/                   # 书源引擎（规则分析 / 请求层 / 并发搜索 / 详情目录解析 / 隐藏浏览器正文引擎）
+    ├── source/                   # 书源引擎（规则 / 请求 / 并发搜索 / 隐藏浏览器）
     ├── theme/app_theme.dart      # 二次元主题（樱粉 + 薰衣草）
-    ├── util/format.dart
-    └── ui/
-        ├── home_page.dart        # 底部导航（书架 / 最近 / 设置）
-        ├── shelf_page.dart       # 书架 + 导入流程
-        ├── book_detail_page.dart # 书籍详情（模糊封面头图）
-        ├── recent_page.dart      # 最近阅读
-        ├── settings_page.dart    # 设置
-        ├── folder_picker_page.dart      # 内置文件浏览器
-        ├── storage_permission_page.dart # 权限引导
+    └── ui/                       # 页面与组件
+        ├── home_page.dart        # 底部导航
+        ├── shelf_page.dart       # 书架 + 导入
+        ├── reader/               # 沉浸式阅读器
         ├── source/               # 书源管理 / 在线搜书 / 在线书详情
-        ├── widgets/              # cute.dart / sakura_petals.dart / book_cover.dart / battery_badge.dart
-        └── reader/
-            ├── reader_page.dart  # 沉浸式阅读器（4 种翻页模式）
-            └── reader_settings_panel.dart  # 阅读设置面板
+        └── widgets/              # 桌宠 / 花瓣 / 封面 / 引导层
 
 tool/
-├── make_fixtures.py              # 生成测试用 TXT / EPUB 素材
-├── make_icon.py                  # 生成 App 图标（legacy + 自适应 + 单色 + 启动 logo）
-├── artwork/                      # AI 素材管线
-│   ├── manifest_wave*.json       # 各批次生成任务（prompt / 模型 / seed / 负面词）
-│   ├── prompts/                  # 提示词
-│   └── src/                      # 生产用源图（如 Q 版图标源）
-├── sf_batch.py                   # 硅基流动批量文生图（需自备 API Key）
-├── sf_image.sh                   # 单张生成
-├── vlm_look.py / vlm_compare.py  # 用视觉模型质检 / 对比素材
-├── shrink_images.dart            # 素材压缩（控制 APK 体积）
-└── wait_for.sh                   # 有界等待助手（检查后台任务完成）
+├── screenshots/                  # README 截图生成器（离线渲染）
+├── live/                         # 真实联网冒烟测试
+├── make_fixtures.py              # 测试素材生成
+├── artwork/                      # AI 素材管线（提示词 / 源图 / 候选）
+├── sf_batch.py                   # 批量文生图（需自备 API Key）
+├── vlm_look.py                   # 视觉模型质检
+└── release.sh                    # 一键发布
 ```
 
-## 构建与运行
+---
 
-> 本仓库自带的 `android/setup_android_env.sh` 可完成 Flutter / Android SDK / Gradle 环境初始化（含 ARM64 主机的模拟适配）。
+## ❓ 常见问题
 
-```bash
-bash android/setup_android_env.sh   # 1) 环境（首次）
+<details>
+<summary><b>搜不到书 / 某本书打不开？</b></summary>
 
-export PATH="$HOME/flutter/bin:$PATH"
-flutter pub get                     # 2) 依赖与检查
-flutter analyze
-flutter test
+第三方书源站点经常改版、关闭或换域名，这是常态。可以：
 
-flutter build apk --release --target-platform android-arm,android-arm64   # 3) 构建 APK
-```
+1. 在「设置 → 书源管理」停用失效的源
+2. 导入你自己的书源（支持「阅读 3.0」格式）
+3. 换源：在书籍详情页 / 阅读器内一键切换到其它源
+</details>
 
-产物：`build/app/outputs/flutter-apk/app-release.apk`
+<details>
+<summary><b>朗读没有声音？</b></summary>
 
-### ARM64 主机的两个已知环境补丁（本机已应用）
+需要系统安装 TTS 引擎并设为默认。可在「系统设置 → 无障碍 → 文字转语音」中检查。App 检测不到引擎时会给出安装引导。
+</details>
 
-1. **gen_snapshot**：ARM64 主机上 Android release AOT 需要 linux-arm64 版 gen_snapshot，
-   引擎包未附带，已用 box64 包装：
-   `android-{arm,arm64}-release/linux-arm64/gen_snapshot` → `box64 .../linux-x64/gen_snapshot`
-2. **libflutter.so 未 strip**（导致 APK 从 37MB 膨胀到 330MB+）：已对以下位置的
-   `libflutter.so` 做 `strip --strip-unneeded` 替换：
-   - `bin/cache/artifacts/engine/android-*-release/flutter.jar`
-   - Gradle 模块缓存 `io.flutter:arm64_v8a_release` / `io.flutter:armeabi_v7a_release`
+<details>
+<summary><b>不想让桌宠在阅读时跑来跑去？</b></summary>
 
-> 上述补丁作用于 **Flutter SDK / Gradle 缓存**，不在仓库内；
-> 随附的 `android/tools/`（aapt2 等平台专用二进制）同样属于本机适配产物，
-> 已在 `.gitignore` 中排除，**克隆仓库后无需这些文件即可在 x86_64 主机正常构建**。
+阅读器底栏「设置」面板或软件设置页都有「阅读时显示桌宠」开关，关掉即可。
+</details>
 
-### 一键发布
+<details>
+<summary><b>怎么关闭「新手引导」？</b></summary>
 
-```bash
-./tool/release.sh              # 格式化 → analyze → test → 构建 APK
-./tool/release.sh --no-build   # 只跑检查与测试
-```
+引导只在首次启动出现，右上角有「跳过引导」按钮。跳过或看完后都不会再出现。
+</details>
 
-CI（`.github/workflows/ci.yml`）会在 push / PR 时执行同样的检查并产出 APK 工件。
+---
 
-## 安装
+## 🎨 关于美术素材
 
->APK 位于 `Download/樱读-v1.3.14.apk`，安装后：
+看板娘与全部插画由 **AI 生成管线**生产（见 `tool/artwork/`），流程：
 
-1. 跟随引导授予「所有文件访问」权限
-2. 点「＋」导入 TXT / EPUB（或扫描常见目录）
-3. 打开小说即可阅读；进度、字体、背景等会自动记录
-4. 在线看书：书架「＋」→ 在线搜书 → 输入书名 → 点结果进详情页 → 「加入书架」/「开始阅读」
+**批量文生图 → 视觉模型质检 → 人工筛选 → 压缩入库 → 算法抠图（去背景）**
 
-- 最低支持：Android 7.0（minSdk 24）
-- 包名：`com.operit.sakuraread`
+- 生成模型：[硅基流动](https://siliconflow.cn) 平台的 `Qwen-Image` / `Z-Image` 等
+- 质检模型：`Qwen3-VL-32B-Instruct`（风格核验 / 缺陷检查 / 角色一致性）
+- 风格锁定：**日本电视动画赛璐璐上色**（负面词排除「写实 / 3D / 厚涂 / 电影感」）
 
-## 测试
+---
 
-- `flutter analyze`：No issues found
-- `flutter test`：**193 项全部通过**
-  - 桌宠状态机（`pet_mood`）：频繁点击判定、**第 4 次生气的锁屏门槛与递增概率**、拖动低概率、台词池完整性
-  - 桌宠资源（`pet_store`）：亲密度 / 点心 / 每日上限 / 位置记忆 / 阅读时长兑换
-  - 新手引导（`pet_guide`）：**流程长度、逐步推进、跳过、劝导 5 次、第 6 次锁屏、锚点缺失软化**
-  - 内置书源（`source_builtin`）：**「令牌 + POST」搜索链路（Mock 复刻站点校验）、四个内置源的真实页面/接口夹具解析**
-  - 书源升级（`source_store_legacy`）：首启全量导入、legacy 清理机制、幂等、保留用户启停
-  - 书源引擎：规则拆分 / CSS / JSONPath / XPath / 正则 / URL 模板 夹具测试
-  - 书源网络层：编码探测 / 超时 / Cookie / 限流 / 多源并发（MockClient 离线测试）
-  - TXT：UTF-8 / GBK 编码探测、章节切分、无章节回退、误报防护
-  - EPUB：EPUB3 元数据 / nav 目录 / 封面 / 正文
-  - 覆盖翻页像素级回归测试（钉住页裁剪 / 前缘投影）
-  - 翻页吸附物理（固定速率 300ms/页、短距 110ms 收敛、无二次微调循环）
-  - 应用启动 widget 测试
+## ⚖️ 免责声明与合规
 
-> 另有**真实联网冒烟**（人工执行，不随 CI 跑）：`flutter test tool/live/live_sources_test.dart`
-> —— 对内置源跑一次真实搜索，验证线上链路可用（无网络时自动跳过）。
+- 本项目是**阅读工具**，**不捆绑、不分发、不存储任何受版权保护的书籍内容**
+- 内置书源包含公版内容源（中文维基文库，CC BY-SA）与第三方聚合源；
+  **第三方源的所有内容版权归原站与原作者所有**，本项目仅提供索引与阅读工具，
+  请支持正版阅读
+- 用户自行导入的书源与内容，由用户自行承担相应的合规责任
+- 书源 JSON 格式兼容「阅读 3.0」（Legado），**代码为独立 Dart 实现**，未复制任何 GPL 代码
 
-## 看板娘 & AI 素材
+---
 
-看板娘全部素材由 AI 生成管线生产（工具见 `tool/`），流程：**批量文生图 → 视觉模型质检 → 压缩入库 → 算法抠图（去背景）**。
+## 🤝 参与贡献
 
-- 生成模型：[硅基流动](https://siliconflow.cn) 平台上的 `Qwen/Qwen-Image`、`Tongyi-MAI/Z-Image(-Turbo)`、`Kwai-Kolors` 等
-- 质检模型：`Qwen/Qwen3-VL-32B-Instruct`（风格核验 / 缺陷检查 / 角色一致性对比）
-- 关键提示词手法：锁定「日本电视动画赛璐璐上色」+ 负面词排除「写实 / 3D / 厚涂 / 电影感」
-- 素材清单：Q 版表情 ×6（含生气 / 阴沉差分）、开屏立绘 ×1、默认场景封面 ×2、桌宠透明立绘 ×8、App 图标全套（`assets/images/`）
-- App 图标三层齐全：legacy 圆角方形 + 自适应前景/背景 + **Android 13+ 主题图标（monochrome 白色人物剪影）**
+欢迎提交 Issue 与 PR！请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-> 复现管线需要自备硅基流动 API Key（工具从 `/tmp/sf_key` 读取，**Key 不入库**）。
+- 🐛 [报告 Bug](../../issues/new)
+- 💡 [功能建议](../../issues/new)
+- 📖 更新日志：[CHANGELOG.md](CHANGELOG.md)
 
-## 许可
+---
 
-- **代码**：MIT License（见 `LICENSE`）
-- **字体**：内置「霞鹜文楷 Lite」（LXGW WenKai Lite，作者 LXGW），遵循 SIL Open Font License 1.1（全文见 `assets/fonts/OFL.txt`）
-- **AI 生成素材**：由上述生成模型产出，随本仓库一并以 MIT 许可分发
-- **内置书源**：当前内置 4 个——**公版内容源**（中文维基文库 ×2，内容 CC BY-SA 4.0）
-  与 **第三方聚合源**（好看吗 / 笔趣阁，搜索采用「令牌 + POST」链路）。
-  第三方源内容版权归原站所有，仅供索引与个人阅读使用；站点失效时可在「书源管理」
-  停用或删除，用户自行导入的书源由用户自行承担合规责任。
-- **开源仓库**中的 `tool/artwork/candidates`、`tool/probe_out`、`tool/shots` 等**中间产物不入库**（见 `.gitignore`）
+## 📄 许可证
+
+- **代码**：[MIT License](LICENSE)
+- **字体**：内置「霞鹜文楷 Lite」（LXGW WenKai Lite，OFL-1.1）
+- **AI 生成素材**：随本仓库一并以 MIT 许可分发
+
+---
+
+<div align="center">
+
+**⭐ 如果这个项目让你会心一笑，就给小樱点个 Star 吧~**
+
+<img src="docs/images/mascot.png" width="120"/>
+
+</div>

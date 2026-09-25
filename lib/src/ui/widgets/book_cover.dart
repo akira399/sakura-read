@@ -88,93 +88,115 @@ class GeneratedCover extends StatelessWidget {
           colors: colors,
         ),
       ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 默认封面插画（按书名稳定选取；加载失败则退回渐变底）
-          Positioned.fill(
-            child: Image.asset(
-              _coverAssets[_titleHash % _coverAssets.length],
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => const SizedBox.shrink(),
-            ),
-          ),
-          // 底部渐暗遮罩，保证书名可读
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: 108,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0x00000000), Color(0x73000000)],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 小尺寸封面（列表缩略图 44×60 等）自适应：
+          // 压缩行数 / 字号并收紧内边距，避免文字把封面撑爆（RenderFlex 溢出）
+          final h = constraints.maxHeight;
+          final compact = h < 140;
+          final tiny = h < 76;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              // 默认封面插画（按书名稳定选取；加载失败则退回渐变底）
+              Positioned.fill(
+                child: Image.asset(
+                  _coverAssets[_titleHash % _coverAssets.length],
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
                 ),
               ),
-            ),
-          ),
-          // 书名
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text(
-                  book.title,
-                  maxLines: 3,
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                    height: 1.35,
-                    shadows: [
-                      Shadow(
-                        color: Colors.black.withValues(alpha: .18),
-                        blurRadius: 6,
-                      ),
-                    ],
-                  ),
-                ),
-                if (book.author.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    book.author,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: .88),
-                      fontSize: 10,
+              // 底部渐暗遮罩，保证书名可读
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: compact ? 64 : 108,
+                child: const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x00000000), Color(0x73000000)],
                     ),
                   ),
-                ],
-              ],
-            ),
-          ),
-          Positioned(
-            left: 10,
-            bottom: 10,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: .28),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                book.formatLabel,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: .5,
                 ),
               ),
-            ),
-          ),
-        ],
+              // 书名 / 作者
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  compact ? 6 : 12,
+                  0,
+                  compact ? 6 : 12,
+                  compact ? 8 : 16,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        book.title,
+                        maxLines: tiny ? 1 : (compact ? 2 : 3),
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: tiny ? 10 : (compact ? 12 : 15),
+                          fontWeight: FontWeight.w900,
+                          height: tiny ? 1.1 : 1.35,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withValues(alpha: .18),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (book.author.isNotEmpty && !tiny) ...[
+                      SizedBox(height: compact ? 3 : 6),
+                      Text(
+                        book.author,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: .88),
+                          fontSize: compact ? 9 : 10,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              // 格式角标（超小封面不显示，避免拥挤）
+              if (!tiny)
+                Positioned(
+                  left: compact ? 6 : 10,
+                  bottom: compact ? 6 : 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: .28),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      book.formatLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: .5,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }

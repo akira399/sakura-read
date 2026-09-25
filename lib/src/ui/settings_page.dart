@@ -64,6 +64,8 @@ class _SettingsPageState extends State<SettingsPage> {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return Scaffold(
           floatingActionButton: FloatingActionButton.small(
+            // 与书架的 FAB 区分（两者同时在 IndexedStack 中存活，避免 Hero tag 冲突）
+            heroTag: 'settings-theme-fab',
             onPressed: _toggleTheme,
             tooltip: isDark ? '切换到浅色模式' : '切换到深色模式',
             child: Icon(

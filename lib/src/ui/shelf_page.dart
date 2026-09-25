@@ -68,6 +68,9 @@ class _ShelfPageState extends State<ShelfPage> {
           floatingActionButton: PetGuideTarget(
             id: 'shelf_add',
             child: FloatingActionButton(
+              // 显式 heroTag：书架与设置页的 FAB 同时在 IndexedStack 里存活，
+              // 使用默认 tag 会在路由切换（Hero 动画扫描）时冲突
+              heroTag: 'shelf-add-fab',
               onPressed: () => _showAddSheet(context),
               tooltip: '导入书籍',
               child: const Icon(Icons.add_rounded, size: 30),
