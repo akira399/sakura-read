@@ -7,14 +7,30 @@ import '../data/natural_sort.dart';
 import '../platform/native_bridge.dart';
 import 'widgets/cute.dart';
 
-enum PickerMode { files, folder }
+enum PickerMode { files, folder, sourceFiles }
 
-/// 内置文件浏览器：多选小说文件，或选择一个文件夹。
+/// 各模式允许展示的文件扩展名（小写、不带点）；
+/// `folder` 模式不展示文件，返回空集合。
+Set<String> pickerExtensionsFor(PickerMode mode) => switch (mode) {
+  PickerMode.files => kNovelExtensions,
+  PickerMode.sourceFiles => kSourceFileExtensions,
+  PickerMode.folder => const <String>{},
+};
+
+/// 内置文件浏览器：多选小说 / 书源文件，或选择一个文件夹。
 class FolderPickerPage extends StatefulWidget {
-  const FolderPickerPage({super.key, required this.mode, this.title});
+  const FolderPickerPage({
+    super.key,
+    required this.mode,
+    this.title,
+    this.rootOverride,
+  });
 
   final PickerMode mode;
   final String? title;
+
+  /// 起始目录覆盖（仅测试注入；生产环境始终从存储根开始）。
+  final String? rootOverride;
 
   @override
   State<FolderPickerPage> createState() => _FolderPickerPageState();
@@ -37,7 +53,7 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
   }
 
   Future<void> _init() async {
-    _root = await NativeBridge.storageRoot();
+    _root = widget.rootOverride ?? await NativeBridge.storageRoot();
     await _open(Directory(_root));
   }
 
@@ -47,6 +63,7 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
       _loading = true;
       _error = null;
     });
+    final exts = pickerExtensionsFor(widget.mode);
     try {
       final dirs = <Directory>[];
       final files = <File>[];
@@ -57,8 +74,8 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
           if (isSkippedDirName(name)) continue;
           dirs.add(e);
         } else if (e is File &&
-            widget.mode == PickerMode.files &&
-            isNovelFile(e.path)) {
+            widget.mode != PickerMode.folder &&
+            exts.contains(pathExtension(e.path))) {
           files.add(e);
         }
       }
@@ -115,7 +132,11 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
         appBar: AppBar(
           title: Text(
             widget.title ??
-                (widget.mode == PickerMode.files ? '选择小说文件' : '选择文件夹'),
+                switch (widget.mode) {
+                  PickerMode.files => '选择小说文件',
+                  PickerMode.sourceFiles => '选择书源文件',
+                  PickerMode.folder => '选择文件夹',
+                },
           ),
         ),
         body: Column(
@@ -286,15 +307,20 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
     }
 
     if (rows.isEmpty) {
-      return EmptyState(
-        icon: widget.mode == PickerMode.files
-            ? Icons.menu_book_outlined
-            : Icons.folder_off_rounded,
-        title: widget.mode == PickerMode.files ? '这个文件夹里没有小说' : '这里是空的',
-        subtitle: widget.mode == PickerMode.files
-            ? '进入别的文件夹找找 .txt / .epub 吧'
-            : '换个文件夹看看吧',
-      );
+      final (icon, title, subtitle) = switch (widget.mode) {
+        PickerMode.files => (
+          Icons.menu_book_outlined,
+          '这个文件夹里没有小说',
+          '进入别的文件夹找找 .txt / .epub 吧',
+        ),
+        PickerMode.sourceFiles => (
+          Icons.code_rounded,
+          '这个文件夹里没有书源文件',
+          '进入别的文件夹找找 .json 吧',
+        ),
+        PickerMode.folder => (Icons.folder_off_rounded, '这里是空的', '换个文件夹看看吧'),
+      };
+      return EmptyState(icon: icon, title: title, subtitle: subtitle);
     }
     return ListView(children: rows);
   }
@@ -313,7 +339,7 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
               Expanded(
                 child: Text(
                   _selected.isEmpty
-                      ? (widget.mode == PickerMode.files
+                      ? (widget.mode != PickerMode.folder
                             ? '点击文件选中 · 可多选'
                             : '点击行进入文件夹 · 点圆圈选中')
                       : '已选 ${_selected.length} 项',
@@ -329,7 +355,7 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
                     : () => Navigator.of(context).pop(_selected.toList()),
                 icon: const Icon(Icons.check_rounded, size: 18),
                 label: Text(
-                  widget.mode == PickerMode.files
+                  widget.mode != PickerMode.folder
                       ? (_selected.isEmpty ? '导入' : '导入 (${_selected.length})')
                       : '选择',
                 ),

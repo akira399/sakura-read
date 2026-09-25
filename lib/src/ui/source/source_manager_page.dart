@@ -289,13 +289,32 @@ class SourceManagerPage extends StatelessWidget {
   Future<void> _importFromFile(BuildContext context) async {
     final picked = await Navigator.of(context).push<List<String>>(
       MaterialPageRoute(
-        builder: (_) => const FolderPickerPage(mode: PickerMode.files),
+        // 用「书源文件」模式：书源是 .json（该模式同时允许 .txt）
+        builder: (_) => const FolderPickerPage(mode: PickerMode.sourceFiles),
       ),
     );
     if (picked == null || picked.isEmpty || !context.mounted) return;
-    final report = await store.importFromFile(picked.first);
+    // 支持多选：逐个导入并合并统计（选择器允许一次选多个文件）
+    var added = 0, updated = 0, invalid = 0;
+    String? error;
+    for (final path in picked) {
+      final r = await store.importFromFile(path);
+      added += r.added;
+      updated += r.updated;
+      invalid += r.invalid;
+      error ??= r.error;
+    }
     if (!context.mounted) return;
-    _report(context, report);
+    _report(
+      context,
+      SourceImportReport(
+        added: added,
+        updated: updated,
+        invalid: invalid,
+        // 至少导入成功过就不展示错误（个别文件失败由 invalid 计数体现）
+        error: added + updated > 0 ? null : error,
+      ),
+    );
   }
 
   Future<void> _importFromUrl(BuildContext context) async {
