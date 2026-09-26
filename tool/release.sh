@@ -23,7 +23,13 @@ step() { STEP=$((STEP + 1)); echo; echo "===== [$STEP] $* ====="; }
 fail() { echo; echo "❌ $*"; exit 1; }
 
 VERSION="$(grep -E '^version:' pubspec.yaml | awk '{print $2}')"
+APP_VERSION="$(grep -E 'static const String version' lib/src/app_info.dart | awk -F"'" '{print $2}')"
 echo "樱读 发布流程 · 版本 $VERSION"
+
+step "版本一致性（pubspec ↔ 关于页）"
+[[ "${VERSION%%+*}" == "$APP_VERSION" ]] ||
+  fail "版本不同步：pubspec=${VERSION%%+*}，app_info=$APP_VERSION（两处一起改，见 CONTRIBUTING）"
+echo "✓ 一致：${VERSION%%+*}"
 
 step "代码格式化（应为 0 改动）"
 BEFORE="$(dart format lib test | tail -1)"
