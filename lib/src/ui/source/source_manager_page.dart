@@ -1,37 +1,36 @@
-// 书源管理：列表 / 启用开关 / 删除 / 导入（粘贴・文件・订阅链接）/ 导出。
+// 书源管理：列表 / 启用开关 / 批量管理 / 详情（访问・复制・删除）/ 导入导出。
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../source/http_client.dart';
+import '../../source/models.dart';
 import '../../source/source_export.dart';
 import '../../source/source_store.dart';
 import '../../util/format.dart';
 import '../folder_picker_page.dart';
 import '../widgets/cute.dart';
+import '../../platform/url_launcher.dart';
 
-class SourceManagerPage extends StatelessWidget {
+class SourceManagerPage extends StatefulWidget {
   const SourceManagerPage({super.key, required this.store});
 
   final SourceStore store;
 
   @override
+  State<SourceManagerPage> createState() => _SourceManagerPageState();
+}
+
+class _SourceManagerPageState extends State<SourceManagerPage> {
+  SourceStore get store => widget.store;
+
+  /// 批量管理模式：非空表示正在多选（值为已选书源 URL）。
+  final Set<String> _selected = {};
+  bool _bulkMode = false;
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('书源管理'),
-        actions: [
-          IconButton(
-            tooltip: '导出书源',
-            onPressed: () => _export(context),
-            icon: const Icon(Icons.ios_share_rounded),
-          ),
-          IconButton(
-            tooltip: '导入书源',
-            onPressed: () => _showImportSheet(context),
-            icon: const Icon(Icons.add_rounded),
-          ),
-        ],
-      ),
+      appBar: _appBar(context),
       body: AnimatedBuilder(
         animation: store,
         builder: (context, _) {
@@ -40,77 +39,246 @@ class SourceManagerPage extends StatelessWidget {
             return _EmptyView(onImport: () => _showImportSheet(context));
           }
           return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 40),
+            padding: EdgeInsets.fromLTRB(12, 8, 12, _bulkMode ? 100 : 40),
             itemCount: sources.length,
             separatorBuilder: (_, _) => const SizedBox(height: 2),
-            itemBuilder: (context, i) {
-              final s = sources[i];
-              return Card(
-                elevation: 0,
-                color: Theme.of(
-                  context,
-                ).colorScheme.surfaceContainerHighest.withValues(alpha: .45),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Theme.of(
-                      context,
-                    ).colorScheme.primary.withValues(alpha: .18),
-                    child: Text(
-                      s.bookSourceName.characters.first,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  title: Text(
-                    s.bookSourceName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    [
-                      _hostOf(s.bookSourceUrl),
-                      if ((s.bookSourceGroup ?? '').isNotEmpty)
-                        s.bookSourceGroup!,
-                      if (s.searchUrl == null) '（未配置搜索）',
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Switch(
-                        value: s.enabled,
-                        onChanged: (v) => store.setEnabled(s.bookSourceUrl, v),
-                      ),
-                      IconButton(
-                        tooltip: '删除',
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          size: 20,
-                        ),
-                        onPressed: () => _confirmDelete(
-                          context,
-                          s.bookSourceUrl,
-                          s.bookSourceName,
-                        ),
-                      ),
-                    ],
-                  ),
-                  onTap: () => _showDetail(context, i),
-                ),
-              );
-            },
+            itemBuilder: (context, i) => _buildTile(context, sources[i]),
           );
         },
       ),
+      bottomNavigationBar: _bulkMode ? _bulkBar(context) : null,
     );
+  }
+
+  PreferredSizeWidget _appBar(BuildContext context) {
+    if (_bulkMode) {
+      final allSelected = _selected.length == store.sources.length;
+      return AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded),
+          tooltip: '退出批量管理',
+          onPressed: () => setState(() {
+            _bulkMode = false;
+            _selected.clear();
+          }),
+        ),
+        title: Text('已选 ${_selected.length} / ${store.sources.length}'),
+        actions: [
+          TextButton(
+            onPressed: () => setState(() {
+              if (allSelected) {
+                _selected.clear();
+              } else {
+                _selected
+                  ..clear()
+                  ..addAll(store.sources.map((s) => s.bookSourceUrl));
+              }
+            }),
+            child: Text(allSelected ? '取消全选' : '全选'),
+          ),
+        ],
+      );
+    }
+    return AppBar(
+      title: const Text('书源管理'),
+      actions: [
+        IconButton(
+          tooltip: '批量管理',
+          onPressed: () => setState(() {
+            _bulkMode = true;
+            _selected.clear();
+          }),
+          icon: const Icon(Icons.checklist_rounded),
+        ),
+        IconButton(
+          tooltip: '导出书源',
+          onPressed: () => _export(context),
+          icon: const Icon(Icons.ios_share_rounded),
+        ),
+        IconButton(
+          tooltip: '导入书源',
+          onPressed: () => _showImportSheet(context),
+          icon: const Icon(Icons.add_rounded),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTile(BuildContext context, BookSource s) {
+    final scheme = Theme.of(context).colorScheme;
+    final chosen = _selected.contains(s.bookSourceUrl);
+    return Card(
+      elevation: 0,
+      color: chosen
+          ? scheme.primary.withValues(alpha: .12)
+          : scheme.surfaceContainerHighest.withValues(alpha: .45),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListTile(
+        leading: _bulkMode
+            ? Icon(
+                chosen
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: chosen ? scheme.primary : scheme.onSurfaceVariant,
+              )
+            : CircleAvatar(
+                backgroundColor: scheme.primary.withValues(alpha: .18),
+                child: Text(
+                  s.bookSourceName.characters.first,
+                  style: TextStyle(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+        title: Text(
+          s.bookSourceName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          [
+            _hostOf(s.bookSourceUrl),
+            if ((s.bookSourceGroup ?? '').isNotEmpty) s.bookSourceGroup!,
+            if (s.searchUrl == null) '（未配置搜索）',
+          ].join(' · '),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 12),
+        ),
+        trailing: _bulkMode
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Switch(
+                    value: s.enabled,
+                    onChanged: (v) => store.setEnabled(s.bookSourceUrl, v),
+                  ),
+                  IconButton(
+                    tooltip: '删除',
+                    icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                    onPressed: () => _confirmDelete(
+                      context,
+                      s.bookSourceUrl,
+                      s.bookSourceName,
+                    ),
+                  ),
+                ],
+              ),
+        onTap: () {
+          if (_bulkMode) {
+            setState(() {
+              if (chosen) {
+                _selected.remove(s.bookSourceUrl);
+              } else {
+                _selected.add(s.bookSourceUrl);
+              }
+            });
+          } else {
+            _showDetail(context, s.bookSourceUrl);
+          }
+        },
+        onLongPress: () {
+          if (!_bulkMode) {
+            setState(() {
+              _bulkMode = true;
+              _selected
+                ..clear()
+                ..add(s.bookSourceUrl);
+            });
+          }
+        },
+      ),
+    );
+  }
+
+  /// 底部批量操作栏：启用 / 停用 / 删除（作用于已选条目）。
+  Widget _bulkBar(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final enabled = _selected.isNotEmpty;
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: .08),
+              blurRadius: 12,
+              offset: const Offset(0, -3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: enabled ? () => _bulkSetEnabled(true) : null,
+                icon: const Icon(Icons.toggle_on_rounded, size: 20),
+                label: const Text('启用'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: enabled ? () => _bulkSetEnabled(false) : null,
+                icon: const Icon(Icons.toggle_off_rounded, size: 20),
+                label: const Text('停用'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: enabled ? () => _bulkDelete() : null,
+                icon: const Icon(Icons.delete_sweep_rounded, size: 20),
+                label: const Text('删除'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _bulkSetEnabled(bool value) {
+    final n = store.setEnabledAll(_selected, value);
+    _snack(value ? '已启用 $n 个书源' : '已停用 $n 个书源');
+    setState(_selected.clear);
+  }
+
+  Future<void> _bulkDelete() async {
+    final count = _selected.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('批量删除'),
+        content: Text('确定删除已选的 $count 个书源吗？此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final n = store.removeMany(_selected);
+    setState(() {
+      _selected.clear();
+      // 删空后自动退出批量模式
+      if (store.sources.isEmpty) _bulkMode = false;
+    });
+    _snack('已删除 $n 个书源');
+  }
+
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   static String _hostOf(String url) {
@@ -121,13 +289,16 @@ class SourceManagerPage extends StatelessWidget {
     }
   }
 
-  void _showDetail(BuildContext context, int index) {
-    final s = store.sources[index];
+  /// 书源详情（底部弹层）：完整信息 + 单源操作（访问 / 复制 / 删除）。
+  void _showDetail(BuildContext context, String url) {
+    final s = store.byUrl(url);
+    if (s == null) return;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -140,12 +311,73 @@ class SourceManagerPage extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              const SizedBox(height: 8),
-              _kv('地址', s.bookSourceUrl),
+              const SizedBox(height: 4),
+              Text(
+                s.enabled ? '已启用' : '已停用',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: s.enabled
+                      ? Theme.of(ctx).colorScheme.primary
+                      : Theme.of(ctx).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _kv(ctx, '地址', s.bookSourceUrl),
               if ((s.bookSourceGroup ?? '').isNotEmpty)
-                _kv('分组', s.bookSourceGroup!),
-              _kv('并发率', s.concurrentRate ?? '不限'),
-              _kv('评论', (s.bookSourceComment ?? '（无）')),
+                _kv(ctx, '分组', s.bookSourceGroup!),
+              _kv(ctx, '搜索', s.searchUrl ?? '（未配置）'),
+              _kv(ctx, '并发率', s.concurrentRate ?? '不限'),
+              _kv(ctx, '评论', s.bookSourceComment ?? '（无）'),
+              const SizedBox(height: 12),
+              // ---- 单源操作 ----
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: () async {
+                      final ok = await launchUrlString(s.bookSourceUrl);
+                      if (!ctx.mounted || ok) return;
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('没有找到可用的浏览器')),
+                      );
+                    },
+                    icon: const Icon(Icons.public_rounded, size: 18),
+                    label: const Text('访问网站'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: s.bookSourceUrl));
+                      ScaffoldMessenger.of(
+                        ctx,
+                      ).showSnackBar(const SnackBar(content: Text('地址已复制')));
+                    },
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    label: const Text('复制地址'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      store.setEnabled(s.bookSourceUrl, !s.enabled);
+                      Navigator.pop(ctx);
+                    },
+                    icon: Icon(
+                      s.enabled
+                          ? Icons.toggle_off_rounded
+                          : Icons.toggle_on_rounded,
+                      size: 18,
+                    ),
+                    label: Text(s.enabled ? '停用' : '启用'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _confirmDelete(ctx, s.bookSourceUrl, s.bookSourceName);
+                    },
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    label: const Text('删除'),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -153,7 +385,7 @@ class SourceManagerPage extends StatelessWidget {
     );
   }
 
-  Widget _kv(String k, String v) => Padding(
+  Widget _kv(BuildContext ctx, String k, String v) => Padding(
     padding: const EdgeInsets.only(bottom: 6),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -162,10 +394,15 @@ class SourceManagerPage extends StatelessWidget {
           width: 64,
           child: Text(
             k,
-            style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+            style: TextStyle(
+              fontSize: 12.5,
+              color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
-        Expanded(child: Text(v, style: const TextStyle(fontSize: 12.5))),
+        Expanded(
+          child: SelectableText(v, style: const TextStyle(fontSize: 12.5)),
+        ),
       ],
     ),
   );
@@ -195,7 +432,36 @@ class SourceManagerPage extends StatelessWidget {
     if (ok == true) store.remove(url);
   }
 
-  // ---------- 导入 ----------
+  // ---------- 导入 / 导出 ----------
+
+  /// 导出全部书源。
+  ///
+  /// 小数据（≤ 200KB）复制到剪贴板；更大的数据（书源很多时 JSON 可达数 MB，
+  /// 超出 Android 剪贴板 ~1MB 上限）自动保存为文件。无论成败都有明确提示
+  /// （旧实现把大 JSON 塞剪贴板抛异常、且无捕获 → 点击"没反应"）。
+  Future<void> _export(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (store.sources.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('还没有书源可导出')));
+      return;
+    }
+    final json = store.exportJson();
+    try {
+      final result = await exportSourcesJson(
+        json,
+        copyToClipboard: (text) => Clipboard.setData(ClipboardData(text: text)),
+      );
+      final text = result.savedToFile
+          ? '书源较多（${formatBytes(result.byteLength)}），'
+                '已保存到文件：\n${result.path}'
+          : '已复制全部书源 JSON 到剪贴板';
+      messenger.showSnackBar(
+        SnackBar(content: Text(text), duration: const Duration(seconds: 4)),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    }
+  }
 
   void _showImportSheet(BuildContext context) {
     showModalBottomSheet<void>(
@@ -249,35 +515,6 @@ class SourceManagerPage extends StatelessWidget {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(r.summary)));
-  }
-
-  /// 导出全部书源。
-  ///
-  /// 小数据（≤ 200KB）复制到剪贴板；更大的数据（书源很多时 JSON 可达数 MB，
-  /// 超出 Android 剪贴板 ~1MB 上限）自动保存为文件。无论成败都有明确提示
-  /// （旧实现把大 JSON 塞剪贴板抛异常、且无捕获 → 点击"没反应"）。
-  Future<void> _export(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    if (store.sources.isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('还没有书源可导出')));
-      return;
-    }
-    final json = store.exportJson();
-    try {
-      final result = await exportSourcesJson(
-        json,
-        copyToClipboard: (text) => Clipboard.setData(ClipboardData(text: text)),
-      );
-      final text = result.savedToFile
-          ? '书源较多（${formatBytes(result.byteLength)}），'
-                '已保存到文件：\n${result.path}'
-          : '已复制全部书源 JSON 到剪贴板';
-      messenger.showSnackBar(
-        SnackBar(content: Text(text), duration: const Duration(seconds: 4)),
-      );
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
-    }
   }
 
   Future<void> _importFromPaste(BuildContext context) async {

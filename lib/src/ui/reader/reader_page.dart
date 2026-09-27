@@ -799,7 +799,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             ),
           ),
           _buildTopBar(bg),
-          _buildBottomBar(bg),
+          _buildBottomBar(),
           // 朗读控制条（朗读时悬浮在底部，位于底栏之上）
           if (_ttsActive)
             Positioned(
@@ -1116,9 +1116,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildBottomBar(ReaderBg bg) {
+  Widget _buildBottomBar() {
     final book = _book;
-    final scheme = Theme.of(context).colorScheme;
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
@@ -1179,7 +1178,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                       _barButton(
                         icon: Icons.text_fields_rounded,
                         label: '设置',
-                        onTap: () => _showSettingsSheet(scheme),
+                        onTap: _showSettingsSheet,
                       ),
                       _barButton(
                         icon: Icons.skip_next_rounded,
@@ -1584,16 +1583,22 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  void _showSettingsSheet(ColorScheme scheme) {
+  void _showSettingsSheet() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
+      builder: (sheetContext) => Padding(
+        // 键盘 / 手势条安全边距（紧凑高度由面板自身控制）
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.paddingOf(sheetContext).bottom,
+        ),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
           child: ReaderSettingsPanel(
             prefs: widget.prefs,
             petStore: PetStore.shared,
+            // 紧凑模式：面板限高，调整排版时上方正文保持可见
+            compact: true,
           ),
         ),
       ),
