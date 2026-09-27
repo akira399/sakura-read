@@ -83,13 +83,16 @@ class SakuraTheme {
   }
 
   /// 顶部渐变（书架 / 章节列表头图）。
+  ///
+  /// 使用**纵向**渐变（topCenter → bottomCenter）：顶部边缘颜色均匀，
+  /// 可与「不透明状态栏底块」的固体色无缝衔接（[headerTopColor] 与之配套）。
   static LinearGradient headerGradient(BuildContext context, {Color? accent}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final a = accent ?? Theme.of(context).colorScheme.primary;
     if (isDark) {
       return LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
         colors: [
           a.withValues(alpha: .40),
           const Color(0xFF3A2B52).withValues(alpha: .95),
@@ -97,9 +100,21 @@ class SakuraTheme {
       );
     }
     return LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
       colors: [a.withValues(alpha: .88), lavender.withValues(alpha: .80)],
     );
+  }
+
+  /// 头部渐变顶部对应的「不透明」固体色（状态栏底块用）。
+  ///
+  /// 把渐变首色按同参数 alpha 混到页面底色上，得到与头部顶部边缘一致的
+  /// 不透明颜色——状态栏底块与头部拼接处不会出现色差。
+  static Color headerTopColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final a = Theme.of(context).colorScheme.primary;
+    final top = isDark ? a.withValues(alpha: .40) : a.withValues(alpha: .88);
+    return Color.alphaBlend(top, bg);
   }
 }

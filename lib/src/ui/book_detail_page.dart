@@ -11,6 +11,7 @@ import 'reader/reader_page.dart';
 import 'source/source_switch_sheet.dart';
 import 'widgets/book_cover.dart';
 import 'widgets/cute.dart';
+import 'widgets/status_bar_backdrop.dart';
 
 /// 书籍详情页：封面 / 信息 / 简介 / 目录。
 class BookDetailPage extends StatelessWidget {
@@ -38,63 +39,74 @@ class BookDetailPage extends StatelessWidget {
           );
         }
         return Scaffold(
-          body: CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: _Header(book: book, store: store),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                  child: _Actions(
-                    book: book,
-                    onContinue: () => _openReader(context, book),
-                    onSwitchSource: book.format == BookFormat.online
-                        ? () => _switchSource(context, book)
-                        : null,
+          body: Stack(
+            children: [
+              CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: _Header(book: book, store: store),
                   ),
-                ),
-              ),
-              if (book.intro.isNotEmpty)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                    child: _IntroCard(intro: book.intro),
-                  ),
-                ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.format_list_numbered_rounded,
-                        size: 18,
-                        color: Theme.of(context).colorScheme.primary,
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                      child: _Actions(
+                        book: book,
+                        onContinue: () => _openReader(context, book),
+                        onSwitchSource: book.format == BookFormat.online
+                            ? () => _switchSource(context, book)
+                            : null,
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '目录 · 共 ${book.chapterCount} 章',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
-                        ),
+                    ),
+                  ),
+                  if (book.intro.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                        child: _IntroCard(intro: book.intro),
                       ),
-                    ],
+                    ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.format_list_numbered_rounded,
+                            size: 18,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '目录 · 共 ${book.chapterCount} 章',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 30),
+                    sliver: SliverList.separated(
+                      itemCount: book.chapterCount,
+                      separatorBuilder: (_, _) => const SizedBox(height: 6),
+                      itemBuilder: (context, index) => _ChapterTile(
+                        book: book,
+                        index: index,
+                        onTap: () => _openChapter(context, book, index),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 30),
-                sliver: SliverList.separated(
-                  itemCount: book.chapterCount,
-                  separatorBuilder: (_, _) => const SizedBox(height: 6),
-                  itemBuilder: (context, index) => _ChapterTile(
-                    book: book,
-                    index: index,
-                    onTap: () => _openChapter(context, book, index),
-                  ),
-                ),
+              // 不透明状态栏底块：头部滚出后，滚动内容不穿过状态栏区域
+              const Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: StatusBarBackdrop(),
               ),
             ],
           ),

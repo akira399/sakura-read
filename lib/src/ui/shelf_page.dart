@@ -20,6 +20,7 @@ import 'widgets/cute.dart';
 import 'widgets/kanban_mascot.dart';
 import 'widgets/pet_guide_overlay.dart';
 import 'widgets/sakura_petals.dart';
+import 'widgets/status_bar_backdrop.dart';
 
 class ShelfPage extends StatefulWidget {
   const ShelfPage({
@@ -76,19 +77,33 @@ class _ShelfPageState extends State<ShelfPage> {
               child: const Icon(Icons.add_rounded, size: 30),
             ),
           ),
-          body: CustomScrollView(
-            slivers: [
-              _buildHeader(context, books.length),
-              if (books.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _buildEmpty(context),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
-                  sliver: _buildBooksSliver(books),
+          body: Stack(
+            children: [
+              CustomScrollView(
+                slivers: [
+                  _buildHeader(context, books.length),
+                  if (books.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: _buildEmpty(context),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
+                      sliver: _buildBooksSliver(books),
+                    ),
+                ],
+              ),
+              // 不透明状态栏底块：滚动时内容不穿过状态栏区域
+              // （颜色与头部渐变顶部一致，拼接处无缝）
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: StatusBarBackdrop(
+                  color: SakuraTheme.headerTopColor(context),
                 ),
+              ),
             ],
           ),
         );

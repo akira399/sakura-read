@@ -140,6 +140,40 @@ class SourceStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 批量设置启用状态（书源管理「批量管理」用）。
+  ///
+  /// 返回实际变更的数量（已处于目标状态的条目不计入）。
+  int setEnabledAll(Iterable<String> urls, bool value) {
+    final targets = urls.toSet();
+    if (targets.isEmpty) return 0;
+    var changed = 0;
+    for (var i = 0; i < _sources.length; i++) {
+      final s = _sources[i];
+      if (!targets.contains(s.bookSourceUrl) || s.enabled == value) continue;
+      _sources[i] = s.copyWith(enabled: value);
+      changed++;
+    }
+    if (changed > 0) {
+      _saveSoon();
+      notifyListeners();
+    }
+    return changed;
+  }
+
+  /// 批量删除（书源管理「批量管理」用）。返回实际删除的数量。
+  int removeMany(Iterable<String> urls) {
+    final targets = urls.toSet();
+    if (targets.isEmpty) return 0;
+    final before = _sources.length;
+    _sources.removeWhere((s) => targets.contains(s.bookSourceUrl));
+    final removed = before - _sources.length;
+    if (removed > 0) {
+      _saveSoon();
+      notifyListeners();
+    }
+    return removed;
+  }
+
   // ---------- 导入 / 导出 ----------
 
   /// 从 JSON 文本导入（支持数组或单个对象；容忍 BOM 与首尾空白）。
