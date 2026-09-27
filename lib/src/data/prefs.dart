@@ -91,6 +91,15 @@ class AppPrefs extends ChangeNotifier {
   /// 是否已同意首启的「使用条款与声明」（同意后才进入新手引导）。
   bool agreementAccepted = false;
 
+  // ---- 更新检查 ----
+  /// 启动时自动检查更新（默认开启；设置页可关闭）。
+  bool autoCheckUpdate = true;
+
+  /// 用户点过「以后再说」的版本（该版本不再自动弹窗；空 = 无）。
+  ///
+  /// 只影响自动弹窗：设置页「检查更新」仍会展示。
+  String skipUpdateVersion = '';
+
   static const List<Color> accents = [
     Color(0xFFFF7EB6), // 樱粉
     Color(0xFF9D8CFF), // 薰衣草
@@ -150,6 +159,9 @@ class AppPrefs extends ChangeNotifier {
           guideSeen = data['guideSeen'] as bool? ?? false;
           // v6：首启使用条款
           agreementAccepted = data['agreementAccepted'] as bool? ?? false;
+          // v7：更新检查
+          autoCheckUpdate = data['autoCheckUpdate'] as bool? ?? true;
+          skipUpdateVersion = data['skipUpdateVersion'] as String? ?? '';
         }
       }
     } catch (_) {
@@ -350,6 +362,22 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 启动时自动检查更新开关。
+  void setAutoCheckUpdate(bool v) {
+    if (autoCheckUpdate == v) return;
+    autoCheckUpdate = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 记住用户点过「以后再说」的版本（该版本不再自动弹窗）。
+  void setSkipUpdateVersion(String v) {
+    if (skipUpdateVersion == v) return;
+    skipUpdateVersion = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void _saveSoon() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 300), () {
@@ -386,6 +414,8 @@ class AppPrefs extends ChangeNotifier {
           'ttsAutoNextChapter': ttsAutoNextChapter,
           'guideSeen': guideSeen,
           'agreementAccepted': agreementAccepted,
+          'autoCheckUpdate': autoCheckUpdate,
+          'skipUpdateVersion': skipUpdateVersion,
         }),
       );
     } catch (_) {

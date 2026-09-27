@@ -82,4 +82,25 @@ class NativeBridge {
     final tmp = Directory.systemTemp.path;
     return AppDirs(files: tmp, cache: tmp);
   }
+
+  /// 调起系统安装器安装 APK（原生侧走 FileProvider 授权读权限）。
+  ///
+  /// 返回 true = 已成功调起；false = 失败（文件缺失 / 平台不支持）。
+  static Future<bool> installApk(String path) async {
+    if (!_supported) return false;
+    final ok = await _invoke<bool>('installApk', path);
+    return ok ?? false;
+  }
+
+  /// 是否已允许「从本应用安装未知来源应用」（Android 8.0+ 需单独授权）。
+  static Future<bool> canInstallApk() async {
+    if (!_supported) return true;
+    final ok = await _invoke<bool>('canInstallApk');
+    return ok ?? true;
+  }
+
+  /// 跳转系统设置页，让用户授权「安装未知来源应用」。
+  static Future<void> openInstallPermission() async {
+    await _invoke<void>('openInstallPermission');
+  }
 }

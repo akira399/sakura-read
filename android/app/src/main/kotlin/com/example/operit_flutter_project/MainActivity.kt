@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.WindowManager
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -116,6 +117,16 @@ class MainActivity : FlutterActivity() {
                 "openUrl" -> {
                     val url = call.arguments as? String ?: ""
                     result.success(openUrl(url))
+                }
+                // ---------- 应用内更新（安装新版本 APK） ----------
+                "installApk" -> {
+                    val path = call.arguments as? String ?: ""
+                    result.success(installApk(path))
+                }
+                "canInstallApk" -> result.success(canInstallApk())
+                "openInstallPermission" -> {
+                    openInstallPermission()
+                    result.success(null)
                 }
                 // ---------- 朗读（TTS） ----------
                 "ttsEngines" -> result.success(listTtsEngines())
@@ -286,6 +297,64 @@ class MainActivity : FlutterActivity() {
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    // ==================== 应用内更新（安装 APK）实现 ====================
+
+    /**
+     * 调起系统安装器安装指定路径的 APK。
+     *
+     * 为什么必须走 FileProvider：Android 7.0 起用 `file://` 分享安装包会抛
+     * `FileUriExposedException`；新版系统把「安装未知应用」收进各自的授权页，
+     * 这里统一用 `content://` + 临时读权限交给安装器。
+     */
+    private fun installApk(path: String): Boolean {
+        if (path.isEmpty()) return false
+        val file = java.io.File(path)
+        if (!file.exists() || file.length() <= 0L) {
+            android.util.Log.w("SakuraRead", "installApk: file missing or empty")
+            return false
+        }
+        return try {
+            val uri = FileProvider.getUriForFile(
+                this,
+                "$packageName.fileprovider",
+                file,
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(intent)
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("SakuraRead", "installApk failed", e)
+            false
+        }
+    }
+
+    /** 是否已允许「从本应用安装未知来源应用」（Android 8.0+ 需单独授权）。 */
+    private fun canInstallApk(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+    }
+
+    /** 跳转系统设置页，让用户授权「安装未知来源应用」。 */
+    private fun openInstallPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+        } catch (_: Exception) {
         }
     }
 

@@ -101,12 +101,15 @@ class BookDetailPage extends StatelessWidget {
                   ),
                 ],
               ),
-              // 不透明状态栏底块：头部滚出后，滚动内容不穿过状态栏区域
-              const Positioned(
+              // 不透明状态栏底块：头部滚出后，滚动内容不穿过状态栏区域。
+              // 颜色取「头部渐变起点色」，与头部顶端同色（避免出现空白条）。
+              Positioned(
                 top: 0,
                 left: 0,
                 right: 0,
-                child: StatusBarBackdrop(),
+                child: StatusBarBackdrop(
+                  color: SakuraTheme.headerTopColor(context),
+                ),
               ),
             ],
           ),
@@ -171,101 +174,141 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.paddingOf(context).top;
-    return Stack(
+    // 两段式头部：状态栏区域为纯色（= 渐变起点色），主体渐变从状态栏下沿
+    // 才开始 —— 状态栏与其下方完全同色，不会出现一条"空白"的色阶断裂
+    // （用户截图反馈「详情页状态栏是一条空白的」）。
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 背景：封面模糊 + 主题渐变
-        Positioned.fill(
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: SakuraTheme.headerGradient(context),
-            ),
-          ),
+        SizedBox(
+          height: topPad,
+          child: ColoredBox(color: SakuraTheme.headerTopColor(context)),
         ),
-        Positioned.fill(
-          child: ClipRect(
-            child: ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-              child: Opacity(
-                opacity: .45,
-                child: SizedBox.expand(
-                  child: FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: 240,
-                      height: 320,
-                      child: BookCover(book: book, radius: 0),
+        Stack(
+          children: [
+            // 背景：封面模糊 + 主题渐变
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: SakuraTheme.headerGradient(context),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: ClipRect(
+                child: ImageFiltered(
+                  imageFilter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                  child: Opacity(
+                    opacity: .45,
+                    child: SizedBox.expand(
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: 240,
+                          height: 320,
+                          child: BookCover(book: book, radius: 0),
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
-        Container(
-          padding: EdgeInsets.fromLTRB(8, topPad + 4, 16, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              IconButton(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-              ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 112,
-                    height: 156,
-                    child: BookCover(book: book, radius: 14),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            book.title,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 21,
-                              fontWeight: FontWeight.w900,
-                              height: 1.25,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            book.author.isEmpty ? '佚名' : book.author,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: .9),
-                              fontSize: 13,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
-                            children: [
-                              _chip(book.formatLabel),
-                              _chip('${book.chapterCount} 章'),
-                              if (book.totalChars > 0)
-                                _chip(_charsLabel(book.totalChars)),
-                              if (book.finished) _chip('已读完'),
-                            ],
-                          ),
+            // 顶端渐隐：把模糊封面在顶部平滑过渡到纯色（与状态栏无缝）
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: SizedBox(
+                  height: 22,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          SakuraTheme.headerTopColor(context),
+                          SakuraTheme.headerTopColor(
+                            context,
+                          ).withValues(alpha: 0),
                         ],
                       ),
                     ),
                   ),
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(8, 4, 16, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 112,
+                        height: 156,
+                        child: BookCover(book: book, radius: 14),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                book.title,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1.25,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                book.author.isEmpty ? '佚名' : book.author,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: .9),
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: [
+                                  _chip(book.formatLabel),
+                                  _chip('${book.chapterCount} 章'),
+                                  if (book.totalChars > 0)
+                                    _chip(_charsLabel(book.totalChars)),
+                                  if (book.finished) _chip('已读完'),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
     );

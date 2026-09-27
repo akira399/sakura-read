@@ -7,12 +7,14 @@ import '../data/pet_store.dart';
 import '../data/prefs.dart';
 import '../data/stats_store.dart';
 import '../platform/url_launcher.dart';
+import '../platform/update_service.dart';
 import '../source/source_store.dart';
 import '../util/format.dart';
 import 'reader/reader_page.dart';
 import 'reader/reader_settings_panel.dart';
 import 'source/source_manager_page.dart';
 import 'stats_page.dart';
+import 'update_dialog.dart';
 import 'widgets/cute.dart';
 import 'widgets/pet_overlay.dart';
 import 'widgets/status_bar_backdrop.dart';
@@ -37,6 +39,9 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   int? _cacheBytes;
+
+  /// 手动检查更新进行中（按钮转圈、避免重复点击）。
+  bool _checkingUpdate = false;
 
   @override
   void initState() {
@@ -101,6 +106,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   _storageCard(context),
                   const SizedBox(height: 14),
                   _helpCard(context),
+                  const SizedBox(height: 14),
+                  _updateCard(context),
                   const SizedBox(height: 14),
                   _aboutCard(context),
                 ],
@@ -521,6 +528,85 @@ class _SettingsPageState extends State<SettingsPage> {
         duration: const Duration(seconds: 2),
       ),
     );
+  }
+
+  /// 更新卡片：手动检查更新 + 启动自动检查开关。
+  Widget _updateCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle(icon: Icons.system_update_rounded, title: '检查更新'),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.refresh_rounded),
+            title: const Text('检查新版本', style: TextStyle(fontSize: 14)),
+            subtitle: Text(
+              '当前版本 v${AppInfo.version}',
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: _checkingUpdate
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right_rounded),
+            onTap: _checkingUpdate ? null : _checkUpdate,
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.schedule_rounded),
+            title: const Text('启动时自动检查更新', style: TextStyle(fontSize: 14)),
+            subtitle: Text(
+              '有新版时弹出更新公告（默认通过国内镜像下载）',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+            value: widget.prefs.autoCheckUpdate,
+            onChanged: (v) => widget.prefs.setAutoCheckUpdate(v),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 手动检查更新（无论是否「以后再说」都会展示结果）。
+  Future<void> _checkUpdate() async {
+    setState(() => _checkingUpdate = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await UpdateService.instance.check();
+    if (!mounted) return;
+    setState(() => _checkingUpdate = false);
+
+    switch (result.status) {
+      case UpdateCheckStatus.updateAvailable:
+        await showUpdateDialog(
+          context,
+          info: result.info!,
+          isAuto: false,
+          prefs: widget.prefs,
+        );
+        // 手动检查不记「以后再说」，也不清除已记版本
+        break;
+      case UpdateCheckStatus.upToDate:
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('已经是最新版本啦～'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
+      case UpdateCheckStatus.failed:
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('检查更新失败，请稍后重试（网络繁忙）'),
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(label: '重试', onPressed: _checkUpdate),
+          ),
+        );
+        break;
+    }
   }
 
   Widget _aboutCard(BuildContext context) {

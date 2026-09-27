@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,13 +11,16 @@ import '../data/prefs.dart';
 import '../data/stats_store.dart';
 import '../platform/native_bridge.dart';
 import '../platform/open_file_service.dart';
+import '../platform/update_service.dart';
 import '../source/source_store.dart';
 import 'reader/reader_page.dart';
 import 'recent_page.dart';
 import 'settings_page.dart';
 import 'shelf_page.dart';
 import 'storage_permission_page.dart';
+import 'update_dialog.dart';
 import 'widgets/pet_guide_overlay.dart';
+import 'widgets/pet_overlay.dart' show kPetEggActive;
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -40,6 +44,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _index = 0;
   bool? _granted;
 
+  /// 启动后自动检查更新的延迟任务（见 [_scheduleAutoUpdateCheck]）。
+  Timer? _updateCheckTimer;
+
   @override
   void initState() {
     super.initState();
@@ -51,7 +58,45 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ..onOpenFile = _handleOpenedFile
       ..listen();
     unawaited(_consumeLaunchFile());
+    _scheduleAutoUpdateCheck();
     _check();
+  }
+
+  // ==================== 启动自动检查更新 ====================
+
+  /// 启动后延迟几秒做一次静默更新检查。
+  ///
+  /// - 延迟的目的：避开开屏动画与首屏加载，不跟启动流程抢资源；
+  /// - 失败静默：网络不好时不打扰用户（设置页可手动检查）；
+  /// - 引导 / 彩蛋进行中不弹（避免打断首启流程与彩蛋体验）。
+  void _scheduleAutoUpdateCheck() {
+    // 测试环境：不发网络请求、不留 Timer（flutter test 的模拟时钟会有
+    // 「pending timer」断言，且测试要完全离线可复现）。
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return;
+    _updateCheckTimer = Timer(const Duration(seconds: 3), () {
+      unawaited(_autoCheckUpdate());
+    });
+  }
+
+  Future<void> _autoCheckUpdate() async {
+    if (!mounted) return;
+    final prefs = widget.prefs;
+    if (!prefs.autoCheckUpdate) return;
+    // 还没同意条款（首启流程中）→ 不打扰；下次启动再查
+    if (!prefs.agreementAccepted) return;
+    // 新手引导 / 彩蛋进行中 → 不打断
+    if (kPetGuideActive.value || kPetEggActive.value) return;
+
+    final result = await UpdateService.instance.check();
+    if (!mounted) return;
+    if (result.status != UpdateCheckStatus.updateAvailable) return;
+    final info = result.info!;
+    // 用户对该版本点过「以后再说」→ 不再自动弹（设置页手动检查仍可见）
+    if (prefs.skipUpdateVersion == info.version) return;
+    // 检查期间状态可能又变了（开始引导等）
+    if (kPetGuideActive.value || kPetEggActive.value) return;
+
+    await showUpdateDialog(context, info: info, isAuto: true, prefs: prefs);
   }
 
   /// 冷启动：系统带文件启动时，取走路径并处理。
@@ -144,6 +189,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     kPetGuideReplay.removeListener(_onGuideReplay);
+    _updateCheckTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
