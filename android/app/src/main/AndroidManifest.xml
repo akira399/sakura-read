@@ -38,6 +38,31 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- 文件关联 ①：content:// + 常见 MIME 类型
+                 （现代 Android 文件管理器的分享/打开方式主要走这条链路） -->
+            <intent-filter android:label="用樱读打开">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="content"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="application/epub+zip"/>
+                <data android:mimeType="application/json"/>
+                <data android:mimeType="application/octet-stream"/>
+            </intent-filter>
+            <!-- 文件关联 ②：file:// + 扩展名
+                 （老式文件管理器 / 无 MIME 来源，按路径匹配 .txt/.epub/.json） -->
+            <intent-filter android:label="用樱读打开">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="file" android:host="*"
+                      android:pathPattern=".*\\.txt"/>
+                <data android:scheme="file" android:host="*"
+                      android:pathPattern=".*\\.epub"/>
+                <data android:scheme="file" android:host="*"
+                      android:pathPattern=".*\\.json"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

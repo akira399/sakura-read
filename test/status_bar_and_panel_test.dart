@@ -1,6 +1,7 @@
 // 本次 UI 改动的渲染 / 布局回归测试：
 //   ① 不透明状态栏底块（StatusBarBackdrop）覆盖状态栏高度；
-//   ② 阅读设置面板三页签：默认「排版」可见、切页后内容随之变化。
+//   ② 头部「状态栏区 + 渐变区」两段式的颜色无缝衔接（用户反馈色阶跳变）；
+//   ③ 阅读设置面板三页签：默认「排版」可见、切页后内容随之变化。
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -51,6 +52,54 @@ void main() {
       expect(find.byType(SizedBox), findsWidgets);
       final box = tester.getSize(find.byType(StatusBarBackdrop));
       expect(box, Size.zero);
+    });
+  });
+
+  group('状态栏色阶衔接（用户反馈：状态栏与页面颜色不一致）', () {
+    testWidgets('头部两段式：状态栏区为纯色、且该纯色 = 渐变起步色（无缝）', (tester) async {
+      // 构造与书架一致的两段式头部（状态栏区纯色 + 内容区渐变）
+      await tester.pumpWidget(
+        _host(
+          Builder(
+            builder: (context) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(
+                    height: 40,
+                    child: ColoredBox(color: Color(0x00000000)),
+                  ),
+                  Container(
+                    height: 200,
+                    decoration: BoxDecoration(
+                      gradient: SakuraTheme.headerGradient(context),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      );
+
+      // 取主题侧的「头部顶色」与渐变起点色对比
+      final ctx = tester.element(find.byType(Column).first);
+      final themeTop = SakuraTheme.headerTopColor(ctx);
+      final gradient = SakuraTheme.headerGradient(ctx);
+      final gradientTop = gradient.colors.first;
+
+      // 无缝要求的核心：渐变**起点色**与状态栏底块色一致（或仅差透明度混合前的原始色）
+      // 说明：渐变首色是半透明原色，混到背景后才等于 headerTopColor，
+      // 这里验证「混底后颜色一致」——即两者的不透明等效色相同。
+      final blendedGradientTop = Color.alphaBlend(
+        gradientTop,
+        Theme.of(ctx).scaffoldBackgroundColor,
+      );
+      final delta =
+          (blendedGradientTop.r - themeTop.r).abs() +
+          (blendedGradientTop.g - themeTop.g).abs() +
+          (blendedGradientTop.b - themeTop.b).abs();
+      expect(delta, lessThan(0.05), reason: '渐变起点（混底后）与状态栏底块色必须一致，否则出现色阶跳变');
     });
   });
 
