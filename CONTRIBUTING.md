@@ -59,7 +59,7 @@ flutter test                   # 全部通过
 
 | 位置 | 示例 | 说明 |
 |------|----------|------|
-| `pubspec.yaml` | `version: 1.0.1+50` | 语义版本 + build 号；**build 号只增不减** |
+| `pubspec.yaml` | `version: 1.0.1+52` | 语义版本 + build 号；**build 号只增不减** |
 | `lib/src/app_info.dart` | `version = '1.0.1'` | 设置页「关于」展示（不含 build 号） |
 
 两处必须一致：`test/version_sync_test.dart` 与 `./tool/release.sh` 都会把关。
@@ -76,6 +76,10 @@ flutter test                   # 全部通过
 3. 产物归档为 `樱读-vx.y.z.apk`（同时放一份到 `Download/`）
 4. 提交并推送；打 tag `vx.y.z`；在 GitHub 建 Release 并附 APK
 5. push 后 CI 会自动复跑检查并构建（仓库 Actions 页可查看）
+
+> ⚠️ **Release 必须附 APK 附件**：应用内「检查更新」读取的就是 Release 的
+> `assets[].browser_download_url`。**只打 tag 不发 Release、或 Release 不带 APK**，
+> 用户端一律检测不到更新。Release 的标题与说明也会直接展示在更新公告弹窗里。
 
 ## 提交规范
 

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 可分享路径：仅暴露应用私有缓存目录（更新包下载到这里）。
+     不暴露 files/ 与外部存储，最小权限原则。 -->
+<paths>
+    <cache-path name="cache" path="." />
+</paths>
