@@ -89,3 +89,6 @@ android/app/src/main/kotlin/**/GeneratedPluginRegistrant.kt
 linux/flutter/ephemeral/
 windows/flutter/ephemeral/
 .dart_tool/build/
+
+# 一次性诊断工具（不入库）
+tool/_shot_debug/
