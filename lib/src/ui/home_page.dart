@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,7 +9,9 @@ import '../data/pet_store.dart';
 import '../data/prefs.dart';
 import '../data/stats_store.dart';
 import '../platform/native_bridge.dart';
+import '../platform/open_file_service.dart';
 import '../source/source_store.dart';
+import 'reader/reader_page.dart';
 import 'recent_page.dart';
 import 'settings_page.dart';
 import 'shelf_page.dart';
@@ -42,7 +46,80 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // 「重看新手引导」：切回书架页（引导从书架开始，后续锚点也在书架 / 导航栏）
     kPetGuideReplay.addListener(_onGuideReplay);
+    // 「用樱读打开文件」：接住系统文件打开事件（冷启动取一次 + 热启动持续监听）
+    OpenFileService.instance
+      ..onOpenFile = _handleOpenedFile
+      ..listen();
+    unawaited(_consumeLaunchFile());
     _check();
+  }
+
+  /// 冷启动：系统带文件启动时，取走路径并处理。
+  Future<void> _consumeLaunchFile() async {
+    final path = await OpenFileService.instance.consumeLaunchFile();
+    if (path == null || !mounted) return;
+    // 等首帧后再处理（书架页 / SnackBar 需要已挂载）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _handleOpenedFile(path);
+    });
+  }
+
+  /// 分派被打开的文件：txt / epub → 导入书架并打开；json → 导入书源。
+  Future<void> _handleOpenedFile(String path) async {
+    if (!mounted) return;
+    final ext = path.contains('.')
+        ? path.substring(path.lastIndexOf('.') + 1).toLowerCase()
+        : '';
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (ext == 'json') {
+      // 书源文件
+      messenger.showSnackBar(const SnackBar(content: Text('正在导入书源…')));
+      final report = await widget.sourceStore.importFromFile(path);
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text(report.summary)));
+      setState(() => _index = 0); // 导入书源后停留书架无意义，回书架
+      return;
+    }
+
+    if (ext == 'txt' || ext == 'epub') {
+      // 已在书架：直接打开阅读器
+      final existing = widget.store.books.where((b) => b.path == path).toList();
+      if (existing.isNotEmpty && mounted) {
+        setState(() => _index = 0);
+        _openBook(existing.first.id);
+        return;
+      }
+      messenger.showSnackBar(const SnackBar(content: Text('正在导入…')));
+      final result = await widget.store.importFile(path);
+      if (!mounted) return;
+      if (!result.success) {
+        messenger.showSnackBar(SnackBar(content: Text(result.error ?? '导入失败')));
+        return;
+      }
+      setState(() => _index = 0);
+      _openBook(result.book!.id);
+      return;
+    }
+
+    messenger.showSnackBar(SnackBar(content: Text('不支持的文件类型：.$ext')));
+  }
+
+  /// 打开指定书籍的阅读器（从书架数据取进度）。
+  void _openBook(String bookId) {
+    final book = widget.store.byId(bookId);
+    if (book == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReaderPage(
+          store: widget.store,
+          prefs: widget.prefs,
+          bookId: book.id,
+          chapterIndex: book.safeChapterIndex,
+          charOffset: book.charOffset,
+        ),
+      ),
+    );
   }
 
   /// 收到「重看新手引导」请求：把底部导航切回书架（第 1 格）。

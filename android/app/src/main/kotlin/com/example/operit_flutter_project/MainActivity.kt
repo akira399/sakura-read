@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
@@ -17,15 +18,54 @@ import java.util.Locale
 class MainActivity : FlutterActivity() {
     private val channelName = "sakuramanga/native"
 
+    /// 独立通道：文件打开事件（与 native 通道分开，避免覆盖 TTS 的事件处理器）。
+    private val openChannelName = "sakuramanga/open"
+
     // ---- 朗读（TTS）状态 ----
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var ttsInitRequested = false
     private var ttsChannel: MethodChannel? = null
+    private var openChannel: MethodChannel? = null
+
+    // ---- 文件打开（VIEW intent）状态 ----
+    // 冷启动时系统把文件 intent 传进来，Dart 尚未就绪 → 先存路径等 Dart 来取；
+    // 热启动（已有实例）时通过 [notifyFileOpened] 直接推送。
+    private var pendingOpenPath: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingOpenPath = resolveOpenIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // 热启动：App 已在运行，用户又用「打开方式」选了一个文件 → 直接推送
+        val path = resolveOpenIntent(intent)
+        if (path != null) {
+            pendingOpenPath = path
+            notifyFileOpened(path)
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ttsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        // 文件打开通道：独立于 native 通道（两处都要 setMethodCallHandler，
+        // 同一通道会互相覆盖）
+        openChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, openChannelName)
+        openChannel!!.setMethodCallHandler { call, result ->
+            when (call.method) {
+                // Dart 就绪后调用：取走启动时收到的文件路径（取后清除）
+                "getLaunchFile" -> {
+                    val p = pendingOpenPath
+                    pendingOpenPath = null
+                    result.success(p)
+                }
+                else -> result.notImplemented()
+            }
+        }
         ttsChannel!!.setMethodCallHandler { call, result ->
             when (call.method) {
                 "hasStoragePermission" -> result.success(hasStoragePermission())
@@ -246,6 +286,75 @@ class MainActivity : FlutterActivity() {
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    // ==================== 文件打开（VIEW intent）实现 ====================
+
+    /**
+     * 解析「用樱读打开」的文件 intent，返回可读路径（无则 null）。
+     *
+     * 支持两种来源：
+     *  - `file://`（文件管理器直接传路径）：直接用该路径；
+     *  - `content://`（系统 DocumentsUI / 第三方应用共享）：把内容复制到
+     *    App 缓存目录下的固定文件，返回缓存路径（缓存目录无需权限即可读）。
+     */
+    private fun resolveOpenIntent(intent: Intent?): String? {
+        if (intent == null || intent.action != Intent.ACTION_VIEW) return null
+        val data = intent.data ?: return null
+        return try {
+            val path = when (data.scheme) {
+                "file" -> data.path
+                "content" -> copyContentToCache(data)
+                else -> null
+            }
+            if (!path.isNullOrEmpty()) {
+                android.util.Log.i("SakuraRead", "open file: $path")
+                path
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("SakuraRead", "open file failed", e)
+            null
+        }
+    }
+
+    /** 把 content:// 指向的文件复制到缓存目录，返回缓存文件路径。 */
+    private fun copyContentToCache(uri: Uri): String? {
+        val name = queryDisplayName(uri) ?: "opened_file"
+        // 用固定前缀 + 原名：若同名文件已存在则先删除，保证是本次内容
+        val safe = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val target = java.io.File(cacheDir, "open/$safe")
+        target.parentFile?.mkdirs()
+        if (target.exists()) target.delete()
+        contentResolver.openInputStream(uri)?.use { input ->
+            target.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        } ?: return null
+        return target.absolutePath
+    }
+
+    /** 读取 content:// 的显示名（用于给缓存文件起原名）。 */
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 把「用户刚打开的文件」推送给 Dart 侧（热启动路径）。 */
+    private fun notifyFileOpened(path: String) {
+        runOnUiThread {
+            try {
+                openChannel?.invokeMethod("fileOpened", path)
+            } catch (_: Exception) {
+            }
         }
     }
 
