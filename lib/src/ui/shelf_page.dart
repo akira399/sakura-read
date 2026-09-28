@@ -20,7 +20,6 @@ import 'widgets/cute.dart';
 import 'widgets/kanban_mascot.dart';
 import 'widgets/pet_guide_overlay.dart';
 import 'widgets/sakura_petals.dart';
-import 'widgets/status_bar_backdrop.dart';
 
 class ShelfPage extends StatefulWidget {
   const ShelfPage({
@@ -77,33 +76,19 @@ class _ShelfPageState extends State<ShelfPage> {
               child: const Icon(Icons.add_rounded, size: 30),
             ),
           ),
-          body: Stack(
-            children: [
-              CustomScrollView(
-                slivers: [
-                  _buildHeader(context, books.length),
-                  if (books.isEmpty)
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: _buildEmpty(context),
-                    )
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
-                      sliver: _buildBooksSliver(books),
-                    ),
-                ],
-              ),
-              // 不透明状态栏底块：滚动时内容不穿过状态栏区域
-              // （颜色与头部渐变顶部一致，拼接处无缝）
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: StatusBarBackdrop(
-                  color: SakuraTheme.headerTopColor(context),
+          body: CustomScrollView(
+            slivers: [
+              _buildHeader(context, books.length),
+              if (books.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _buildEmpty(context),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
+                  sliver: _buildBooksSliver(books),
                 ),
-              ),
             ],
           ),
         );
@@ -193,94 +178,84 @@ class _ShelfPageState extends State<ShelfPage> {
   }
 
   Widget _buildHeader(BuildContext context, int count) {
-    final topPad = MediaQuery.paddingOf(context).top;
+    // 头部即渐变容器本身：渐变铺满整个头部（含状态栏区域），
+    // 状态栏透明 → 头部颜色直接透到状态栏底下，两者浑然一体。
     return SliverToBoxAdapter(
-      // 头部两段式：状态栏区（纯"渐变起点色"）+ 内容区（渐变从这里才开始）。
-      // 这样状态栏与头部衔接处完全同色，滚动时也无色阶跳变（用户截图反馈）。
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // 状态栏区域：纯色（= 渐变起点色混底后的不透明色）
-          SizedBox(
-            height: topPad,
-            child: ColoredBox(color: SakuraTheme.headerTopColor(context)),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: SakuraTheme.headerGradient(context),
+          borderRadius: const BorderRadius.vertical(
+            bottom: Radius.circular(30),
           ),
-          // 内容区：渐变从本区域的顶部开始（顶部颜色 = headerTopColor，无缝衔接）
-          Container(
-            decoration: BoxDecoration(
-              gradient: SakuraTheme.headerGradient(context),
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(30),
-              ),
-            ),
-            padding: const EdgeInsets.fromLTRB(20, 18, 8, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+        ),
+        padding: EdgeInsets.only(
+          top: MediaQuery.paddingOf(context).top + 18,
+          left: 20,
+          right: 8,
+          bottom: 18,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    // 看板娘小头像（纯装饰；互动已统一收进全局桌宠）
-                    Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: .28),
-                      ),
-                      child: ClipOval(
-                        child: Image.asset(
-                          'assets/images/pet_wave.png',
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
+                // 看板娘小头像（纯装饰；互动已统一收进全局桌宠）
+                Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: .28),
+                  ),
+                  child: ClipOval(
+                    child: Image.asset(
+                      'assets/images/pet_wave.png',
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.cover,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            '樱读',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1,
-                            ),
-                          ),
-                          Text(
-                            '$_headerLine · $count 本书',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: .88),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PetGuideTarget(
-                      id: 'shelf_search',
-                      child: IconButton(
-                        onPressed: () => _openSearch(context),
-                        icon: const Icon(
-                          Icons.search_rounded,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '樱读',
+                        style: TextStyle(
                           color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1,
                         ),
-                        tooltip: '搜索',
                       ),
-                    ),
-                    IconButton(
-                      onPressed: _showArrangeSheet,
-                      icon: const Icon(Icons.tune_rounded, color: Colors.white),
-                      tooltip: '排列方式',
-                    ),
-                  ],
+                      Text(
+                        '$_headerLine · $count 本书',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: .88),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PetGuideTarget(
+                  id: 'shelf_search',
+                  child: IconButton(
+                    onPressed: () => _openSearch(context),
+                    icon: const Icon(Icons.search_rounded, color: Colors.white),
+                    tooltip: '搜索',
+                  ),
+                ),
+                IconButton(
+                  onPressed: _showArrangeSheet,
+                  icon: const Icon(Icons.tune_rounded, color: Colors.white),
+                  tooltip: '排列方式',
                 ),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

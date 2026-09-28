@@ -9,7 +9,6 @@ import 'reader/reader_page.dart';
 import 'stats_page.dart';
 import 'widgets/book_cover.dart';
 import 'widgets/cute.dart';
-import 'widgets/status_bar_backdrop.dart';
 
 class RecentPage extends StatelessWidget {
   const RecentPage({
@@ -31,42 +30,31 @@ class RecentPage extends StatelessWidget {
         final recents = store.books.where((b) => b.lastReadAt > 0).toList()
           ..sort((a, b) => b.lastReadAt.compareTo(a.lastReadAt));
         return Scaffold(
-          body: Stack(
-            children: [
-              CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(child: _header(context, recents.length)),
-                  if (recents.isEmpty)
-                    const SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: EmptyState(
-                        icon: Icons.history_rounded,
-                        title: '还没有阅读记录',
-                        subtitle: '去书架翻开一本小说吧～',
-                      ),
-                    )
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                      sliver: SliverList.separated(
-                        itemCount: recents.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) => _RecentTile(
-                          book: recents[index],
-                          store: store,
-                          prefs: prefs,
-                        ),
-                      ),
+          body: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: _header(context, recents.length)),
+              if (recents.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyState(
+                    icon: Icons.history_rounded,
+                    title: '还没有阅读记录',
+                    subtitle: '去书架翻开一本小说吧～',
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                  sliver: SliverList.separated(
+                    itemCount: recents.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) => _RecentTile(
+                      book: recents[index],
+                      store: store,
+                      prefs: prefs,
                     ),
-                ],
-              ),
-              // 不透明状态栏底块：滚动内容不穿过状态栏区域
-              const Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: StatusBarBackdrop(),
-              ),
+                  ),
+                ),
             ],
           ),
         );
