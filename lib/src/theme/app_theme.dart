@@ -84,19 +84,18 @@ class SakuraTheme {
 
   /// 顶部渐变（书架 / 章节列表头图）。
   ///
-  /// 使用**纵向**渐变（topCenter → bottomCenter）：顶部边缘颜色均匀。
+  /// 使用**对角**渐变（topLeft → bottomRight）。
   ///
-  /// 注意：头部使用时把渐变容器放到「状态栏下沿→底部」的区域内
-  /// （见 shelf_page / book_detail_page 的头部结构）——渐变从该区域顶部
-  /// （即状态栏下沿）以 [headerTopColor] 为起点向下延展，与状态栏底块
-  /// **无缝衔接**，避免「状态栏纯色 + 头部中间色」的色阶跳变。
+  /// 头部使用时把渐变容器铺满**整个头部**（含状态栏区域）——应用运行在
+  /// 「边到边」模式下，状态栏本身透明，头部渐变会直接透到状态栏底下，
+  /// 效果是「状态栏与头部浑然一体」（用户偏好这种透明观感）。
   static LinearGradient headerGradient(BuildContext context, {Color? accent}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final a = accent ?? Theme.of(context).colorScheme.primary;
     if (isDark) {
       return LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
         colors: [
           a.withValues(alpha: .40),
           const Color(0xFF3A2B52).withValues(alpha: .95),
@@ -104,21 +103,9 @@ class SakuraTheme {
       );
     }
     return LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
       colors: [a.withValues(alpha: .88), lavender.withValues(alpha: .80)],
     );
-  }
-
-  /// 头部渐变顶部对应的「不透明」固体色（状态栏底块 / 头部顶部静区用）。
-  ///
-  /// 把渐变首色按同参数 alpha 混到页面底色上，得到与头部顶部边缘一致的
-  /// 不透明颜色——状态栏区域与其下方拼接处不会出现色差。
-  static Color headerTopColor(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = Theme.of(context).scaffoldBackgroundColor;
-    final a = Theme.of(context).colorScheme.primary;
-    final top = isDark ? a.withValues(alpha: .40) : a.withValues(alpha: .88);
-    return Color.alphaBlend(top, bg);
   }
 }

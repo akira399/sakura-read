@@ -11,7 +11,6 @@ import 'reader/reader_page.dart';
 import 'source/source_switch_sheet.dart';
 import 'widgets/book_cover.dart';
 import 'widgets/cute.dart';
-import 'widgets/status_bar_backdrop.dart';
 
 /// 书籍详情页：封面 / 信息 / 简介 / 目录。
 class BookDetailPage extends StatelessWidget {
@@ -39,76 +38,62 @@ class BookDetailPage extends StatelessWidget {
           );
         }
         return Scaffold(
-          body: Stack(
-            children: [
-              CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: _Header(book: book, store: store),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                      child: _Actions(
-                        book: book,
-                        onContinue: () => _openReader(context, book),
-                        onSwitchSource: book.format == BookFormat.online
-                            ? () => _switchSource(context, book)
-                            : null,
-                      ),
-                    ),
-                  ),
-                  if (book.intro.isNotEmpty)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                        child: _IntroCard(intro: book.intro),
-                      ),
-                    ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.format_list_numbered_rounded,
-                            size: 18,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '目录 · 共 ${book.chapterCount} 章',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 30),
-                    sliver: SliverList.separated(
-                      itemCount: book.chapterCount,
-                      separatorBuilder: (_, _) => const SizedBox(height: 6),
-                      itemBuilder: (context, index) => _ChapterTile(
-                        book: book,
-                        index: index,
-                        onTap: () => _openChapter(context, book, index),
-                      ),
-                    ),
-                  ),
-                ],
+          body: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: _Header(book: book, store: store),
               ),
-              // 不透明状态栏底块：头部滚出后，滚动内容不穿过状态栏区域。
-              // 颜色取「头部渐变起点色」，与头部顶端同色（避免出现空白条）。
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: StatusBarBackdrop(
-                  color: SakuraTheme.headerTopColor(context),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: _Actions(
+                    book: book,
+                    onContinue: () => _openReader(context, book),
+                    onSwitchSource: book.format == BookFormat.online
+                        ? () => _switchSource(context, book)
+                        : null,
+                  ),
+                ),
+              ),
+              if (book.intro.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                    child: _IntroCard(intro: book.intro),
+                  ),
+                ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.format_list_numbered_rounded,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '目录 · 共 ${book.chapterCount} 章',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 30),
+                sliver: SliverList.separated(
+                  itemCount: book.chapterCount,
+                  separatorBuilder: (_, _) => const SizedBox(height: 6),
+                  itemBuilder: (context, index) => _ChapterTile(
+                    book: book,
+                    index: index,
+                    onTap: () => _openChapter(context, book, index),
+                  ),
                 ),
               ),
             ],
@@ -174,141 +159,103 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.paddingOf(context).top;
-    // 两段式头部：状态栏区域为纯色（= 渐变起点色），主体渐变从状态栏下沿
-    // 才开始 —— 状态栏与其下方完全同色，不会出现一条"空白"的色阶断裂
-    // （用户截图反馈「详情页状态栏是一条空白的」）。
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    // 头部即渐变容器本身：渐变铺满整个头部（含状态栏区域），状态栏透明 →
+    // 头部颜色直接透到状态栏底下（用户偏好这种透明观感）。
+    return Stack(
       children: [
-        SizedBox(
-          height: topPad,
-          child: ColoredBox(color: SakuraTheme.headerTopColor(context)),
-        ),
-        Stack(
-          children: [
-            // 背景：封面模糊 + 主题渐变
-            Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: SakuraTheme.headerGradient(context),
-                ),
-              ),
+        // 背景：封面模糊 + 主题渐变
+        Positioned.fill(
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: SakuraTheme.headerGradient(context),
             ),
-            Positioned.fill(
-              child: ClipRect(
-                child: ImageFiltered(
-                  imageFilter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-                  child: Opacity(
-                    opacity: .45,
-                    child: SizedBox.expand(
-                      child: FittedBox(
-                        fit: BoxFit.cover,
-                        child: SizedBox(
-                          width: 240,
-                          height: 320,
-                          child: BookCover(book: book, radius: 0),
-                        ),
-                      ),
+          ),
+        ),
+        Positioned.fill(
+          child: ClipRect(
+            child: ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+              child: Opacity(
+                opacity: .45,
+                child: SizedBox.expand(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: 240,
+                      height: 320,
+                      child: BookCover(book: book, radius: 0),
                     ),
                   ),
                 ),
               ),
             ),
-            // 顶端渐隐：把模糊封面在顶部平滑过渡到纯色（与状态栏无缝）
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: IgnorePointer(
-                child: SizedBox(
-                  height: 22,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          SakuraTheme.headerTopColor(context),
-                          SakuraTheme.headerTopColor(
-                            context,
-                          ).withValues(alpha: 0),
+          ),
+        ),
+        Container(
+          padding: EdgeInsets.fromLTRB(8, topPad + 4, 16, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 112,
+                    height: 156,
+                    child: BookCover(book: book, radius: 14),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            book.title,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w900,
+                              height: 1.25,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            book.author.isEmpty ? '佚名' : book.author,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: .9),
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              _chip(book.formatLabel),
+                              _chip('${book.chapterCount} 章'),
+                              if (book.totalChars > 0)
+                                _chip(_charsLabel(book.totalChars)),
+                              if (book.finished) _chip('已读完'),
+                            ],
+                          ),
                         ],
                       ),
                     ),
                   ),
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(8, 4, 16, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(
-                      Icons.arrow_back_rounded,
-                      color: Colors.white,
-                    ),
-                  ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 112,
-                        height: 156,
-                        child: BookCover(book: book, radius: 14),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                book.title,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 21,
-                                  fontWeight: FontWeight.w900,
-                                  height: 1.25,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                book.author.isEmpty ? '佚名' : book.author,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: .9),
-                                  fontSize: 13,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 6,
-                                children: [
-                                  _chip(book.formatLabel),
-                                  _chip('${book.chapterCount} 章'),
-                                  if (book.totalChars > 0)
-                                    _chip(_charsLabel(book.totalChars)),
-                                  if (book.finished) _chip('已读完'),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );

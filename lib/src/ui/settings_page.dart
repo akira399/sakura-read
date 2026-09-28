@@ -17,7 +17,6 @@ import 'stats_page.dart';
 import 'update_dialog.dart';
 import 'widgets/cute.dart';
 import 'widgets/pet_overlay.dart';
-import 'widgets/status_bar_backdrop.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -81,44 +80,33 @@ class _SettingsPageState extends State<SettingsPage> {
               isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
             ),
           ),
-          body: Stack(
+          body: ListView(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              MediaQuery.paddingOf(context).top + 18,
+              16,
+              100,
+            ),
             children: [
-              ListView(
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  MediaQuery.paddingOf(context).top + 18,
-                  16,
-                  100,
-                ),
-                children: [
-                  _title(context),
-                  const SizedBox(height: 16),
-                  _appearanceCard(context),
-                  const SizedBox(height: 14),
-                  _readingCard(context),
-                  const SizedBox(height: 14),
-                  _petCard(context),
-                  const SizedBox(height: 14),
-                  _statsCard(context),
-                  const SizedBox(height: 14),
-                  _sourceCard(context),
-                  const SizedBox(height: 14),
-                  _storageCard(context),
-                  const SizedBox(height: 14),
-                  _helpCard(context),
-                  const SizedBox(height: 14),
-                  _updateCard(context),
-                  const SizedBox(height: 14),
-                  _aboutCard(context),
-                ],
-              ),
-              // 不透明状态栏底块：滚动内容不穿过状态栏区域
-              const Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: StatusBarBackdrop(),
-              ),
+              _title(context),
+              const SizedBox(height: 16),
+              _appearanceCard(context),
+              const SizedBox(height: 14),
+              _readingCard(context),
+              const SizedBox(height: 14),
+              _petCard(context),
+              const SizedBox(height: 14),
+              _statsCard(context),
+              const SizedBox(height: 14),
+              _sourceCard(context),
+              const SizedBox(height: 14),
+              _storageCard(context),
+              const SizedBox(height: 14),
+              _helpCard(context),
+              const SizedBox(height: 14),
+              _updateCard(context),
+              const SizedBox(height: 14),
+              _aboutCard(context),
             ],
           ),
         );
