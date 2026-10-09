@@ -8,7 +8,7 @@
 
 ### 📲 下载
 
-- **APK**：`SakuraRead-v1.1.0.apk`（arm64，约 xx MB）
+- **APK**：`SakuraRead-v1.1.0.apk`（arm64，约 34.7 MB）
 - 系统要求：Android 7.0（API 24）及以上
 
 ### ✨ 本次更新
