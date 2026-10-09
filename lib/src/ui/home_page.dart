@@ -17,6 +17,7 @@ import 'reader/reader_page.dart';
 import 'recent_page.dart';
 import 'settings_page.dart';
 import 'shelf_page.dart';
+import 'source/discover_page.dart';
 import 'storage_permission_page.dart';
 import 'update_dialog.dart';
 import 'widgets/pet_guide_overlay.dart';
@@ -216,6 +217,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               prefs: widget.prefs,
               sourceStore: widget.sourceStore,
             ),
+            // 发现页（原在书架右上角，改到常驻底栏，用户要求）
+            DiscoverPage(
+              bookStore: widget.store,
+              prefs: widget.prefs,
+              sourceStore: widget.sourceStore,
+            ),
             RecentPage(
               store: widget.store,
               prefs: widget.prefs,
@@ -238,9 +245,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-/// 底部导航 + 每格独立的引导锚点（书架 / 最近 / 设置）。
+/// 底部导航 + 每格独立的引导锚点（书架 / 发现 / 最近 / 设置）。
 ///
-/// 三格都在**常驻导航栏**上，因此引导要求用户点击时不会导致页面结构失效——
+/// 四格都在**常驻导航栏**上，因此引导要求用户点击时不会导致页面结构失效——
 /// 这是引导设计的硬约束（指向会跳页的按钮会让后续步骤锚点消失）。
 class _GuidedNavBar extends StatelessWidget {
   const _GuidedNavBar({required this.index, required this.onSelect});
@@ -248,10 +255,17 @@ class _GuidedNavBar extends StatelessWidget {
   final int index;
   final ValueChanged<int> onSelect;
 
-  /// 把整条栏按三等分切成三格（每格 = 1/3 宽）。
+  /// 格数（与 [NavigationBar.destinations] 数量保持一致）。
+  static const int _slots = 4;
+
+  /// 把整条栏按等分切成 [_slots] 格。
   Rect Function(Size) _cell(int slot) =>
-      (size) =>
-          Rect.fromLTWH(size.width * slot / 3, 0, size.width / 3, size.height);
+      (size) => Rect.fromLTWH(
+        size.width * slot / _slots,
+        0,
+        size.width / _slots,
+        size.height,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -259,31 +273,40 @@ class _GuidedNavBar extends StatelessWidget {
       id: 'nav_shelf',
       rectOf: _cell(0),
       child: PetGuideTarget(
-        id: 'nav_recent',
+        id: 'nav_discover',
         rectOf: _cell(1),
         child: PetGuideTarget(
-          id: 'nav_settings',
+          id: 'nav_recent',
           rectOf: _cell(2),
-          child: NavigationBar(
-            selectedIndex: index,
-            onDestinationSelected: onSelect,
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.auto_stories_outlined),
-                selectedIcon: Icon(Icons.auto_stories),
-                label: '书架',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.history_outlined),
-                selectedIcon: Icon(Icons.history),
-                label: '最近',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.favorite_outline_rounded),
-                selectedIcon: Icon(Icons.favorite_rounded),
-                label: '设置',
-              ),
-            ],
+          child: PetGuideTarget(
+            id: 'nav_settings',
+            rectOf: _cell(3),
+            child: NavigationBar(
+              selectedIndex: index,
+              onDestinationSelected: onSelect,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.auto_stories_outlined),
+                  selectedIcon: Icon(Icons.auto_stories),
+                  label: '书架',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.explore_outlined),
+                  selectedIcon: Icon(Icons.explore),
+                  label: '发现',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.history_outlined),
+                  selectedIcon: Icon(Icons.history),
+                  label: '最近',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.favorite_outline_rounded),
+                  selectedIcon: Icon(Icons.favorite_rounded),
+                  label: '设置',
+                ),
+              ],
+            ),
           ),
         ),
       ),

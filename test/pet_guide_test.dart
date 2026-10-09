@@ -46,6 +46,7 @@ void main() {
       'shelf_add', // 书架右下角「＋」
       'search_back', // 搜索页左上角返回
       'nav_shelf',
+      'nav_discover', // 底栏「发现」（v1.1.0 新增第四格）
       'nav_recent',
       'nav_settings',
     };

@@ -9,11 +9,13 @@ import '../../data/book_source.dart';
 import '../../data/book_store.dart';
 import '../../data/models.dart';
 import '../../data/paginator.dart';
+import '../../data/offline_downloader.dart';
 import '../../data/pet_store.dart';
 import '../../data/prefs.dart';
 import '../../data/stats_store.dart';
 import '../../platform/native_bridge.dart';
 import '../../platform/tts_service.dart';
+import '../../platform/url_launcher.dart';
 import '../../source/source_store.dart';
 import '../source/source_switch_sheet.dart';
 import '../widgets/battery_badge.dart';
@@ -92,6 +94,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 本章插图目录（EPUB 有插图时非空；正文里的图片标记从这里加载）。
   String? _imageDir;
+
+  /// 离线缓存下载器（仅在线书用；一次一个任务）。
+  final OfflineDownloader _downloader = OfflineDownloader();
+
+  /// 离线下载进度（null = 未在下载）。
+  OfflineDownloadProgress? _offlineProgress;
 
   /// 当前章节的朗读段落（含原文偏移，用于自动跟随）。
   List<SpeechParagraph> _ttsParagraphs = const [];
@@ -1055,6 +1063,76 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return ((_chapterIndex + local) / book.chapterCount).clamp(0.0, 1.0);
   }
 
+  /// 当前章节的来源网址（在线书）；无则 null。
+  ///
+  /// 用途：用户想核对/分享正文出处时，可直接用浏览器打开原始页面。
+  String? get _currentChapterUrl {
+    final book = _book;
+    if (book == null || book.format != BookFormat.online) return null;
+    if (_chapterIndex < 0 || _chapterIndex >= book.chapters.length) return null;
+    final href = book.chapters[_chapterIndex].href?.trim();
+    if (href == null || href.isEmpty) return null;
+    return href;
+  }
+
+  /// 用系统浏览器打开「本章来源网址」。
+  Future<void> _openChapterSource() async {
+    final url = _currentChapterUrl;
+    if (url == null) return;
+    final ok = await launchUrlString(url);
+    if (!mounted) return;
+    if (!ok) {
+      // 浏览器不可用时至少让用户能复制链接
+      await Clipboard.setData(ClipboardData(text: url));
+      if (!mounted) return;
+      _toastLate('没有可用的浏览器，链接已复制');
+    }
+  }
+
+  /// 离线缓存：把整本（在线书）提前抓下来，断网也能读。
+  Future<void> _downloadWholeBook() async {
+    final book = _book;
+    if (book == null || book.format != BookFormat.online) return;
+    if (_downloader.running) {
+      // 已在下载：再点一次 = 暂停
+      _downloader.cancel();
+      return;
+    }
+    final store = widget.store;
+    final cached = await store.cachedChapterCount(book.id);
+    if (!mounted) return;
+    setState(() {
+      _offlineProgress = OfflineDownloadProgress(
+        done: 0,
+        total: book.chapterCount - cached,
+        failed: 0,
+        currentChapter: cached,
+        finished: false,
+        cancelled: false,
+      );
+    });
+
+    final result = await _downloader.download(
+      book,
+      store,
+      from: 0,
+      onProgress: (p) {
+        if (mounted) setState(() => _offlineProgress = p);
+      },
+    );
+
+    if (!mounted) return;
+    setState(() => _offlineProgress = null);
+    final ok = book.chapterCount - result.failed;
+    _toastLate(
+      result.cancelled
+          ? '已暂停缓存（已存 $ok 章，再点一次继续）'
+          : result.failed == 0
+          ? '整本已缓存，断网也能读啦'
+          : '已缓存 $ok 章，${result.failed} 章失败（可重试）',
+    );
+  }
+
   Widget _buildTopBar(ReaderBg bg) {
     final book = _book;
     final dark =
@@ -1110,14 +1188,42 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                           ),
                         ),
                         if (book != null)
-                          Text(
-                            '第 ${_chapterIndex + 1}/${book.chapterCount} 章',
-                            style: TextStyle(
-                              color: (dark ? Colors.white : Colors.black87)
-                                  .withValues(alpha: .65),
-                              fontSize: 11,
+                          // 下载中优先显示进度，让用户知道还要多久
+                          if (_offlineProgress != null)
+                            Row(
+                              children: [
+                                SizedBox(
+                                  width: 46,
+                                  height: 5,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(3),
+                                    child: LinearProgressIndicator(
+                                      value: _offlineProgress!.fraction,
+                                      minHeight: 5,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '缓存 ${_offlineProgress!.done}/${_offlineProgress!.total}',
+                                  style: TextStyle(
+                                    color:
+                                        (dark ? Colors.white : Colors.black87)
+                                            .withValues(alpha: .65),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            )
+                          else
+                            Text(
+                              '第 ${_chapterIndex + 1}/${book.chapterCount} 章',
+                              style: TextStyle(
+                                color: (dark ? Colors.white : Colors.black87)
+                                    .withValues(alpha: .65),
+                                fontSize: 11,
+                              ),
                             ),
-                          ),
                       ],
                     ),
                   ),
@@ -1129,6 +1235,28 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ),
                     tooltip: '目录',
                   ),
+                  // 离线缓存（在线书）：把整本提前下好
+                  if (book?.format == BookFormat.online)
+                    IconButton(
+                      onPressed: _downloadWholeBook,
+                      icon: Icon(
+                        _offlineProgress != null
+                            ? Icons.cloud_sync_rounded
+                            : Icons.cloud_download_outlined,
+                        color: dark ? Colors.white : Colors.black87,
+                      ),
+                      tooltip: '离线缓存',
+                    ),
+                  // 当前章节来源：跳浏览器打开本章原始页面
+                  if (_currentChapterUrl != null)
+                    IconButton(
+                      onPressed: _openChapterSource,
+                      icon: Icon(
+                        Icons.open_in_new_rounded,
+                        color: dark ? Colors.white : Colors.black87,
+                      ),
+                      tooltip: '查看本章来源',
+                    ),
                 ],
               ),
             ),
