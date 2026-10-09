@@ -302,22 +302,76 @@ class OnlineRepo {
 
   // ==================== 发现页（exploreUrl / ruleExplore） ====================
 
-  /// 解析书源的 exploreUrl → 分类列表（不含分页渲染，供 UI 展示标签）。
+  /// 解析书源的 exploreUrl → 分类列表。
   ///
-  /// 格式（Legado 兼容）：
-  /// ```
-  /// 玄幻::https://site/list/xuanhuan/{{page}}.html
-  /// 排行::https://site/rank/all/{{page}}.html
-  /// ```
-  /// 也支持 `标题,地址` 与「只有地址」（标题自动取 URL 末段）。
+  /// 实测（用户 1093 个真实书源）三种写法并存，必须都支持：
+  ///
+  /// 1. **行格式**（316 个）：
+  ///    ```
+  ///    玄幻::https://site/list/xuanhuan/{{page}}.html
+  ///    排行::https://site/rank/all/{{page}}.html
+  ///    ```
+  /// 2. **JSON 数组**（318 个，Legado 主流写法）：
+  ///    ```json
+  ///    [{"title":"男生","url":""},{"title":"都市","url":"https://..."}]
+  ///    ```
+  /// 3. **JS 脚本**（168 个，`@js:` 开头）：需要 JS 引擎动态生成，
+  ///    静态解析无法支持 —— 返回空列表，由 UI 明确提示（不静默失败）。
+  ///
+  /// 「标题::地址」也兼容 `标题,地址`；无标题时取 URL 末段。
   static List<ExploreCategory> parseExploreCategories(BookSource source) {
-    final raw = source.exploreUrl;
-    if (raw == null || raw.trim().isEmpty) return const [];
+    final raw = source.exploreUrl?.trim();
+    if (raw == null || raw.isEmpty) return const [];
+
+    // JS 脚本：无法静态解析
+    if (raw.startsWith('@js:') ||
+        raw.startsWith('<js>') ||
+        raw.startsWith('@JS:')) {
+      return const [];
+    }
+
+    // JSON 数组格式
+    if (raw.startsWith('[')) {
+      return _parseJsonCategories(raw);
+    }
+
+    // 行格式
+    return _parseLineCategories(raw);
+  }
+
+  /// 解析 JSON 数组格式的 exploreUrl。
+  ///
+  /// 每项形如 `{"title":"男生","url":"https://..."}`；
+  /// `url` 为空的项是**分组标题**（Legado 用它做分栏），跳过不生成分类。
+  static List<ExploreCategory> _parseJsonCategories(String raw) {
+    List<dynamic> decoded;
+    try {
+      final d = jsonDecode(raw);
+      if (d is! List) return const [];
+      decoded = d;
+    } catch (_) {
+      // 非法 JSON（书源写坏 / 被截断）：静默返回空，由 UI 提示该源不可用
+      return const [];
+    }
+    final out = <ExploreCategory>[];
+    for (final item in decoded) {
+      if (item is! Map) continue;
+      final title = (item['title'] ?? '').toString().trim();
+      final url = (item['url'] ?? '').toString().trim();
+      // 分组标题（无地址）跳过：它没有可抓取的目标
+      if (url.isEmpty) continue;
+      if (title.isEmpty) continue;
+      out.add(ExploreCategory(title: title, url: url));
+    }
+    return out;
+  }
+
+  /// 解析行格式（`标题::地址` / `标题,地址` / 纯地址）。
+  static List<ExploreCategory> _parseLineCategories(String raw) {
     final out = <ExploreCategory>[];
     for (final line in raw.split('\n')) {
       final item = line.trim();
       if (item.isEmpty || item.startsWith('#')) continue;
-      // 标题::地址 优先；退化为 标题,地址
       var title = '';
       var url = '';
       final sepIdx = item.indexOf('::');
@@ -335,13 +389,20 @@ class OnlineRepo {
       }
       if (url.isEmpty) continue;
       if (title.isEmpty) {
-        // 从 URL 末段猜个名字，避免标签空白
         final seg = url.split('/').where((s) => s.isNotEmpty).toList();
         title = seg.isEmpty ? '分类' : seg.last;
       }
       out.add(ExploreCategory(title: title, url: url));
     }
     return out;
+  }
+
+  /// 该书源的 exploreUrl 是否为 JS 脚本（发现页无法支持）。
+  static bool hasJsExplore(BookSource source) {
+    final raw = source.exploreUrl?.trim() ?? '';
+    return raw.startsWith('@js:') ||
+        raw.startsWith('<js>') ||
+        raw.startsWith('@JS:');
   }
 
   /// 抓取某个分类的一页书单（复用搜索页解析规则 [ExploreRule]）。
@@ -370,10 +431,14 @@ class OnlineRepo {
     return resolveUrl(s, base);
   }
 
-  /// 解析发现页书单（与搜索页结构一致，规则取 [BookSource.exploreRule]）。
+  /// 解析发现页书单。
+  ///
+  /// 规则选择（实测踩坑）：不能简单用 `exploreRule ?? searchRule`——
+  /// 大量书源的 `ruleExplore` 是**空对象 `{}`**（非 null），`??` 不会回退，
+  /// 于是 bookList 取不到 → 解析出 0 本书（用户反馈「发现页什么都没有」）。
+  /// 这里改为「exploreRule 有 bookList 才用它，否则回退 searchRule」。
   List<SearchBook> parseExplorePage(BookSource source, String body) {
-    final rule = source.exploreRule ?? source.searchRule;
-    if (rule == null) return const [];
+    final rule = _pickExploreRule(source);
     // ExploreRule 与 SearchRule 字段同名，这里统一取字段
     final listRule = _exploreField(rule, 'bookList');
     if (listRule == null || listRule.trim().isEmpty) return const [];
@@ -416,8 +481,24 @@ class OnlineRepo {
     return books;
   }
 
+  /// 选择用于发现页解析的规则。
+  ///
+  /// 实测（用户 1093 个真实书源）：
+  /// - 511 个源有 `ruleExplore`，其中不少 bookList 直接用 `<js>` 或指向搜索规则；
+  /// - 291 个源的 `ruleExplore` 是**空对象 `{}`**（非 null），
+  ///   此时必须回退到 `ruleSearch`（Legado 里发现页与搜索页列表结构常一致）。
+  Object? _pickExploreRule(BookSource source) {
+    final er = source.exploreRule;
+    if (er != null) {
+      final list = er.bookList?.trim();
+      // 有可用的 bookList 才认它（空对象 / 空字段一律回退）
+      if (list != null && list.isNotEmpty) return er;
+    }
+    return source.searchRule;
+  }
+
   /// 从 ExploreRule / SearchRule 取同名字段（两者字段名一致）。
-  String? _exploreField(Object rule, String key) {
+  String? _exploreField(Object? rule, String key) {
     if (rule is ExploreRule) {
       return switch (key) {
         'bookList' => rule.bookList,
@@ -451,59 +532,98 @@ class OnlineRepo {
     return null;
   }
 
-  /// 对**所有支持发现页的书源**并发抓取指定分类（按书源顺序返回）。
-  ///
-  /// 「支持发现页」= 配了 `exploreUrl` 且能解析出分类。
-  Future<List<SourceExploreResult>> exploreAll(
-    String categoryTitle, {
+  /// 对**单个书源**抓取其某个分类的一页书单。
+  Future<SourceExploreResult> exploreSource(
+    BookSource source,
+    ExploreCategory category, {
     int page = 1,
   }) async {
-    // 收集「分类名 → (源, 分类)」的任务
+    final started = DateTime.now();
+    try {
+      final books = await exploreOne(source, category, page: page);
+      return SourceExploreResult(
+        source: source,
+        books: books,
+        elapsedMs: DateTime.now().difference(started).inMilliseconds,
+      );
+    } catch (e) {
+      return SourceExploreResult(
+        source: source,
+        error: '$e',
+        elapsedMs: DateTime.now().difference(started).inMilliseconds,
+      );
+    }
+  }
+
+  /// 在所有**支持发现页**的书源中，并发抓取「各自第一个分类」。
+  ///
+  /// 用途：发现页首屏「随便逛逛」——每个源出一个分类的最新书单，
+  /// 用户不必先挑书源。分类由各源自己的 exploreUrl 决定。
+  Future<List<SourceExploreResult>> exploreFirstOfEach({
+    int page = 1,
+    int maxSources = 12,
+  }) async {
     final tasks = <(BookSource, ExploreCategory)>[];
     for (final s in store.enabled) {
-      for (final c in parseExploreCategories(s)) {
-        if (c.title == categoryTitle) tasks.add((s, c));
-      }
+      final cats = parseExploreCategories(s);
+      if (cats.isEmpty) continue;
+      tasks.add((s, cats.first));
+      if (tasks.length >= maxSources) break;
     }
     if (tasks.isEmpty) return const [];
+    return _runExploreTasks(tasks, page: page);
+  }
 
-    final results = <SourceExploreResult>[];
+  /// 并发执行一批「源 + 分类」抓取任务（结果顺序与任务顺序一致）。
+  Future<List<SourceExploreResult>> _runExploreTasks(
+    List<(BookSource, ExploreCategory)> tasks, {
+    int page = 1,
+  }) async {
+    final results = List<SourceExploreResult?>.filled(tasks.length, null);
     var next = 0;
     Future<void> worker() async {
       while (true) {
         final i = next++;
         if (i >= tasks.length) return;
         final (source, category) = tasks[i];
-        final started = DateTime.now();
-        try {
-          final books = await exploreOne(source, category, page: page);
-          results.add(
-            SourceExploreResult(
-              source: source,
-              books: books,
-              elapsedMs: DateTime.now().difference(started).inMilliseconds,
-            ),
-          );
-        } catch (e) {
-          results.add(
-            SourceExploreResult(
-              source: source,
-              error: '$e',
-              elapsedMs: DateTime.now().difference(started).inMilliseconds,
-            ),
-          );
-        }
+        results[i] = await exploreSource(source, category, page: page);
       }
     }
 
     final n = concurrency.clamp(1, tasks.length);
     await Future.wait(List.generate(n, (_) => worker()));
-    return results;
+    return [for (final r in results) ?r];
+  }
+
+  /// 所有支持发现页的书源（按名称排序），供发现页顶部选择。
+  List<BookSource> exploreCapableSources() {
+    final out = <BookSource>[];
+    for (final s in store.enabled) {
+      if (parseExploreCategories(s).isNotEmpty) out.add(s);
+    }
+    out.sort((a, b) => a.bookSourceName.compareTo(b.bookSourceName));
+    return out;
+  }
+
+  /// 统计：支持发现页的源数 / 启用总数 / JS 脚本源数（UI 提示用）。
+  ({int capable, int total, int jsOnly}) exploreStats() {
+    var capable = 0;
+    var jsOnly = 0;
+    final enabled = store.enabled;
+    for (final s in enabled) {
+      if (parseExploreCategories(s).isNotEmpty) {
+        capable++;
+      } else if (hasJsExplore(s)) {
+        jsOnly++;
+      }
+    }
+    return (capable: capable, total: enabled.length, jsOnly: jsOnly);
   }
 
   /// 汇总所有启用书源的发现分类（同名合并，保留出现顺序）。
   ///
-  /// 返回「分类名 → 支持它的书源数」，供发现页顶部选择。
+  /// 注意：不同书源的同名分类**地址不同**，所以这只用于「跨源联合搜索」
+  /// 场景；发现页按书源浏览时请用 [parseExploreCategories]。
   List<ExploreCategory> allExploreCategories() {
     final seen = <String>{};
     final out = <ExploreCategory>[];

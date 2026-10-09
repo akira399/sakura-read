@@ -25,6 +25,49 @@ BookSource _src({String exploreUrl = ''}) => BookSource(
 
 void main() {
   group('发现页：exploreUrl 分类解析', () {
+    test('JSON 数组格式（Legado 主流写法，实测占 318/802）', () {
+      final cats = OnlineRepo.parseExploreCategories(
+        _src(
+          exploreUrl:
+              '[{"title":"男生","url":""},'
+              '{"title":"都市人生","url":"https://s.com/c?page={{page}}"},'
+              '{"title":"玄幻奇幻","url":"https://s.com/c/2?page={{page}}"}]',
+        ),
+      );
+      // 第一项 url 为空 = 分组标题，应跳过
+      expect(cats.length, 2);
+      expect(cats[0].title, '都市人生');
+      expect(cats[1].title, '玄幻奇幻');
+      expect(cats[0].url, contains('{{page}}'));
+    });
+
+    test('JSON 数组容错：非法 JSON 不抛异常，返回空', () {
+      expect(
+        OnlineRepo.parseExploreCategories(_src(exploreUrl: '[{bad json')),
+        isEmpty,
+      );
+    });
+
+    test('JS 脚本格式（@js: / <js>）→ 空列表且被标记为 JS', () {
+      final js = _src(exploreUrl: '@js:\nvar result=[];');
+      expect(OnlineRepo.parseExploreCategories(js), isEmpty);
+      expect(OnlineRepo.hasJsExplore(js), isTrue);
+
+      final js2 = _src(exploreUrl: '<js>var a=1;</js>');
+      expect(OnlineRepo.parseExploreCategories(js2), isEmpty);
+      expect(OnlineRepo.hasJsExplore(js2), isTrue);
+    });
+
+    test('行格式与 JSON 格式不会互相污染（回归：曾把 JSON 按行切碎）', () {
+      // 回归场景：JSON 被当行格式解析时，标题会变成 '[{"title":"男生' 这种垃圾
+      final cats = OnlineRepo.parseExploreCategories(
+        _src(exploreUrl: '[{"title":"男生","url":"https://s.com/a"}]'),
+      );
+      expect(cats.single.title, '男生');
+      expect(cats.single.title, isNot(contains('{')));
+      expect(cats.single.title, isNot(contains('title')));
+    });
+
     test('标准写法「标题::地址」，多行', () {
       final cats = OnlineRepo.parseExploreCategories(
         _src(

@@ -1,13 +1,14 @@
-// 发现页：按书源分类「逛书」，不需要先想好关键词。
+// 发现页：按书源分类浏览书单。
 //
-// 用户反馈（社区最期待的功能之一）：「什么时候能上线那个发现页啊」。
+// 结构（与 Legado 一致）：
+//   顶部「书源」下拉 → 选中源后显示该源的分类标签 → 点分类展示书单
 //
-// 数据来源：书源的 `exploreUrl` + `ruleExplore` 规则（Legado 兼容）。
-// 注意：并非所有书源都配了发现页规则——内置的公版源就没有；因此这里有
-// 三重兜底：
-//   1. 没有任何源支持 → 明确引导用户去导入带发现页规则的书源；
-//   2. 分类下有多个源 → 并发抓取 + 同名合并（与搜索页一致）；
-//   3. 单个源失败 → 隔离错误，其它源照常展示。
+// 为什么不是「跨源共享分类名」：实测 1093 个书源里，各家的分类名完全不同
+// （七猫叫「男生 / 都市人生」，PO18 叫「都市 / 浓情」），按分类名跨源匹配
+// 永远匹配不到 —— 首版就是这么写错的（用户反馈「发现页什么都没有」）。
+//
+// exploreUrl 支持三种写法（实测分布）：
+//   行格式 `标题::地址`（316 个）、JSON 数组（318 个）、JS 脚本（168 个，不支持）
 import 'package:flutter/material.dart';
 
 import '../../data/book_store.dart';
@@ -18,7 +19,7 @@ import '../../source/source_store.dart';
 import '../widgets/cute.dart';
 import 'online_book_page.dart';
 
-/// 同名书的多个来源（发现页合并展示）。
+/// 同名书的多个来源。
 class _MergedBook {
   _MergedBook(this.title, this.author);
 
@@ -48,55 +49,92 @@ class DiscoverPage extends StatefulWidget {
 class _DiscoverPageState extends State<DiscoverPage> {
   late final OnlineRepo _repo = OnlineRepo(store: widget.sourceStore);
 
-  /// 可用的分类（来自所有启用书源）。
+  /// 支持发现页的书源。
+  List<BookSource> _sources = const [];
+
+  /// 当前选中的书源。
+  BookSource? _source;
+
+  /// 当前源的分类。
   List<ExploreCategory> _categories = const [];
 
   /// 当前选中的分类。
-  String? _current;
+  ExploreCategory? _category;
 
   bool _loading = false;
   String? _error;
   List<_MergedBook> _books = const [];
 
-  /// 每页条数（发现页按页浏览）。
-  static const int _pageSize = 20;
+  /// 统计信息（无可用源时提示用）。
+  ({int capable, int total, int jsOnly})? _stats;
 
   @override
   void initState() {
     super.initState();
-    _categories = _repo.allExploreCategories();
-    if (_categories.isNotEmpty) {
-      _current = _categories.first.title;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-    }
+    _reloadSources(autoSelect: true);
+  }
+
+  /// 重新枚举支持发现页的书源。
+  void _reloadSources({bool autoSelect = false}) {
+    final list = _repo.exploreCapableSources();
+    setState(() {
+      _sources = list;
+      _stats = _repo.exploreStats();
+      if (list.isNotEmpty && (_source == null || autoSelect)) {
+        _source = list.first;
+        _categories = OnlineRepo.parseExploreCategories(list.first);
+        _category = _categories.isNotEmpty ? _categories.first : null;
+      }
+    });
+    if (_category != null) _load();
+  }
+
+  /// 切换书源。
+  void _selectSource(BookSource s) {
+    setState(() {
+      _source = s;
+      _categories = OnlineRepo.parseExploreCategories(s);
+      _category = _categories.isNotEmpty ? _categories.first : null;
+      _books = const [];
+      _error = null;
+    });
+    if (_category != null) _load();
+  }
+
+  /// 切换分类。
+  void _selectCategory(ExploreCategory c) {
+    if (_category?.title == c.title) return;
+    setState(() {
+      _category = c;
+      _books = const [];
+      _error = null;
+    });
+    _load();
   }
 
   Future<void> _load() async {
-    final category = _current;
-    if (category == null) return;
+    final source = _source;
+    final category = _category;
+    if (source == null || category == null) return;
     setState(() {
       _loading = true;
       _error = null;
     });
-    try {
-      final results = await _repo.exploreAll(category);
-      if (!mounted) return;
-      final merged = _merge(results);
-      setState(() {
-        _books = merged;
-        _loading = false;
-        _error = merged.isEmpty ? '这个分类暂时没抓到书，换个分类或稍后再试' : null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = '加载失败：$e';
-      });
-    }
+    final result = await _repo.exploreSource(source, category);
+    if (!mounted) return;
+    final merged = _merge([result]);
+    setState(() {
+      _loading = false;
+      _books = merged;
+      if (result.error != null) {
+        _error = '抓取失败：${result.error}';
+      } else if (merged.isEmpty) {
+        _error = '这个分类没有解析到书单（该源可能改版或规则不兼容）';
+      }
+    });
   }
 
-  /// 多源结果 → 同名同作者合并（与搜索页一致的用户体验）。
+  /// 多源结果 → 同名同作者合并。
   List<_MergedBook> _merge(List<SourceExploreResult> results) {
     final map = <String, _MergedBook>{};
     for (final r in results) {
@@ -108,90 +146,134 @@ class _DiscoverPageState extends State<DiscoverPage> {
         m.variants.add((r.source, b));
       }
     }
-    final list = map.values.toList();
-    // 来源多的排前面（更可靠）
-    list.sort((a, b) => b.variants.length.compareTo(a.variants.length));
-    return list.take(_pageSize).toList();
+    return map.values.toList();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_sources.isEmpty) return _buildEmpty();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('发现'),
+        actions: [
+          IconButton(
+            onPressed: () => _reloadSources(),
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: '重新检测书源',
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          _buildSourceSelector(),
+          if (_categories.isNotEmpty) _buildCategoryBar(),
+          const Divider(height: 1),
+          Expanded(child: _buildList()),
+        ],
+      ),
+    );
+  }
+
+  /// 空状态：没有任何书源支持发现页。
+  Widget _buildEmpty() {
+    final s = _stats;
+    final js = s?.jsOnly ?? 0;
     return Scaffold(
       appBar: AppBar(title: const Text('发现')),
-      body: _categories.isEmpty ? _buildNoExplore() : _buildBody(context),
-    );
-  }
-
-  /// 没有任何书源支持发现页时的引导。
-  Widget _buildNoExplore() {
-    return EmptyState(
-      icon: Icons.explore_outlined,
-      title: '还没有可发现的分类',
-      subtitle:
-          '发现页需要书源自带「发现规则」（exploreUrl）\n'
-          '可在「设置 → 书源管理」导入带发现规则的书源',
-      actions: [
-        FilledButton.icon(
-          onPressed: () {
-            setState(() {
-              _categories = _repo.allExploreCategories();
-              if (_categories.isNotEmpty) {
-                _current = _categories.first.title;
-              }
-            });
-            if (_categories.isNotEmpty) _load();
-          },
-          icon: const Icon(Icons.refresh_rounded),
-          label: const Text('重新检测'),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBody(BuildContext context) {
-    return Column(
-      children: [
-        // 分类选择
-        SizedBox(
-          height: 46,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            itemCount: _categories.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemBuilder: (context, i) {
-              final c = _categories[i];
-              return ChoiceChip(
-                label: Text(c.title),
-                selected: _current == c.title,
-                onSelected: (_) {
-                  if (_current == c.title) return;
-                  setState(() {
-                    _current = c.title;
-                    _books = const [];
-                  });
-                  _load();
-                },
-                visualDensity: VisualDensity.compact,
-              );
-            },
+      body: EmptyState(
+        icon: Icons.explore_outlined,
+        title: '没有可用的发现页书源',
+        subtitle:
+            '共启用 ${s?.total ?? 0} 个书源，其中没有一个能被静态解析\n'
+            '${js > 0 ? '（另有 $js 个书源使用 JS 脚本生成分类，暂不支持）\n' : ''}'
+            '\n'
+            '发现页需要书源里的 exploreUrl 是「行格式」或「JSON 数组」：\n'
+            '· 行格式：玄幻::https://站点/list/{{page}}.html\n'
+            '· JSON：[{"title":"玄幻","url":"https://..."}]\n'
+            '\n'
+            '可在「设置 → 书源管理」导入带此类规则的书源',
+        actions: [
+          FilledButton.icon(
+            onPressed: () => _reloadSources(),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('重新检测'),
           ),
-        ),
-        const Divider(height: 1),
-        Expanded(child: _buildList(context)),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildList(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+  /// 书源选择行。
+  Widget _buildSourceSelector() {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+      child: Row(
+        children: [
+          Icon(Icons.source_rounded, size: 18, color: scheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<BookSource>(
+                value: _source,
+                isExpanded: true,
+                isDense: true,
+                items: [
+                  for (final s in _sources)
+                    DropdownMenuItem(
+                      value: s,
+                      child: Text(
+                        s.bookSourceName,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                ],
+                onChanged: (v) {
+                  if (v != null) _selectSource(v);
+                },
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${_sources.length} 个可用',
+            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 分类标签条。
+  Widget _buildCategoryBar() {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: _categories.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final c = _categories[i];
+          return ChoiceChip(
+            label: Text(c.title),
+            selected: _category?.title == c.title,
+            onSelected: (_) => _selectCategory(c),
+            visualDensity: VisualDensity.compact,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    if (_loading) return const Center(child: CircularProgressIndicator());
     final error = _error;
     if (error != null) {
       return EmptyState(
         icon: Icons.cloud_off_rounded,
-        title: '这里暂时是空的',
+        title: '没有拿到书单',
         subtitle: error,
         actions: [
           OutlinedButton.icon(
@@ -235,7 +317,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
           Text(
             [
               if (m.author.isNotEmpty) m.author,
-              if (m.variants.length > 1) '${m.variants.length} 个来源',
               if ((b.latestChapterTitle ?? '').isNotEmpty)
                 '最新：${b.latestChapterTitle}',
             ].join(' · '),
@@ -258,7 +339,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
     );
   }
 
-  /// 打开书籍详情（与搜索页同一套逻辑：只保留支持阅读的源）。
+  /// 打开书籍详情。
   void _open(BuildContext context, _MergedBook m) {
     final readable = <OnlineBookVariant>[];
     for (final (source, book) in m.variants) {
