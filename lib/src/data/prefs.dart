@@ -60,6 +60,21 @@ class AppPrefs extends ChangeNotifier {
   double letterSpacing = 0;
   double readerMarginH = 20;
 
+  /// 正文区距屏幕顶部的留白（上边距）。
+  ///
+  /// 用户反馈：希望能自己定「正文离顶部多远」（原先是写死的 30）。
+  /// 页眉（章节名）也挂在这块留白里。
+  double readerPaddingTop = 30;
+
+  /// 正文区距屏幕底部的留白（下边距；页脚挂在这里）。
+  double readerPaddingBottom = 46;
+
+  /// 是否显示页眉（章节名）。
+  bool readerHeaderVisible = true;
+
+  /// 是否显示页脚（时间 / 页码 / 电量）。
+  bool readerFooterVisible = true;
+
   /// 字体：默认使用内置「霞鹜文楷」，空串 = 系统默认。
   String fontFamily = 'LXGWWenKai';
   int readerBgIndex = 0;
@@ -82,6 +97,12 @@ class AppPrefs extends ChangeNotifier {
 
   /// 朗读到章节末尾时自动进入下一章。
   bool ttsAutoNextChapter = true;
+
+  /// 朗读引擎包名（空 = 系统默认）。
+  ///
+  /// 用户反馈：一加等机型自带引擎不会被系统选为默认 → 朗读不可用。
+  /// 允许手动指定，并持久化。
+  String ttsEngine = '';
 
   // ---- 新手引导 ----
   /// 是否已看过新手引导（看完或跳过后都为 true，只首次启动引导一次）。
@@ -128,6 +149,19 @@ class AppPrefs extends ChangeNotifier {
           lineHeight = (data['lineHeight'] as num?)?.toDouble() ?? 1.75;
           letterSpacing = (data['letterSpacing'] as num?)?.toDouble() ?? 0;
           readerMarginH = (data['readerMarginH'] as num?)?.toDouble() ?? 20;
+          // v8：正文上下留白 + 页眉页脚开关（用户反馈：想自己定这些距离）
+          readerPaddingTop =
+              ((data['readerPaddingTop'] as num?)?.toDouble() ?? 30).clamp(
+                0,
+                160,
+              );
+          readerPaddingBottom =
+              ((data['readerPaddingBottom'] as num?)?.toDouble() ?? 46).clamp(
+                0,
+                160,
+              );
+          readerHeaderVisible = data['readerHeaderVisible'] as bool? ?? true;
+          readerFooterVisible = data['readerFooterVisible'] as bool? ?? true;
           fontFamily = data['fontFamily'] as String? ?? 'LXGWWenKai';
           // v2 迁移：老版本未主动选过字体（空串）时，默认切换到内置霞鹜文楷
           if (fontFamily.isEmpty && ((data['v'] as num?)?.toInt() ?? 0) < 2) {
@@ -155,6 +189,8 @@ class AppPrefs extends ChangeNotifier {
           );
           ttsAutoFollow = data['ttsAutoFollow'] as bool? ?? true;
           ttsAutoNextChapter = data['ttsAutoNextChapter'] as bool? ?? true;
+          // v8：朗读引擎（空 = 系统默认）
+          ttsEngine = data['ttsEngine'] as String? ?? '';
           // v5：新手引导是否已看过
           guideSeen = data['guideSeen'] as bool? ?? false;
           // v6：首启使用条款
@@ -246,6 +282,14 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 朗读引擎（空 = 系统默认）。
+  void setTtsEngine(String v) {
+    if (ttsEngine == v) return;
+    ttsEngine = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void setThemeMode(ThemeMode v) {
     if (themeMode == v) return;
     themeMode = v;
@@ -288,6 +332,38 @@ class AppPrefs extends ChangeNotifier {
     v = v.clamp(8, 48).toDouble();
     if (readerMarginH == v) return;
     readerMarginH = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 正文距顶部留白（页眉也挂在这里）。
+  void setReaderPaddingTop(double v) {
+    v = v.clamp(0, 160).toDouble();
+    if (readerPaddingTop == v) return;
+    readerPaddingTop = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 正文距底部留白（页脚挂在这里）。
+  void setReaderPaddingBottom(double v) {
+    v = v.clamp(0, 160).toDouble();
+    if (readerPaddingBottom == v) return;
+    readerPaddingBottom = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setReaderHeaderVisible(bool v) {
+    if (readerHeaderVisible == v) return;
+    readerHeaderVisible = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setReaderFooterVisible(bool v) {
+    if (readerFooterVisible == v) return;
+    readerFooterVisible = v;
     _saveSoon();
     notifyListeners();
   }
@@ -399,6 +475,10 @@ class AppPrefs extends ChangeNotifier {
           'lineHeight': lineHeight,
           'letterSpacing': letterSpacing,
           'readerMarginH': readerMarginH,
+          'readerPaddingTop': readerPaddingTop,
+          'readerPaddingBottom': readerPaddingBottom,
+          'readerHeaderVisible': readerHeaderVisible,
+          'readerFooterVisible': readerFooterVisible,
           'fontFamily': fontFamily,
           'readerBgIndex': readerBgIndex,
           'lightBgIndex': lightBgIndex,
@@ -412,6 +492,7 @@ class AppPrefs extends ChangeNotifier {
           'ttsPitch': ttsPitch,
           'ttsAutoFollow': ttsAutoFollow,
           'ttsAutoNextChapter': ttsAutoNextChapter,
+          'ttsEngine': ttsEngine,
           'guideSeen': guideSeen,
           'agreementAccepted': agreementAccepted,
           'autoCheckUpdate': autoCheckUpdate,

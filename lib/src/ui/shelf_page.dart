@@ -14,6 +14,7 @@ import '../util/format.dart';
 import 'book_detail_page.dart';
 import 'folder_picker_page.dart';
 import 'reader/reader_page.dart';
+import 'source/discover_page.dart';
 import 'source/source_search_page.dart';
 import 'widgets/book_cover.dart';
 import 'widgets/cute.dart';
@@ -247,6 +248,12 @@ class _ShelfPageState extends State<ShelfPage> {
                     tooltip: '搜索',
                   ),
                 ),
+                // 发现页入口（用户反馈：希望有「发现页」直接逛书）
+                IconButton(
+                  onPressed: () => _openDiscover(context),
+                  icon: const Icon(Icons.explore_rounded, color: Colors.white),
+                  tooltip: '发现',
+                ),
                 IconButton(
                   onPressed: _showArrangeSheet,
                   icon: const Icon(Icons.tune_rounded, color: Colors.white),
@@ -309,6 +316,19 @@ class _ShelfPageState extends State<ShelfPage> {
           bookId: book.id,
           chapterIndex: book.safeChapterIndex,
           charOffset: book.charOffset,
+        ),
+      ),
+    );
+  }
+
+  /// 打开「发现页」（按书源分类逛书）。
+  void _openDiscover(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DiscoverPage(
+          bookStore: widget.store,
+          prefs: widget.prefs,
+          sourceStore: widget.sourceStore,
         ),
       ),
     );

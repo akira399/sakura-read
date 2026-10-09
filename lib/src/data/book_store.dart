@@ -345,6 +345,55 @@ class BookStore extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 某本书已缓存的章节数（在线书离线缓存用）。
+  ///
+  /// 统计 `ch_v2_*.txt` 且内容非空的文件——只有真正抓到正文才会写文件，
+  /// 所以这个数字就是「断网也能读的章节数」。
+  Future<int> cachedChapterCount(String bookId) async {
+    try {
+      final dir = chapterCacheDir(bookId);
+      if (!await dir.exists()) return 0;
+      var n = 0;
+      await for (final e in dir.list(followLinks: false)) {
+        if (e is! File) continue;
+        final name = e.uri.pathSegments.last;
+        if (!name.startsWith('ch_v2_') || !name.endsWith('.txt')) continue;
+        try {
+          if (await e.length() > 0) n++;
+        } catch (_) {}
+      }
+      return n;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 某本书的缓存占用（字节）。
+  Future<int> bookCacheBytes(String bookId) async {
+    var total = 0;
+    try {
+      final dir = chapterCacheDir(bookId);
+      if (await dir.exists()) {
+        await for (final e in dir.list(recursive: true, followLinks: false)) {
+          if (e is File) {
+            try {
+              total += await e.length();
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+    return total;
+  }
+
+  /// 清除某本书的章节缓存（该书改源 / 想重新抓取时用）。
+  Future<void> clearBookCache(String bookId) async {
+    try {
+      final dir = chapterCacheDir(bookId);
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (_) {}
+  }
+
   // ---------- 持久化 ----------
 
   void _saveSoon() {
@@ -391,9 +440,22 @@ Map<String, dynamic> _parseEpubIsolate(Map<String, dynamic> args) {
   final cacheDirPath = args['cacheDir'] as String;
   final r = EpubParser.parse(bytes);
   Directory(cacheDirPath).createSync(recursive: true);
+  // 插图目录（用户反馈「书里的插图不能加载」）
+  final imgDir = Directory('$cacheDirPath/img');
+  var imgTotal = 0;
   final chapters = <Map<String, dynamic>>[];
   for (var i = 0; i < r.chapters.length; i++) {
     final c = r.chapters[i];
+    // 先把本章插图落盘（正文里的占位标记按文件名查找）
+    for (final img in c.images) {
+      try {
+        imgDir.createSync(recursive: true);
+        File('${imgDir.path}/${img.name}').writeAsBytesSync(img.bytes);
+        imgTotal++;
+      } catch (_) {
+        // 单张图失败不影响正文
+      }
+    }
     final name = 'ch_${i.toString().padLeft(4, '0')}.txt';
     File('$cacheDirPath/$name').writeAsStringSync(c.text);
     chapters.add({'href': c.href, 'title': c.title, 'charCount': c.charCount});
@@ -407,6 +469,7 @@ Map<String, dynamic> _parseEpubIsolate(Map<String, dynamic> args) {
     'chapters': chapters,
     'cover': r.coverBytes,
     'coverExt': r.coverExtension,
+    'imageCount': imgTotal,
   };
 }
 

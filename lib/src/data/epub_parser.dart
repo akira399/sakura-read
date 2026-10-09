@@ -18,13 +18,36 @@ class EpubMeta {
 
 /// EPUB 章节（已完成 HTML → 纯文本提取）。
 class EpubChapter {
-  EpubChapter({required this.href, required this.title, required this.text});
+  EpubChapter({
+    required this.href,
+    required this.title,
+    required this.text,
+    this.images = const [],
+  });
 
   final String href;
   final String title;
   final String text;
 
+  /// 本章引用的插图（资源路径 + 原始字节）。
+  ///
+  /// 用户反馈「书里的插图不能加载」：EPUB 正文里的 `<img>` 以前只替换成
+  /// 「［插图］」占位文字，图片本身被丢掉。现在导入时把图片一并抽出来，
+  /// 交给 [BookStore] 存到书籍缓存目录，正文里写占位标记，阅读器按标记渲染。
+  final List<EpubImage> images;
+
   int get charCount => text.length;
+}
+
+/// EPUB 里的一张插图（原始字节 + 建议文件名）。
+class EpubImage {
+  EpubImage({required this.name, required this.bytes});
+
+  /// 建议文件名（已去掉目录，保留扩展名，用于本地落盘）。
+  final String name;
+
+  /// 图片原始字节。
+  final Uint8List bytes;
 }
 
 class EpubParseResult {
@@ -219,7 +242,7 @@ class EpubParser {
       }
     }
 
-    // 5. 章节正文
+    // 5. 章节正文（含插图提取）
     final chapters = <EpubChapter>[];
     var index = 0;
     for (final href in spineRefs) {
@@ -234,11 +257,25 @@ class EpubParser {
       if (!isHtml) continue;
       final htmlStr = _entryString(entry);
       if (htmlStr == null || htmlStr.trim().isEmpty) continue;
-      final text = extractText(htmlStr);
+      // 该章所在目录（用于把相对图片路径解析成 zip 内路径）
+      final chapterDir = _dirName(href);
+      final extracted = _extractTextWithImages(
+        htmlStr,
+        chapterDir: chapterDir,
+        archive: archive,
+      );
+      final text = extracted.text;
       if (text.trim().isEmpty) continue;
       index++;
       final title = tocTitles[href] ?? _fallbackTitle(htmlStr) ?? '第 $index 章';
-      chapters.add(EpubChapter(href: href, title: title, text: text));
+      chapters.add(
+        EpubChapter(
+          href: href,
+          title: title,
+          text: text,
+          images: extracted.images,
+        ),
+      );
     }
     if (chapters.isEmpty) throw EpubException('没有找到可阅读的章节');
 
@@ -284,13 +321,31 @@ class EpubParser {
 
   /// HTML → 纯文本（段落用 \n 分隔，保留基本分段结构）。
   static String extractText(String htmlSource) {
+    return _extractTextWithImages(htmlSource).text;
+  }
+
+  /// 插图占位标记前缀：`\u0001IMG:<文件名>\u0001`。
+  ///
+  /// 为什么用控制字符：正文里几乎不可能出现，解析/清洗时不会被当作正文
+  /// 处理，也不会在朗读（TTS）时念出来；阅读器按它把图片插入排版。
+  static const String imageMarkerPrefix = '\u0001IMG:';
+  static const String imageMarkerSuffix = '\u0001';
+
+  /// HTML → 纯文本，同时把 `<img>` 抽成「图片 + 占位标记」。
+  static ({String text, List<EpubImage> images}) _extractTextWithImages(
+    String htmlSource, {
+    String chapterDir = '',
+    Archive? archive,
+  }) {
     dom.Document doc;
     try {
       doc = html_parser.parse(htmlSource);
     } catch (_) {
-      return '';
+      return (text: '', images: const []);
     }
     final out = <String>[];
+    final images = <EpubImage>[];
+    final usedNames = <String>{};
     final buf = StringBuffer();
 
     void flush() {
@@ -302,6 +357,43 @@ class EpubParser {
           .trim();
       buf.clear();
       if (s.isNotEmpty) out.add(s);
+    }
+
+    /// 把一张 `<img>` 变成「占位标记」，并把字节收集起来。
+    void emitImage(dom.Element node) {
+      if (archive == null) {
+        buf.write('［插图］');
+        return;
+      }
+      final src = (node.attributes['src'] ?? '').trim();
+      if (src.isEmpty) {
+        buf.write('［插图］');
+        return;
+      }
+      // 解析为 zip 内路径（相对章节文件所在目录）
+      final path = _resolvePath(
+        chapterDir,
+        Uri.decodeComponent(src.split('#').first),
+      );
+      final entry = _findEntry(archive, path);
+      if (entry == null || !entry.isFile) {
+        buf.write('［插图］');
+        return;
+      }
+      final bytes = _entryBytes(entry);
+      if (bytes.isEmpty) {
+        buf.write('［插图］');
+        return;
+      }
+      // 去掉重名（不同目录下同名文件）避免互相覆盖
+      var name = _baseName(path);
+      if (!usedNames.add(name)) {
+        name = '${usedNames.length}_$name';
+        usedNames.add(name);
+      }
+      images.add(EpubImage(name: name, bytes: bytes));
+      flush();
+      out.add('$imageMarkerPrefix$name$imageMarkerSuffix');
     }
 
     void walk(dom.Node node) {
@@ -317,7 +409,7 @@ class EpubParser {
           return;
         }
         if (name == 'img') {
-          buf.write('［插图］');
+          emitImage(node);
           return;
         }
         final isBlock = _blockTags.contains(name);
@@ -335,7 +427,13 @@ class EpubParser {
 
     walk(doc);
     flush();
-    return out.join('\n');
+    return (text: out.join('\n'), images: images);
+  }
+
+  /// 取路径的文件名（去目录）。
+  static String _baseName(String path) {
+    final i = path.lastIndexOf('/');
+    return i < 0 ? path : path.substring(i + 1);
   }
 
   // ---------- OPF / 目录解析 ----------

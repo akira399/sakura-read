@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 /// 系统朗读（TTS）服务：封装原生 TextToSpeech。
 ///
 /// - 自动挑选可用引擎（优先中文可用者）；
+/// - 支持**手动指定引擎**（用户反馈：一加等机型自带引擎被忽略 → 朗读不可用）；
+/// - 指定引擎失败时**自动回退**到其它可用引擎，避免「用不了」；
 /// - 「按段落」朗读：一次播报一段，播完自动播下一段，便于跳段 / 调速；
 /// - 播放器状态通过 [ChangeNotifier] 暴露给 UI。
 class TtsService extends ChangeNotifier {
@@ -21,6 +23,12 @@ class TtsService extends ChangeNotifier {
   bool _speaking = false;
   bool _paused = false;
   String? _lastError;
+
+  /// 用户指定的引擎包名（null / 空 = 交给系统挑默认）。
+  String? _preferredEngine;
+
+  /// 当前实际生效的引擎（用于诊断提示）。
+  String? _activeEngine;
 
   /// 当前朗读的段落序号（-1 = 未开始）。
   int _index = -1;
@@ -42,28 +50,89 @@ class TtsService extends ChangeNotifier {
   int get index => _index;
   int get total => _paragraphs.length;
 
+  /// 用户指定的引擎（设置页展示用）。
+  String? get preferredEngine => _preferredEngine;
+
+  /// 实际生效的引擎（可能与指定值不同：指定失败时回退过）。
+  String? get activeEngine => _activeEngine;
+
+  /// 指定朗读引擎（null / 空 = 系统默认）；会重置连接以便下次用新引擎。
+  Future<void> setPreferredEngine(String? engine) async {
+    final next = (engine == null || engine.isEmpty) ? null : engine;
+    if (_preferredEngine == next) return;
+    // 换引擎必须重建原生 TTS 实例（否则继续用旧引擎）
+    await _teardown();
+    _preferredEngine = next;
+    notifyListeners();
+  }
+
   /// 初始化（惰性）：探测引擎并尝试建立 TTS 连接。
   ///
   /// 返回 true = 可用；false = 设备无可用引擎（调用方应提示用户去安装）。
+  ///
+  /// 关键改进（用户反馈「一加15自带语音引擎，用不了朗读」）：
+  /// 以前只试「指定引擎（默认 null → 系统默认）」一次，失败即放弃。
+  /// 现在按「用户指定 → 系统默认 → 逐个可用引擎」依次尝试，
+  /// 任一成功即可用——显著提高国产 ROM（自带引擎未注册为默认）的成功率。
   Future<bool> ensureReady() async {
     if (_ready) return true;
-    if (_supported && _lastError != null) return false;
-    try {
-      final ok = await _channel.invokeMethod<bool>('ttsInit', {'engine': null});
-      _supported = true;
-      _ready = ok == true;
-      if (!_ready) _lastError = '系统未安装可用的语音引擎';
-    } on PlatformException catch (e) {
-      _supported = false;
-      _ready = false;
-      _lastError = e.message ?? '朗读初始化失败';
-    } on MissingPluginException {
-      _supported = false;
-      _ready = false;
-      _lastError = '当前平台不支持系统朗读';
+    if (_supported && _lastError != null && _preferredEngine == null) {
+      return false;
     }
+    _supported = true;
+
+    final candidates = <String?>[
+      if (_preferredEngine != null) _preferredEngine,
+      null, // 系统默认（让系统自己挑）
+      ...await engines(), // 兜底：逐个试设备上所有引擎
+    ];
+
+    for (final engine in candidates) {
+      final ok = await _tryInit(engine);
+      if (ok) {
+        _ready = true;
+        _activeEngine = engine ?? _activeEngine ?? 'system';
+        _lastError = null;
+        notifyListeners();
+        return true;
+      }
+    }
+
+    _ready = false;
+    _lastError = '系统未安装可用的语音引擎，或引擎初始化失败';
     notifyListeners();
-    return _ready;
+    return false;
+  }
+
+  /// 用指定引擎尝试初始化（失败返回 false，不抛异常）。
+  Future<bool> _tryInit(String? engine) async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('ttsInit', {
+        'engine': engine,
+      });
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 断开原生 TTS（换引擎 / 重试前调用）。
+  Future<void> _teardown() async {
+    try {
+      await _channel.invokeMethod('ttsShutdown');
+    } catch (_) {}
+    _ready = false;
+    _speaking = false;
+    _index = -1;
+  }
+
+  /// 重置错误状态并强制重新初始化（设置页「重试」用）。
+  Future<bool> reinit() async {
+    await _teardown();
+    _lastError = null;
+    _supported = false;
+    notifyListeners();
+    return ensureReady();
   }
 
   /// 设备上可用的 TTS 引擎包名列表。

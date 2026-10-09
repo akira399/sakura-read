@@ -6,6 +6,7 @@ import '../data/pet_guide.dart';
 import '../data/pet_store.dart';
 import '../data/prefs.dart';
 import '../data/stats_store.dart';
+import '../platform/tts_service.dart';
 import '../platform/url_launcher.dart';
 import '../platform/update_service.dart';
 import '../source/source_store.dart';
@@ -41,6 +42,16 @@ class _SettingsPageState extends State<SettingsPage> {
 
   /// 手动检查更新进行中（按钮转圈、避免重复点击）。
   bool _checkingUpdate = false;
+
+  /// 设备上可用的朗读引擎（懒加载）。
+  List<String>? _ttsEngines;
+
+  /// 朗读引擎探测中。
+  bool _ttsProbing = false;
+
+  /// 上一次朗读自检结果（null = 未测过）。
+  String? _ttsProbeResult;
+  bool _ttsProbeOk = false;
 
   @override
   void initState() {
@@ -93,6 +104,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _appearanceCard(context),
               const SizedBox(height: 14),
               _readingCard(context),
+              const SizedBox(height: 14),
+              _ttsCard(context),
               const SizedBox(height: 14),
               _petCard(context),
               const SizedBox(height: 14),
@@ -516,6 +529,226 @@ class _SettingsPageState extends State<SettingsPage> {
         duration: const Duration(seconds: 2),
       ),
     );
+  }
+
+  /// 朗读卡片：引擎选择 + 自检。
+  ///
+  /// 用户反馈「一加15 自带语音引擎，用不了朗读」：国产 ROM 的引擎有时
+  /// 不会被系统选为默认，需要能让用户**手动指定**并当场验证。
+  Widget _ttsCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final tts = TtsService.instance;
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle(
+            icon: Icons.record_voice_over_rounded,
+            title: '朗读',
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '没声音？试试换个语音引擎，或点「测试朗读」看看是否正常',
+            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          // 引擎选择
+          AnimatedBuilder(
+            animation: tts,
+            builder: (_, _) {
+              final engines = _ttsEngines;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (engines == null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      leading: const Icon(Icons.memory_rounded, size: 20),
+                      title: const Text('语音引擎', style: TextStyle(fontSize: 14)),
+                      subtitle: Text(
+                        _ttsProbing ? '正在检测…' : '点击检测设备上的语音引擎',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: _ttsProbing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.chevron_right_rounded),
+                      onTap: _ttsProbing ? null : _probeTtsEngines,
+                    )
+                  else if (engines.isEmpty)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      leading: Icon(
+                        Icons.warning_amber_rounded,
+                        size: 20,
+                        color: scheme.error,
+                      ),
+                      title: const Text(
+                        '未检测到语音引擎',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      subtitle: const Text(
+                        '请先安装系统语音服务（如「讯飞语记」「Google 语音服务」）',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      onTap: _probeTtsEngines,
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: DropdownButtonFormField<String>(
+                        initialValue: widget.prefs.ttsEngine,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: '语音引擎',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('系统默认'),
+                          ),
+                          for (final e in engines)
+                            DropdownMenuItem(
+                              value: e,
+                              child: Text(
+                                _shortEngineName(e),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (v) => _changeTtsEngine(v ?? ''),
+                      ),
+                    ),
+                  if (_ttsProbeResult != null) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          _ttsProbeOk
+                              ? Icons.check_circle_rounded
+                              : Icons.error_outline_rounded,
+                          size: 16,
+                          color: _ttsProbeOk ? scheme.primary : scheme.error,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            _ttsProbeResult!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _ttsProbeOk
+                                  ? scheme.onSurfaceVariant
+                                  : scheme.error,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _ttsProbing ? null : _probeTtsEngines,
+                icon: const Icon(Icons.search_rounded, size: 18),
+                label: const Text('检测引擎'),
+              ),
+              FilledButton.icon(
+                onPressed: _ttsProbing ? null : _testTts,
+                icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                label: const Text('测试朗读'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 引擎包名 → 友好短名（如 `com.iflytek.tts` → `iflytek`）。
+  String _shortEngineName(String pkg) {
+    final parts = pkg.split('.');
+    if (parts.length >= 2) return '${parts[parts.length - 2]} · $pkg';
+    return pkg;
+  }
+
+  /// 检测设备上可用的朗读引擎。
+  Future<void> _probeTtsEngines() async {
+    setState(() {
+      _ttsProbing = true;
+      _ttsProbeResult = null;
+    });
+    final tts = TtsService.instance;
+    final list = await tts.engines();
+    if (!mounted) return;
+    // 把用户已选引擎同步给服务（首次进入设置页时）
+    await tts.setPreferredEngine(widget.prefs.ttsEngine);
+    if (!mounted) return;
+    setState(() {
+      _ttsEngines = list;
+      _ttsProbing = false;
+      _ttsProbeResult = list.isEmpty
+          ? '未找到语音引擎，请先安装系统语音服务'
+          : '检测到 ${list.length} 个引擎';
+      _ttsProbeOk = list.isNotEmpty;
+    });
+  }
+
+  /// 切换引擎并重新初始化。
+  Future<void> _changeTtsEngine(String engine) async {
+    final tts = TtsService.instance;
+    widget.prefs.setTtsEngine(engine);
+    await tts.setPreferredEngine(engine);
+    if (!mounted) return;
+    setState(() {
+      _ttsProbeResult = '已切换引擎，点「测试朗读」验证';
+      _ttsProbeOk = true;
+    });
+  }
+
+  /// 自检：真正初始化一次 TTS 并试播一小段。
+  Future<void> _testTts() async {
+    final tts = TtsService.instance;
+    setState(() {
+      _ttsProbing = true;
+      _ttsProbeResult = null;
+    });
+    await tts.setPreferredEngine(widget.prefs.ttsEngine);
+    final ok = await tts.reinit();
+    if (!mounted) return;
+    if (!ok) {
+      setState(() {
+        _ttsProbing = false;
+        _ttsProbeOk = false;
+        _ttsProbeResult = tts.lastError ?? '初始化失败，试试换一个引擎';
+      });
+      return;
+    }
+    // 试播一句中文，确认真的能出声（有些引擎初始化成功但中文缺失）
+    await tts.start(['樱读朗读测试，听到这句话说明朗读正常。'], from: 0);
+    if (!mounted) return;
+    setState(() {
+      _ttsProbing = false;
+      _ttsProbeOk = true;
+      _ttsProbeResult = '正在播放测试语音…能听到声音就说明可用';
+    });
   }
 
   /// 更新卡片：手动检查更新 + 启动自动检查开关。

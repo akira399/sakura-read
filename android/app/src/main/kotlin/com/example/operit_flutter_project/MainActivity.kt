@@ -26,6 +26,9 @@ class MainActivity : FlutterActivity() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var ttsInitRequested = false
+
+    /** 当前生效的引擎包名（null = 系统默认）；用于判断是否需要重建实例。 */
+    private var currentEngine: String? = null
     private var ttsChannel: MethodChannel? = null
     private var openChannel: MethodChannel? = null
 
@@ -183,16 +186,20 @@ class MainActivity : FlutterActivity() {
      *  - engine 为 null / 空：交给系统选默认引擎；
      *  - 中文失败时自动回退到 Locale.CHINA / CHINESE；
      *  - 通过 [MethodChannel] 回传 ttsState 事件（ready / start / done / error）。
+     *
+     * 用户反馈「一加15 自带语音引擎，用不了朗读」的应对：
+     *  - 允许 Dart 侧**逐个引擎重试**（每次调用都重建实例，不再被
+     *    [ttsInitRequested] 永久挡死）；
+     *  - 构造 / 初始化失败时**释放旧实例**再返回失败，避免半死实例占着。
      */
     private fun initTts(engine: String?, result: MethodChannel.Result) {
-        if (ttsReady && tts != null) {
+        // 已经就绪且引擎没变：直接复用
+        if (ttsReady && tts != null && engine == currentEngine) {
             result.success(true)
             return
         }
-        if (ttsInitRequested) {
-            result.success(false)
-            return
-        }
+        // 换引擎 / 上次失败：先释放旧实例，重新建
+        releaseTts()
         ttsInitRequested = true
         try {
             val listener = TextToSpeech.OnInitListener { status ->
@@ -202,6 +209,7 @@ class MainActivity : FlutterActivity() {
                         applyChineseLocale(engineObj)
                         engineObj.setOnUtteranceProgressListener(progressListener)
                         ttsReady = true
+                        currentEngine = engine
                     }
                 } else {
                     ttsReady = false
@@ -217,9 +225,23 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             ttsReady = false
             ttsInitRequested = false
+            releaseTts()
             notifyTts("error")
             result.success(false)
         }
+    }
+
+    /** 释放当前 TTS 实例（换引擎 / 重试前调用）。 */
+    private fun releaseTts() {
+        try {
+            tts?.stop()
+            tts?.shutdown()
+        } catch (_: Exception) {
+        }
+        tts = null
+        ttsReady = false
+        ttsInitRequested = false
+        currentEngine = null
     }
 
     /** 设置中文（优先 zh-CN，退而求其次 zh）。 */
@@ -283,6 +305,7 @@ class MainActivity : FlutterActivity() {
         tts = null
         ttsReady = false
         ttsInitRequested = false
+        currentEngine = null
     }
 
     /** 用系统浏览器打开链接（失败时返回 false，由 Dart 侧提示）。 */

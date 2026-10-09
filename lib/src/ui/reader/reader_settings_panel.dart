@@ -76,7 +76,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     );
   }
 
-  /// 排版：字号 / 行距 / 字间距 / 页边距 / 段首缩进。
+  /// 排版：字号 / 行距 / 字间距 / 页边距 / 上下留白 / 段首缩进。
   Widget _typographyTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -111,13 +111,32 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           onChanged: widget.prefs.setLetterSpacing,
         ),
         _sliderRow(
-          label: '页边距',
+          label: '左右边距',
           value: widget.prefs.readerMarginH,
           min: 8,
           max: 48,
           divisions: 20,
           display: widget.prefs.readerMarginH.round().toString(),
           onChanged: widget.prefs.setReaderMarginH,
+        ),
+        // 用户反馈：希望正文离顶部 / 底部的距离可以自己调
+        _sliderRow(
+          label: '距顶部',
+          value: widget.prefs.readerPaddingTop,
+          min: 0,
+          max: 160,
+          divisions: 32,
+          display: widget.prefs.readerPaddingTop.round().toString(),
+          onChanged: widget.prefs.setReaderPaddingTop,
+        ),
+        _sliderRow(
+          label: '距底部',
+          value: widget.prefs.readerPaddingBottom,
+          min: 0,
+          max: 160,
+          divisions: 32,
+          display: widget.prefs.readerPaddingBottom.round().toString(),
+          onChanged: widget.prefs.setReaderPaddingBottom,
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -273,6 +292,24 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           value: widget.prefs.keepScreenOn,
           onChanged: widget.prefs.setKeepScreenOn,
           title: const Text('阅读时保持屏幕常亮', style: TextStyle(fontSize: 13.5)),
+        ),
+        // 用户反馈：页眉 / 页脚也想能关掉（有些书源章节名很长，看着乱）
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: widget.prefs.readerHeaderVisible,
+          onChanged: widget.prefs.setReaderHeaderVisible,
+          title: const Text('显示页眉（章节名）', style: TextStyle(fontSize: 13.5)),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: widget.prefs.readerFooterVisible,
+          onChanged: widget.prefs.setReaderFooterVisible,
+          title: const Text(
+            '显示页脚（时间 / 页码 / 电量）',
+            style: TextStyle(fontSize: 13.5),
+          ),
         ),
         if (petStore != null)
           AnimatedBuilder(

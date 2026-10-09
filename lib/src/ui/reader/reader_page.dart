@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -88,6 +89,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 是否处于朗读模式（显示控制条）。
   bool _ttsActive = false;
+
+  /// 本章插图目录（EPUB 有插图时非空；正文里的图片标记从这里加载）。
+  String? _imageDir;
 
   /// 当前章节的朗读段落（含原文偏移，用于自动跟随）。
   List<SpeechParagraph> _ttsParagraphs = const [];
@@ -241,6 +245,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       final book = _book;
       if (book == null) throw '这本书不在书架里了';
       _content ??= createBookContent(book, widget.store);
+      // 插图目录（EPUB 专用；图片在导入时已抽到 <cacheDir>/img/）
+      final imgDir = '${widget.store.chapterCacheDir(book.id).path}/img';
+      if (mounted) {
+        if (_imageDir != imgDir) _imageDir = imgDir;
+      }
       var raw = _rawTextCache[_chapterIndex];
       final rawCached = raw != null;
       raw ??= await _content!.chapterText(_chapterIndex);
@@ -286,6 +295,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final cached = _processedCache[key];
     if (cached != null) return cached;
     var text = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    // 分页模式无法把图片嵌进文字排版里（分页按字符测量），
+    // 这里把插图标记换成可读的占位文字，避免控制字符混进正文。
+    // 滚动模式会保留标记并渲染真图（见 _ScrollReader）。
+    if (widget.prefs.pageMode != PageTurnMode.scroll) {
+      text = text.replaceAll(RegExp('\u0001IMG:[^\u0001]*\u0001'), '［插图］');
+    }
     if (widget.prefs.paragraphIndent) {
       final lines = text.split('\n');
       for (var i = 0; i < lines.length; i++) {
@@ -355,6 +370,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         '${_viewport.width.round()}x${_viewport.height.round()}|'
         '${p.fontSize}|${p.lineHeight}|${p.letterSpacing}|${p.readerMarginH}|'
         '${p.fontFamily}|${p.paragraphIndent}|${p.pageMode.name}|'
+        '${p.readerPaddingTop}|${p.readerPaddingBottom}|'
         '${chapterText.length}|${chapterText.hashCode}';
   }
 
@@ -367,8 +383,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return Size(width, height);
   }
 
-  static const double _topReserve = 30;
-  static const double _bottomReserve = 46;
+  /// 顶部留白（用户可调，见设置 → 排版）。
+  double get _topReserve => widget.prefs.readerPaddingTop;
+
+  /// 底部留白（用户可调）。
+  double get _bottomReserve => widget.prefs.readerPaddingBottom;
 
   Future<void> _startLayout() async {
     final gen = ++_paginateGen;
@@ -911,6 +930,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         topReserve: _topReserve,
         bottomReserve: _bottomReserve,
         initialOffset: _targetOffset,
+        imageDir: _imageDir,
         onOffsetChanged: (offset) {
           _scrollOffset = offset;
           _saveProgressSoon();
@@ -958,62 +978,64 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return Stack(
       children: [
         Positioned.fill(child: reader),
-        // 页眉：章节名（呼出菜单时自动隐藏，避免与菜单叠字）
-        Positioned(
-          left: widget.prefs.readerMarginH,
-          right: widget.prefs.readerMarginH,
-          top: _topReserve - 24,
-          child: AnimatedOpacity(
-            opacity: _barsVisible ? 0 : 1,
-            duration: const Duration(milliseconds: 180),
-            child: Text(
-              chapter?.title ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11,
-                color: bg.textColor.withValues(alpha: .45),
+        // 页眉：章节名（呼出菜单时自动隐藏，避免与菜单叠字；可在设置里关闭）
+        if (widget.prefs.readerHeaderVisible)
+          Positioned(
+            left: widget.prefs.readerMarginH,
+            right: widget.prefs.readerMarginH,
+            top: (_topReserve - 24).clamp(2.0, 200.0),
+            child: AnimatedOpacity(
+              opacity: _barsVisible ? 0 : 1,
+              duration: const Duration(milliseconds: 180),
+              child: Text(
+                chapter?.title ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: bg.textColor.withValues(alpha: .45),
+                ),
               ),
             ),
           ),
-        ),
-        // 页脚：页码 / 进度（呼出菜单时自动隐藏）
-        Positioned(
-          left: widget.prefs.readerMarginH,
-          right: widget.prefs.readerMarginH,
-          bottom: _bottomReserve - 30,
-          child: AnimatedOpacity(
-            opacity: _barsVisible ? 0 : 1,
-            duration: const Duration(milliseconds: 180),
-            child: Row(
-              children: [
-                // 左下：时间
-                Expanded(child: Text(_clock, style: footStyle)),
-                // 中：页码 · 进度
-                Expanded(
-                  child: Text(
-                    mode == PageTurnMode.scroll || _pages.isEmpty
-                        ? '${(progress * 100).toStringAsFixed(1)}%'
-                        : '${_pageIndex + 1} / ${_pages.length}  ·  ${(progress * 100).toStringAsFixed(1)}%',
-                    textAlign: TextAlign.center,
-                    style: footStyle,
-                  ),
-                ),
-                // 右下：电量
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: BatteryBadge(
-                      level: _batteryLevel,
-                      charging: _batteryCharging,
-                      color: footColor,
+        // 页脚：页码 / 进度（呼出菜单时自动隐藏；可在设置里关闭）
+        if (widget.prefs.readerFooterVisible)
+          Positioned(
+            left: widget.prefs.readerMarginH,
+            right: widget.prefs.readerMarginH,
+            bottom: (_bottomReserve - 30).clamp(2.0, 200.0),
+            child: AnimatedOpacity(
+              opacity: _barsVisible ? 0 : 1,
+              duration: const Duration(milliseconds: 180),
+              child: Row(
+                children: [
+                  // 左下：时间
+                  Expanded(child: Text(_clock, style: footStyle)),
+                  // 中：页码 · 进度
+                  Expanded(
+                    child: Text(
+                      mode == PageTurnMode.scroll || _pages.isEmpty
+                          ? '${(progress * 100).toStringAsFixed(1)}%'
+                          : '${_pageIndex + 1} / ${_pages.length}  ·  ${(progress * 100).toStringAsFixed(1)}%',
+                      textAlign: TextAlign.center,
+                      style: footStyle,
                     ),
                   ),
-                ),
-              ],
+                  // 右下：电量
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: BatteryBadge(
+                        level: _batteryLevel,
+                        charging: _batteryCharging,
+                        color: footColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -1311,6 +1333,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _toastLate('本章暂时没有可朗读的内容');
       return;
     }
+    // 应用用户在设置里选定的朗读引擎（空 = 系统默认）。
+    // 用户反馈：一加自带引擎不会被系统选为默认 → 必须先指定再初始化。
+    await _tts.setPreferredEngine(widget.prefs.ttsEngine);
+    if (!mounted) return;
     // 用「当前阅读位置」作为朗读起点
     final startOffset = _readingOffset;
     _ttsParagraphs = splitForSpeechWithOffsets(_chapterText);
@@ -2069,7 +2095,11 @@ class _ScrollReader extends StatefulWidget {
     required this.initialOffset,
     required this.onOffsetChanged,
     required this.onToggleBars,
+    this.imageDir,
   });
+
+  /// 插图目录（EPUB 图片；空则正文里的图片标记显示为「［插图］」）。
+  final String? imageDir;
 
   final String text;
   final TextStyle style;
@@ -2249,6 +2279,19 @@ class _ScrollReaderState extends State<_ScrollReader> {
           if (paragraph.trim().isEmpty) {
             return SizedBox(key: key, height: widget.style.fontSize ?? 16);
           }
+          // 插图占位标记 → 渲染成图片（用户反馈：书里的插图不能加载）
+          final imgName = _imageNameOf(paragraph);
+          if (imgName != null) {
+            return GestureDetector(
+              key: key,
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onToggleBars,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: BookImage(name: imgName, dir: widget.imageDir),
+              ),
+            );
+          }
           return GestureDetector(
             key: key,
             behavior: HitTestBehavior.opaque,
@@ -2264,6 +2307,74 @@ class _ScrollReaderState extends State<_ScrollReader> {
           );
         },
       ),
+    );
+  }
+}
+
+/// 插图占位标记的解析：`\u0001IMG:xxx.png\u0001` → `xxx.png`。
+///
+/// 与 [EpubParser.imageMarkerPrefix] 保持一致（见其注释：用控制字符是为了
+/// 不与正文冲突、也不会被 TTS 朗读出来）。
+String? _imageNameOf(String paragraph) {
+  const prefix = '\u0001IMG:';
+  const suffix = '\u0001';
+  final t = paragraph.trim();
+  if (!t.startsWith(prefix) || !t.endsWith(suffix)) return null;
+  final name = t.substring(prefix.length, t.length - suffix.length);
+  return name.isEmpty ? null : name;
+}
+
+/// 正文插图（从书籍缓存目录读取）。
+///
+/// 用户反馈「书里的插图不能加载」：EPUB 导入时图片已抽到
+/// `<cacheDir>/img/`，这里按占位标记里的文件名加载。
+/// 读不到时降级为「［插图］」文字，不打扰阅读。
+class BookImage extends StatelessWidget {
+  const BookImage({super.key, required this.name, this.dir});
+
+  final String name;
+
+  /// 图片目录（为空则只显示占位）。
+  final String? dir;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final placeholder = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.image_outlined,
+            size: 16,
+            color: scheme.onSurfaceVariant.withValues(alpha: .6),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '［插图］',
+            style: TextStyle(
+              fontSize: 12.5,
+              color: scheme.onSurfaceVariant.withValues(alpha: .6),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final d = dir;
+    if (d == null || d.isEmpty) return placeholder;
+    final file = File('$d/$name');
+    if (!file.existsSync()) return placeholder;
+
+    return Image.file(
+      file,
+      fit: BoxFit.contain,
+      errorBuilder: (_, _, _) => placeholder,
+      frameBuilder: (_, child, frame, wasSync) {
+        if (wasSync || frame != null) return child;
+        return placeholder;
+      },
     );
   }
 }

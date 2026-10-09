@@ -78,6 +78,44 @@ int bookRelevanceScore(SearchBook b, String key) {
   return score;
 }
 
+/// 发现页的一个分类（书源 exploreUrl 的一行）。
+class ExploreCategory {
+  const ExploreCategory({required this.title, required this.url});
+
+  /// 分类名（如「玄幻」「排行榜」）。
+  final String title;
+
+  /// 该分类的地址（已渲染模板变量）。
+  final String url;
+}
+
+/// 单源「发现页」抓取结果。
+class SourceExploreResult {
+  const SourceExploreResult({
+    required this.source,
+    this.books = const [],
+    this.error,
+    this.elapsedMs = 0,
+  });
+
+  final BookSource source;
+  final List<SearchBook> books;
+  final String? error;
+  final int elapsedMs;
+}
+
+/// 书源「发现页」：解析 exploreUrl 分类并抓取分类下的书单。
+///
+/// 用户反馈（社区最期待的功能之一）：希望有「发现页」直接逛书，
+/// 而不是每次都先想好关键词去搜。这里实现 Legado 的 `exploreUrl` 规则：
+///
+/// ```
+/// 玄幻::https://site/list/xuanhuan/{{page}}.html
+/// 排行::https://site/rank/all/{{page}}.html   // 可用 {{page}} 占位
+/// ```
+///
+/// 多分类之间用换行分隔；标题与地址用 `::` 分隔（也兼容 `,`）。
+///
 /// 多源搜索聚合器。
 class OnlineRepo {
   OnlineRepo({
@@ -260,6 +298,221 @@ class OnlineRepo {
     if (r == null || r.isEmpty) return null;
     final v = engine.getString(r, ctx: item);
     return (v == null || v.isEmpty) ? null : v;
+  }
+
+  // ==================== 发现页（exploreUrl / ruleExplore） ====================
+
+  /// 解析书源的 exploreUrl → 分类列表（不含分页渲染，供 UI 展示标签）。
+  ///
+  /// 格式（Legado 兼容）：
+  /// ```
+  /// 玄幻::https://site/list/xuanhuan/{{page}}.html
+  /// 排行::https://site/rank/all/{{page}}.html
+  /// ```
+  /// 也支持 `标题,地址` 与「只有地址」（标题自动取 URL 末段）。
+  static List<ExploreCategory> parseExploreCategories(BookSource source) {
+    final raw = source.exploreUrl;
+    if (raw == null || raw.trim().isEmpty) return const [];
+    final out = <ExploreCategory>[];
+    for (final line in raw.split('\n')) {
+      final item = line.trim();
+      if (item.isEmpty || item.startsWith('#')) continue;
+      // 标题::地址 优先；退化为 标题,地址
+      var title = '';
+      var url = '';
+      final sepIdx = item.indexOf('::');
+      if (sepIdx >= 0) {
+        title = item.substring(0, sepIdx).trim();
+        url = item.substring(sepIdx + 2).trim();
+      } else {
+        final comma = item.indexOf(',');
+        if (comma >= 0) {
+          title = item.substring(0, comma).trim();
+          url = item.substring(comma + 1).trim();
+        } else {
+          url = item;
+        }
+      }
+      if (url.isEmpty) continue;
+      if (title.isEmpty) {
+        // 从 URL 末段猜个名字，避免标签空白
+        final seg = url.split('/').where((s) => s.isNotEmpty).toList();
+        title = seg.isEmpty ? '分类' : seg.last;
+      }
+      out.add(ExploreCategory(title: title, url: url));
+    }
+    return out;
+  }
+
+  /// 抓取某个分类的一页书单（复用搜索页解析规则 [ExploreRule]）。
+  Future<List<SearchBook>> exploreOne(
+    BookSource source,
+    ExploreCategory category, {
+    int page = 1,
+  }) async {
+    final url = _renderExploreUrl(category.url, source.bookSourceUrl, page);
+    final headers = _mergeHeaders(source, const {});
+    await _gateFor(source).waitSlot();
+    final resp = await _client.get(
+      url,
+      headers: headers,
+      timeout: perSourceTimeout,
+    );
+    if (!resp.ok) throw SourceHttpException('HTTP ${resp.statusCode}');
+    return parseExplorePage(source, resp.body);
+  }
+
+  /// 把分类地址渲染为可请求的绝对地址（补全相对路径 + `{{page}}` 占位）。
+  static String _renderExploreUrl(String raw, String base, int page) {
+    var s = raw.trim();
+    // 分页占位（Legado 支持 {{page}} / {page}）
+    s = s.replaceAll('{{page}}', '$page').replaceAll('{page}', '$page');
+    return resolveUrl(s, base);
+  }
+
+  /// 解析发现页书单（与搜索页结构一致，规则取 [BookSource.exploreRule]）。
+  List<SearchBook> parseExplorePage(BookSource source, String body) {
+    final rule = source.exploreRule ?? source.searchRule;
+    if (rule == null) return const [];
+    // ExploreRule 与 SearchRule 字段同名，这里统一取字段
+    final listRule = _exploreField(rule, 'bookList');
+    if (listRule == null || listRule.trim().isEmpty) return const [];
+
+    final engine = AnalyzeRule(body, baseUrl: source.bookSourceUrl);
+    final items = engine.getRawList(listRule);
+    final books = <SearchBook>[];
+    for (final item in items) {
+      if (!(item is dom.Element || item is xml.XmlElement || item is Map)) {
+        continue;
+      }
+      final name = _field(engine, _exploreField(rule, 'name'), item);
+      if (name == null || name.isEmpty) continue;
+      final bookUrlRaw = _field(engine, _exploreField(rule, 'bookUrl'), item);
+      final coverRaw = _field(engine, _exploreField(rule, 'coverUrl'), item);
+      books.add(
+        SearchBook(
+          origin: source.bookSourceUrl,
+          originName: source.bookSourceName,
+          name: name,
+          author: _field(engine, _exploreField(rule, 'author'), item),
+          kind: _field(engine, _exploreField(rule, 'kind'), item),
+          intro: _field(engine, _exploreField(rule, 'intro'), item),
+          coverUrl: coverRaw == null
+              ? null
+              : resolveUrl(coverRaw, source.bookSourceUrl),
+          bookUrl: bookUrlRaw == null
+              ? null
+              : resolveUrl(bookUrlRaw, source.bookSourceUrl),
+          latestChapterTitle: _field(
+            engine,
+            _exploreField(rule, 'lastChapter'),
+            item,
+          ),
+          time: _field(engine, _exploreField(rule, 'updateTime'), item),
+          wordCount: _field(engine, _exploreField(rule, 'wordCount'), item),
+        ),
+      );
+    }
+    return books;
+  }
+
+  /// 从 ExploreRule / SearchRule 取同名字段（两者字段名一致）。
+  String? _exploreField(Object rule, String key) {
+    if (rule is ExploreRule) {
+      return switch (key) {
+        'bookList' => rule.bookList,
+        'name' => rule.name,
+        'author' => rule.author,
+        'intro' => rule.intro,
+        'kind' => rule.kind,
+        'lastChapter' => rule.lastChapter,
+        'updateTime' => rule.updateTime,
+        'bookUrl' => rule.bookUrl,
+        'coverUrl' => rule.coverUrl,
+        'wordCount' => rule.wordCount,
+        _ => null,
+      };
+    }
+    if (rule is SearchRule) {
+      return switch (key) {
+        'bookList' => rule.bookList,
+        'name' => rule.name,
+        'author' => rule.author,
+        'intro' => rule.intro,
+        'kind' => rule.kind,
+        'lastChapter' => rule.lastChapter,
+        'updateTime' => rule.updateTime,
+        'bookUrl' => rule.bookUrl,
+        'coverUrl' => rule.coverUrl,
+        'wordCount' => rule.wordCount,
+        _ => null,
+      };
+    }
+    return null;
+  }
+
+  /// 对**所有支持发现页的书源**并发抓取指定分类（按书源顺序返回）。
+  ///
+  /// 「支持发现页」= 配了 `exploreUrl` 且能解析出分类。
+  Future<List<SourceExploreResult>> exploreAll(
+    String categoryTitle, {
+    int page = 1,
+  }) async {
+    // 收集「分类名 → (源, 分类)」的任务
+    final tasks = <(BookSource, ExploreCategory)>[];
+    for (final s in store.enabled) {
+      for (final c in parseExploreCategories(s)) {
+        if (c.title == categoryTitle) tasks.add((s, c));
+      }
+    }
+    if (tasks.isEmpty) return const [];
+
+    final results = <SourceExploreResult>[];
+    var next = 0;
+    Future<void> worker() async {
+      while (true) {
+        final i = next++;
+        if (i >= tasks.length) return;
+        final (source, category) = tasks[i];
+        final started = DateTime.now();
+        try {
+          final books = await exploreOne(source, category, page: page);
+          results.add(
+            SourceExploreResult(
+              source: source,
+              books: books,
+              elapsedMs: DateTime.now().difference(started).inMilliseconds,
+            ),
+          );
+        } catch (e) {
+          results.add(
+            SourceExploreResult(
+              source: source,
+              error: '$e',
+              elapsedMs: DateTime.now().difference(started).inMilliseconds,
+            ),
+          );
+        }
+      }
+    }
+
+    final n = concurrency.clamp(1, tasks.length);
+    await Future.wait(List.generate(n, (_) => worker()));
+    return results;
+  }
+
+  /// 汇总所有启用书源的发现分类（同名合并，保留出现顺序）。
+  ///
+  /// 返回「分类名 → 支持它的书源数」，供发现页顶部选择。
+  List<ExploreCategory> allExploreCategories() {
+    final seen = <String>{};
+    final out = <ExploreCategory>[];
+    for (final s in store.enabled) {
+      for (final c in parseExploreCategories(s)) {
+        if (seen.add(c.title)) out.add(c);
+      }
+    }
+    return out;
   }
 
   /// 预热请求（樱读扩展字段 `preRequest`：字符串数组）。
