@@ -1892,11 +1892,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         content: Text(
           (hasEngine
                   ? '检测到语音引擎，但没能初始化中文朗读。\n\n'
-                        '可以直接换成小樱自带的「内置离线语音」，不用装任何东西；'
+                        '可以直接换成 App 自带的「内置离线语音」，不用装任何东西；'
                         '也可以到系统设置里补一份中文语音数据。\n\n'
                         '已检测到：${engines.join('、')}'
                   : '这台设备没有可用的系统语音引擎。\n\n'
-                        '不过没关系——小樱自带一套**内置离线语音**，'
+                        '不过没关系——App 自带一套内置离线语音，'
                         '点下面的「用内置语音」就能直接听，不需要装任何东西。') +
               (reason == null || reason.isEmpty ? '' : '\n\n（原因：$reason）'),
           style: const TextStyle(height: 1.6, fontSize: 13),

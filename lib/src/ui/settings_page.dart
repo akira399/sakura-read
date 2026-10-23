@@ -651,7 +651,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           // 内置离线语音：系统没引擎时的兜底，永远可选
                           const DropdownMenuItem(
                             value: TtsService.builtinEngineId,
-                            child: Text('内置离线语音 · 小樱（无需安装）'),
+                            child: Text('内置离线语音（无需安装）'),
                           ),
                           for (final e in engines)
                             DropdownMenuItem(

@@ -190,6 +190,12 @@ class OnlineRepo {
       if (rawUrl == null || rawUrl.trim().isEmpty) {
         throw const FormatException('未配置搜索地址（searchUrl）');
       }
+      // JS 生成地址（`@js:` / `<js>`）当前引擎不执行 JS：给出明确原因，
+      // 而不是把它当普通 URL 去请求（那样只会得到含糊的「无效的地址」）。
+      final probe = rawUrl.trim().toLowerCase();
+      if (probe.startsWith('@js:') || probe.startsWith('<js>')) {
+        throw const FormatException('该源用 JS 生成搜索地址，当前版本暂不支持 JS 书源');
+      }
       final req = buildRequest(rawUrl, source.bookSourceUrl, {
         'key': key,
         'page': page,
@@ -257,6 +263,12 @@ class OnlineRepo {
     if (rule == null) return const [];
     final listRule = (rule.bookList ?? '').trim();
     if (listRule.isEmpty) return const [];
+    // JS 解析列表（`<js>…</js>` / `@js:`）当前引擎不执行 JS：明确告知，
+    // 避免界面只显示「没有搜索结果」让人以为是站点挂了。
+    final listProbe = listRule.toLowerCase();
+    if (listProbe.startsWith('<js>') || listProbe.startsWith('@js:')) {
+      throw const FormatException('该书源用 JS 解析搜索结果，当前版本暂不支持 JS 书源');
+    }
 
     final engine = AnalyzeRule(body, baseUrl: source.bookSourceUrl);
     final items = engine.getRawList(listRule);
@@ -442,6 +454,10 @@ class OnlineRepo {
     // ExploreRule 与 SearchRule 字段同名，这里统一取字段
     final listRule = _exploreField(rule, 'bookList');
     if (listRule == null || listRule.trim().isEmpty) return const [];
+    final exploreProbe = listRule.trim().toLowerCase();
+    if (exploreProbe.startsWith('<js>') || exploreProbe.startsWith('@js:')) {
+      throw const FormatException('该分类用 JS 解析书单，当前版本暂不支持 JS 书源');
+    }
 
     final engine = AnalyzeRule(body, baseUrl: source.bookSourceUrl);
     final items = engine.getRawList(listRule);

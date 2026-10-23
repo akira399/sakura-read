@@ -85,7 +85,7 @@
 2. **兜底层（内置离线语音）**：引入 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（Apache-2.0，纯 FFI、无 Java 依赖）+ VITS 中文模型「超文 (chaowen medium int8)」（CC0，22.05 kHz，18 MB），随包内置在 `assets/tts/chaowen/`。
    - `lib/src/platform/offline_tts.dart`：首次使用把模型从 assets 复制到应用私有目录（已存在则跳过），在**独立 isolate** 里加载 onnx 并合成 WAV，主线程不卡；isolate 崩溃/退出会回传错误，不会把 UI 卡到超时。
    - `lib/src/platform/tts_service.dart`：引擎解析顺序变为「用户指定 → 系统默认 → 逐个系统引擎 → 内置离线语音」，内置引擎在所有系统引擎都不可用时自动接管；合成结果交给原生 `ttsPlayFile`（`MainActivity` 里用 MediaPlayer 播放），播完仍走原来的 `ttsState done` 事件，所以**自动跟读、自动下一章、语速调整全都沿用原有逻辑**。
-   - 设置页引擎下拉新增「内置离线语音 · 小樱（无需安装）」；「测试朗读」直接用内置语音播一句话。
+   - 设置页引擎下拉新增「内置离线语音（无需安装）」；「测试朗读」直接用内置语音播一句话。
 
 **验证**（MuMu 模拟器 Android 15，该模拟器本身无系统 TTS 引擎）：选内置引擎 → 测试朗读 → logcat 出现 `MediaPlayer` + `AudioTrack` 播放记录（`stop(9): called with 93148 frames delivered`），`cache/tts_speech/p0.wav` 落地 178 KB / 22.05 kHz / 单声道 / 4.01 秒，证明「合成 → 播放」整条链路通。
 

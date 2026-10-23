@@ -71,11 +71,18 @@ class OnlineBookService {
 
     if (chapters.isEmpty) {
       final tocUrlRule = g(info?.tocUrl);
-      if (tocUrlRule != null && tocUrlRule != bookUrl) {
-        final tocHtml = await _getHtml(source, tocUrlRule);
-        final tocEngine = AnalyzeRule(tocHtml, baseUrl: source.bookSourceUrl);
-        chapters = parseChapters(tocEngine, source.tocRule!, tocUrlRule);
+      if (tocUrlRule != null) {
+        final tocUrl = resolveUrl(tocUrlRule, bookUrl);
+        if (tocUrl.isNotEmpty && tocUrl != bookUrl) {
+          final tocHtml = await _getHtml(source, tocUrl);
+          final tocEngine = AnalyzeRule(tocHtml, baseUrl: source.bookSourceUrl);
+          chapters = parseChapters(tocEngine, source.tocRule!, tocUrl);
+          // 目录分页（`nextTocUrl`）：不少站点目录被拆成 index_1 / index_2 …
+          chapters = await _followTocPages(source, tocEngine, tocUrl, chapters);
+        }
       }
+    } else {
+      chapters = await _followTocPages(source, engine, bookUrl, chapters);
     }
 
     return OnlineBookInfo(
@@ -134,6 +141,56 @@ class OnlineBookService {
     return out;
   }
 
+  /// 沿 `nextTocUrl` 继续翻目录页，把后续页的章节追加进来。
+  ///
+  /// 站点的分页目录（`/index_2.html`、`?page=2`）在 Legado 里靠
+  /// `ruleToc.nextTocUrl` 表达；不支持就等于只能读到第一页目录。
+  Future<List<ChapterRef>> _followTocPages(
+    BookSource source,
+    AnalyzeRule firstEngine,
+    String firstUrl,
+    List<ChapterRef> first,
+  ) async {
+    final rule = source.tocRule?.nextTocUrl?.trim() ?? '';
+    if (rule.isEmpty) return first;
+    final out = <ChapterRef>[...first];
+    final seen = <String>{
+      for (final c in first)
+        if (c.href != null && c.href!.isNotEmpty) c.href!,
+    };
+    var engine = firstEngine;
+    var url = firstUrl;
+    final visited = <String>{firstUrl};
+    for (var page = 0; page < 10; page++) {
+      final rawNext = engine.getString(rule);
+      if (rawNext == null || rawNext.isEmpty) break;
+      final next = resolveUrl(rawNext, url);
+      if (next.isEmpty || !visited.add(next)) break;
+      String html;
+      try {
+        html = await _getHtml(source, next);
+      } catch (_) {
+        break;
+      }
+      final e = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
+      final more = parseChapters(e, source.tocRule!, next);
+      if (more.isEmpty) break;
+      var added = 0;
+      for (final c in more) {
+        final h = c.href;
+        if (h == null || h.isEmpty) continue;
+        if (seen.add(h)) {
+          out.add(c);
+          added++;
+        }
+      }
+      if (added == 0) break;
+      engine = e;
+      url = next;
+    }
+    return out;
+  }
+
   // ---------- 正文 ----------
 
   /// 取章节正文。
@@ -151,11 +208,38 @@ class OnlineBookService {
     }
 
     final html = await _getHtml(source, chapterUrl);
-    final engine = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
+    var engine = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
     final raw = source.contentRule?.content ?? '';
     if (raw.trim().isEmpty) return '';
     // 正文通常是多段：取规则命中的**全部**结果并按段拼回（getString 只会取第一段）
-    return cleanChapterText(engine.getStrings(raw).join('\n'));
+    final buf = <String>[engine.getStrings(raw).join('\n')];
+
+    // 分页正文（`nextContentUrl`）：一章被站点拆成多页时必须继续抓。
+    // 典型写法 `text.下一页@href` / `#linkNext@href` / `a#next:contains(下一页)@href`。
+    final nextRule = source.contentRule?.nextContentUrl?.trim() ?? '';
+    if (nextRule.isNotEmpty) {
+      var url = chapterUrl;
+      final visited = <String>{chapterUrl};
+      for (var page = 0; page < 5; page++) {
+        final rawNext = engine.getString(nextRule);
+        if (rawNext == null || rawNext.isEmpty) break;
+        final next = resolveUrl(rawNext, url);
+        if (next.isEmpty || !visited.add(next) || next == url) break;
+        String nextHtml;
+        try {
+          nextHtml = await _getHtml(source, next);
+        } catch (_) {
+          break;
+        }
+        final e = AnalyzeRule(nextHtml, baseUrl: source.bookSourceUrl);
+        final part = e.getStrings(raw).join('\n');
+        if (part.trim().isEmpty) break;
+        buf.add(part);
+        engine = e;
+        url = next;
+      }
+    }
+    return cleanChapterText(buf.join('\n'));
   }
 
   /// 章节页在隐藏 WebView 中打开的地址（应用 gatewayPath 网关重写）。
@@ -270,17 +354,35 @@ class OnlineBookService {
   /// 清洗：去空行 / 水印行 / 导航行 / 行尾编号，保留段首全角缩进。
   static String cleanChapterText(String raw) {
     if (raw.isEmpty) return '';
-    final text = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    // 先把正文 HTML 变成纯文本：`@html` 取到的内容里全是 <br>/<p>/&nbsp;，
+    // 不还原就会把整章压成**一行**（末尾再带一句站点水印），
+    // 而下面按行去广告的过滤器一旦命中水印就会把整章丢掉 → 正文空白。
+    var text = raw
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'</?p\s*>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'</?div\s*>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<[^>]+>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'");
+    text = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     final out = <String>[];
     for (final line in text.split('\n')) {
       var l = line.trimRight();
       l = l.replaceFirst(RegExp(r'^[ \t\u00A0]+'), '');
       if (l.trim().isEmpty) continue;
       var skip = false;
-      for (final marker in _junkMarkers) {
-        if (l.contains(marker)) {
-          skip = true;
-          break;
+      // 只在**短行**上按水印丢弃：长行是真正的正文段落，
+      // 因为命中一句水印就整段删掉是致命的（见上面的单行章节问题）。
+      if (l.length < 200) {
+        for (final marker in _junkMarkers) {
+          if (l.contains(marker)) {
+            skip = true;
+            break;
+          }
         }
       }
       if (skip) continue;
@@ -290,6 +392,8 @@ class OnlineBookService {
       // 导航短行兜底：短、无标点、且命中栏目词 → 视为菜单残留
       if (_isNavResidue(l.trim())) continue;
       if (l.length < 60 && _domainWatermark.hasMatch(l)) continue;
+      // 行内水印（长行末尾常带）：就地删掉，保留正文
+      l = l.replaceAll(_inlineWatermark, '');
       l = l.replaceAll(_trailingCode, '').trimRight();
       if (l.trim().isEmpty) continue;
       out.add(l);
@@ -297,12 +401,21 @@ class OnlineBookService {
     return out.join('\n');
   }
 
+  /// 行内站点水印（「请记住本书首发域名：xxx」「鬼吹灯手机版阅读网址：xxx」等）。
+  static final RegExp _inlineWatermark = RegExp(
+    r'[（(]?请记住本书[^。\n]{0,60}[。]?|[（(]?首发域名[:：]?\s*\S+|'
+    r'\S{0,12}手机版阅读网址[:：]?\s*\S*',
+  );
+
   // ---------- 内部工具 ----------
 
   Future<String> _getHtml(BookSource source, String url) async {
+    final headers = headerMap(source);
+    // 不少站点对「没有来路的请求」直接 403；补上站内 Referer
+    headers.putIfAbsent('Referer', () => source.bookSourceUrl);
     final resp = await _client.get(
       url,
-      headers: headerMap(source),
+      headers: headers,
       timeout: _httpTimeout,
       retries: 1,
     );

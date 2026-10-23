@@ -112,7 +112,13 @@ class SourceHttpClient {
     retries: retries,
   );
 
-  /// 通用请求（带重试与 Cookie）。
+  /// 通用请求（带重试、Cookie 与手动重定向）。
+  ///
+  /// 为什么手动处理 3xx：书站换域名时普遍返回 `301` + `Location`，而
+  /// `package:http`/`dart:io` 在跟随 301/302 时会把 POST **改写成 GET**
+  /// （浏览器语义）。对「搜索接口只接受 POST」的站点（如得奇 `deqixs.cc`
+  /// → `deqixss.com`）这等于丢掉请求体，结果是空页面 / 0 本书。
+  /// 这里对 301/302/307/308 保留原始方法 + 请求体重发，只有 303 才降级 GET。
   Future<SourceResponse> request(
     String method,
     String url, {
@@ -135,39 +141,53 @@ class SourceHttpClient {
               'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36',
           ...?headers,
         };
-        final cookie = _cookies.headerFor(uri);
-        if (cookie != null) {
-          h['Cookie'] = cookie;
-        }
-        http.Response resp;
+        var currentUri = uri;
+        var currentMethod = method;
+        var currentBody = body;
+        var redirects = 0;
         final t = timeout ?? defaultTimeout;
-        if (method == 'POST') {
-          resp = await _client
-              .post(
-                uri,
-                headers: h,
-                body: body == null ? null : utf8.encode(body),
-              )
-              .timeout(t);
-        } else if (method == 'GET') {
-          resp = await _client.get(uri, headers: h).timeout(t);
-        } else {
-          final req = http.Request(method, uri);
-          req.headers.addAll(h);
-          if (body != null) req.bodyBytes = utf8.encode(body);
-          resp = await http.Response.fromStream(
-            await _client.send(req).timeout(t),
+        while (true) {
+          final hh = Map<String, String>.from(h);
+          final cookie = _cookies.headerFor(currentUri);
+          if (cookie != null) hh['Cookie'] = cookie;
+          final req = http.Request(currentMethod, currentUri);
+          req.followRedirects = false;
+          req.maxRedirects = 0;
+          hh.forEach((k, v) => req.headers[k] = v);
+          if (currentBody != null) req.bodyBytes = utf8.encode(currentBody);
+          final streamed = await _client.send(req).timeout(t);
+          var resp = await http.Response.fromStream(streamed).timeout(t);
+          _cookies.absorb(currentUri, resp.headers);
+
+          final loc = resp.headers['location'];
+          final isRedirect =
+              resp.statusCode == 301 ||
+              resp.statusCode == 302 ||
+              resp.statusCode == 303 ||
+              resp.statusCode == 307 ||
+              resp.statusCode == 308;
+          if (isRedirect && loc != null && loc.isNotEmpty && redirects < 4) {
+            redirects++;
+            final next = currentUri.resolve(loc.trim());
+            // 换域名/换协议时不要带上原有的 Host / Referer
+            hh.remove('Host');
+            if (resp.statusCode == 303) {
+              currentMethod = 'GET';
+              currentBody = null;
+            }
+            currentUri = next;
+            continue;
+          }
+
+          final decoded = decodeBody(resp.bodyBytes, resp.headers, charset);
+          return SourceResponse(
+            statusCode: resp.statusCode,
+            body: decoded,
+            bytes: resp.bodyBytes,
+            headers: resp.headers,
+            finalUrl: currentUri.toString(),
           );
         }
-        _cookies.absorb(uri, resp.headers);
-        final decoded = decodeBody(resp.bodyBytes, resp.headers, charset);
-        return SourceResponse(
-          statusCode: resp.statusCode,
-          body: decoded,
-          bytes: resp.bodyBytes,
-          headers: resp.headers,
-          finalUrl: resp.request?.url.toString() ?? url,
-        );
       } on TimeoutException {
         if (attempt <= retries) {
           _resetConnectionPool();
