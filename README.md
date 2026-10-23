@@ -11,28 +11,29 @@
 [![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-lightgrey?logo=android)]()
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Version](https://img.shields.io/badge/version-1.2.0-ec5f8f)]()
-[![Tests](https://img.shields.io/badge/tests-322%20passed-brightgreen)]()
+[![Version](https://img.shields.io/badge/version-1.2.1-ec5f8f)]()
+[![Tests](https://img.shields.io/badge/tests-338%20passed-brightgreen)]()
 [![Analyze](https://img.shields.io/badge/analyze-0%20issues-brightgreen)]()
 
-[功能特性](#-功能特性) · [截图预览](#-截图预览) · [1.2.0 更新](#-120-更新了什么) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
+[功能特性](#-功能特性) · [截图预览](#-截图预览) · [1.2.1 更新](#-121-更新了什么) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
 
 </div>
 
 ---
 
-## 🆕 1.2.0 更新了什么
+## 🆕 1.2.1 更新了什么
 
-> 完整清单见 [CHANGELOG](CHANGELOG.md) 与 [Releases](../../releases/latest)，这里只放最值得说的四件。
+> 完整清单见 [CHANGELOG](CHANGELOG.md) 与 [Releases](../../releases/latest)，这里只放这一版最关键的四点。
 
 | 更新 | 一句话 |
 | --- | --- |
-| 🤖 **AI 阅读助手「小樱」** | 接 OpenAI / DeepSeek / Kimi 等在线接口，或**下载 521 MB 本地小模型在手机端侧跑**；读懂你的书架、进度与阅读时长 |
-| 🔊 **内置离线语音** | 自带一份中文语音模型，手机没装任何 TTS 引擎也能朗读，离线可用、不联网 |
-| 📜 **滚动阅读跨章无缝** | 一直往下滑就自动接下一章，往回滑接回上一章（评论区呼声最高的一条） |
-| 🎨 **一整轮社区反馈** | 段间距、音量键翻页、阅读时长曲线、大封面书架、删本地文件、毛玻璃底栏、目录定位当前章…… |
+| 📚 **第三方书源兼容** | 按 Legado（阅读 3.x）规则语义补齐：`text.` / `:contains` / `:has` / `!N` / `{{变量}}` 替换链 / 列表项自身匹配 |
+| 🔁 **抓取层加固** | 301·302 保留 POST 与请求体、自动补 `Referer`、目录分页 `nextTocUrl`、正文分页 `nextContentUrl` |
+| 🧹 **正文清洗不再误杀** | `@html` 先归一化成纯文本；水印只删行内片段，不会再让整章被判成广告行丢掉 |
+| 🚧 **JS 书源明确提示** | 不再表现为「无效的地址」或空结果，直接说明当前版本暂不支持 JS 书源 |
 
-顺带关掉了仓库里的 3 个 issue：目录定位（#1）、AI 助手（#2）、书源列表解析（#3）。
+上一版（1.2.0）上线的 AI 阅读助手、内置离线语音、滚动跨章无缝、音量键翻页等功能全部保留。
+仓库里既有的 3 个 issue（目录定位 #1、AI 助手 #2、书源列表解析 #3）已在 1.2.0 关闭。
 
 ---
 
@@ -44,7 +45,7 @@
 - 🌸 **她是漂亮的** —— 图标、开屏、封面、空书架，一整套日系赛璐璐上色的二次元皮肤（AI 出图 + 人工筛选）
 - 📖 **她是很能干的** —— TXT / EPUB 全格式、4 种翻页、TTS 朗读（内置离线语音）、书签统计、多源搜书、一键换源，该有的一个不少
 - 💬 **她还会聊天** —— 接上 AI 助手后，你可以问她「我最近读到哪了」「这本书讲了什么」，本地小模型模式下**阅读数据不出手机**
-- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（322 项自动化测试），欢迎你来改
+- 🔓 **她是开源的** —— MIT 协议，代码干净、测试充分（338 项自动化测试），欢迎你来改
 
 ---
 
@@ -179,7 +180,12 @@ Q 版看板娘头像，三种形态（方形 / 圆角 / 圆形）+ 自适应图�
 
 ### 直接下载 APK
 
-前往 [Releases](../../releases/latest) 页面下载最新版 APK，安装即可。
+前往 [Releases](../../releases/latest) 页面下载最新版 APK：
+
+- **手机 / 平板（绝大多数设备）**：`SakuraRead-v1.2.1-arm64.apk`（约 48 MB）
+- **模拟器 / x86_64 设备**：`SakuraRead-v1.2.1-x86_64.apk`
+
+两个包签名一致，可直接覆盖安装旧版本。
 
 > 也可以在 `Download/樱读-vX.Y.Z.apk` 找到构建产物（自行构建时）。
 
