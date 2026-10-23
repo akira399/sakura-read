@@ -296,9 +296,7 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                canSwitch
-                    ? '网点偶尔会抽风，重试一次，或换个书源再试'
-                    : '网点偶尔会抽风，稍等几秒再重试',
+                canSwitch ? '网点偶尔会抽风，重试一次，或换个书源再试' : '网点偶尔会抽风，稍等几秒再重试',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   height: 1.5,

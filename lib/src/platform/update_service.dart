@@ -312,8 +312,11 @@ Map? _pickApkAsset(Object? assets) {
   var bestScore = -1;
   for (final item in assets) {
     if (item is! Map) continue;
-    final name = _firstString(item, ['name', 'browser_download_url', 'downloadUrl'])
-        .toLowerCase();
+    final name = _firstString(item, [
+      'name',
+      'browser_download_url',
+      'downloadUrl',
+    ]).toLowerCase();
     if (!name.contains('.apk')) continue;
     final int score;
     if (name.contains('arm64') || name.contains('aarch64')) {

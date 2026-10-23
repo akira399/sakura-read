@@ -18,11 +18,7 @@ void main() {
       for (final name in OfflineTtsEngine.assetFiles) {
         final f = File('${OfflineTtsEngine.assetDir}/$name');
         expect(f.existsSync(), isTrue, reason: '缺少内置语音文件 $name');
-        expect(
-          f.lengthSync(),
-          greaterThan(16),
-          reason: '$name 看起来是空文件或占位文件',
-        );
+        expect(f.lengthSync(), greaterThan(16), reason: '$name 看起来是空文件或占位文件');
       }
     });
 

@@ -77,7 +77,9 @@ class _AiChatPageState extends State<AiChatPage> {
     final seed = widget.debugSeedBubbles;
     if (seed != null) {
       for (final (text, mine) in seed) {
-        _bubbles.add(mine ? _BubbleData.user(text) : _BubbleData.assistant(text));
+        _bubbles.add(
+          mine ? _BubbleData.user(text) : _BubbleData.assistant(text),
+        );
       }
     }
   }
@@ -195,9 +197,7 @@ class _AiChatPageState extends State<AiChatPage> {
         if (!mounted) return;
         if (!ok) {
           setState(
-            () => _bubbles.add(
-              _BubbleData.error(manager.error ?? '本地模型加载失败了'),
-            ),
+            () => _bubbles.add(_BubbleData.error(manager.error ?? '本地模型加载失败了')),
           );
           return;
         }
@@ -301,7 +301,9 @@ class _AiChatPageState extends State<AiChatPage> {
                 CircleAvatar(
                   radius: 17,
                   backgroundColor: scheme.primaryContainer,
-                  backgroundImage: const AssetImage('assets/images/pet_wave.png'),
+                  backgroundImage: const AssetImage(
+                    'assets/images/pet_wave.png',
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Column(
@@ -370,7 +372,8 @@ class _AiChatPageState extends State<AiChatPage> {
     return ListView.builder(
       controller: _scroll,
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-      itemCount: _bubbles.length + (showGreeting ? 1 : 0) + (showTyping ? 1 : 0),
+      itemCount:
+          _bubbles.length + (showGreeting ? 1 : 0) + (showTyping ? 1 : 0),
       itemBuilder: (context, index) {
         if (showGreeting && index == 0) return _buildGreeting(context, scheme);
         final bubbleIndex = index - (showGreeting ? 1 : 0);
@@ -447,7 +450,10 @@ class _AiChatPageState extends State<AiChatPage> {
                 const SizedBox(width: 8),
                 Text(
                   _status ?? '小樱正在想…',
-                  style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -561,7 +567,9 @@ class _AiChatPageState extends State<AiChatPage> {
               Row(
                 children: [
                   Icon(
-                    local ? Icons.offline_bolt_outlined : Icons.lock_outline_rounded,
+                    local
+                        ? Icons.offline_bolt_outlined
+                        : Icons.lock_outline_rounded,
                     size: 17,
                   ),
                   const SizedBox(width: 6),

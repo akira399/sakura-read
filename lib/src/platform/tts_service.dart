@@ -135,8 +135,7 @@ class TtsService extends ChangeNotifier {
     if (await _ensureOffline()) return true;
 
     _ready = false;
-    _lastError = OfflineTtsEngine.instance.lastError ??
-        '系统未安装可用的语音引擎，或引擎初始化失败';
+    _lastError = OfflineTtsEngine.instance.lastError ?? '系统未安装可用的语音引擎，或引擎初始化失败';
     notifyListeners();
     return false;
   }

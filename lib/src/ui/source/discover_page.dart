@@ -87,8 +87,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
     if (!mounted) return;
     final list = _repo.exploreCapableSources();
     final keep = _source;
-    final keepAlive = keep != null &&
-        list.any((s) => s.bookSourceUrl == keep.bookSourceUrl);
+    final keepAlive =
+        keep != null && list.any((s) => s.bookSourceUrl == keep.bookSourceUrl);
     setState(() {
       _sources = list;
       _stats = _repo.exploreStats();

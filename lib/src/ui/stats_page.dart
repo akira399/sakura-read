@@ -214,10 +214,7 @@ class _StatsPageState extends State<StatsPage> {
               const SizedBox(width: 10),
               Text(
                 '日均 ${formatDuration(average)}',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: scheme.onSurfaceVariant,
-                ),
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -371,10 +368,7 @@ class _ReadingCurvePainter extends CustomPainter {
         ..shader = ui.Gradient.linear(
           Offset(0, topPad),
           Offset(0, topPad + chartHeight),
-          [
-            lineColor.withValues(alpha: .30),
-            lineColor.withValues(alpha: .02),
-          ],
+          [lineColor.withValues(alpha: .30), lineColor.withValues(alpha: .02)],
         ),
     );
     canvas.drawPath(
@@ -398,9 +392,7 @@ class _ReadingCurvePainter extends CustomPainter {
     }
 
     // ---- 横轴标签：天数多时自动抽稀，避免糊成一片 ----
-    final labelEvery = days.length <= 8
-        ? 1
-        : (days.length / 6).ceil();
+    final labelEvery = days.length <= 8 ? 1 : (days.length / 6).ceil();
     for (var i = 0; i < days.length; i++) {
       final isToday = i == days.length - 1;
       if (!isToday && i % labelEvery != 0) continue;

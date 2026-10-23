@@ -353,10 +353,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionTitle(
-            icon: Icons.memory_rounded,
-            title: '运行方式',
-          ),
+          const SectionTitle(icon: Icons.memory_rounded, title: '运行方式'),
           const SizedBox(height: 8),
           _ModeTile(
             selected: !_useLocal,
@@ -478,8 +475,10 @@ class _LocalModelCard extends StatelessWidget {
   Future<void> _download(BuildContext context) async {
     final manager = LocalModelManager.instance;
     if (!manager.isDownloaded) {
-      onToast('开始下载 ${manager.spec.name}（${manager.spec.sizeLabel}），'
-          '请保持网络畅通');
+      onToast(
+        '开始下载 ${manager.spec.name}（${manager.spec.sizeLabel}），'
+        '请保持网络畅通',
+      );
       await manager.download();
       if (manager.phase == LocalModelPhase.error) {
         onToast(manager.error ?? '下载失败');
@@ -503,7 +502,9 @@ class _LocalModelCard extends StatelessWidget {
       builder: (context, _) {
         final spec = manager.spec;
         final downloaded = manager.isDownloaded;
-        final percent = (manager.progress * 100).clamp(0, 100).toStringAsFixed(0);
+        final percent = (manager.progress * 100)
+            .clamp(0, 100)
+            .toStringAsFixed(0);
         final receivedMb = (manager.receivedBytes / (1024 * 1024))
             .toStringAsFixed(1);
         final totalMb = (manager.totalBytes / (1024 * 1024)).toStringAsFixed(0);
@@ -534,10 +535,7 @@ class _LocalModelCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SectionTitle(
-                icon: Icons.smart_toy_outlined,
-                title: '本地模型',
-              ),
+              const SectionTitle(icon: Icons.smart_toy_outlined, title: '本地模型'),
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -603,9 +601,7 @@ class _LocalModelCard extends StatelessWidget {
                             ? null
                             : () => _download(context),
                         icon: const Icon(Icons.download_rounded, size: 18),
-                        label: Text(
-                          manager.isDownloading ? '下载中…' : '下载模型',
-                        ),
+                        label: Text(manager.isDownloading ? '下载中…' : '下载模型'),
                       ),
                     )
                   else ...[
@@ -617,14 +613,19 @@ class _LocalModelCard extends StatelessWidget {
                                 await manager.deleteModel();
                                 onToast('模型文件已删除');
                               },
-                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 18,
+                        ),
                         label: const Text('删除模型'),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: manager.isReady || manager.phase == LocalModelPhase.loading
+                        onPressed:
+                            manager.isReady ||
+                                manager.phase == LocalModelPhase.loading
                             ? null
                             : () => _download(context),
                         icon: const Icon(Icons.memory_rounded, size: 18),

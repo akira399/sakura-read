@@ -14,9 +14,7 @@ Book _book() => Book(
   format: BookFormat.txt,
   path: '/tmp/b1.txt',
   intro: '一本用于测试的书。',
-  chapters: [
-    ChapterRef(title: '第一章 起点', start: 0, end: 100, charCount: 100),
-  ],
+  chapters: [ChapterRef(title: '第一章 起点', start: 0, end: 100, charCount: 100)],
   totalChars: 100,
   chapterIndex: 0,
   charOffset: 50,
