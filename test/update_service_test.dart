@@ -133,6 +133,39 @@ void main() {
       expect(info, isNotNull);
       expect(info!.downloadUrl, isEmpty);
     });
+
+    test('多架构附件里挑 arm64，不会下到模拟器专用的 x86_64 包', () {
+      // GitHub 按文件名返回 assets：早先的顺序让 `-x86_64.apk` 排在 `-arm64.apk` 前面。
+      final json = _githubRelease();
+      json['assets'] = <Object?>[
+        {
+          'name': 'SakuraRead-v1.2.0-x86_64.apk',
+          'size': 50,
+          'browser_download_url': 'https://example.com/x86_64.apk',
+        },
+        {
+          'name': 'SakuraRead-v1.2.0-arm64.apk',
+          'size': 48,
+          'browser_download_url': 'https://example.com/arm64.apk',
+        },
+      ];
+      final info = parseReleaseJson(json)!;
+      expect(info.downloadUrl, contains('arm64.apk'));
+      expect(info.downloadUrl, isNot(contains('x86_64')));
+      expect(info.sizeBytes, 48);
+    });
+
+    test('只有 x86_64 时仍能取到包（不因架构打分丢掉唯一附件）', () {
+      final json = _githubRelease();
+      json['assets'] = <Object?>[
+        {
+          'name': 'SakuraRead-v1.2.0-x86_64.apk',
+          'size': 50,
+          'browser_download_url': 'https://example.com/x86_64.apk',
+        },
+      ];
+      expect(parseReleaseJson(json)!.downloadUrl, contains('x86_64.apk'));
+    });
   });
 
   group('检查更新链路', () {
