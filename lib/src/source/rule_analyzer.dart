@@ -91,15 +91,37 @@ abstract final class RuleAnalyzer {
 
   /// 应用替换链（容错：非法正则跳过该链）。
   ///
-  /// 替换串支持 `$1`..`$9` 与 `$&` 引用捕获组（手动展开，跨版本一致）。
-  static String applyReplaces(String input, List<ReplaceChain> chains) {
+  /// 替换串支持 `$1`..`$9` 与 `$&` 引用捕获组（手动展开，跨版本一致）；
+  /// 还支持 `{{变量}}`（如 `{{chapter.title}}`，未提供的变量替换为空串）。
+  static String applyReplaces(
+    String input,
+    List<ReplaceChain> chains, {
+    Map<String, String> vars = const {},
+  }) {
     final refPattern = RegExp(r'\$(\d|&)');
     var out = input;
     for (final chain in chains) {
+      final withVars = _substituteVars(chain.replacement, vars);
+      // Legado 的 `{{变量}}` 在模式段里同样会展开（如 `##{{chapter.title}}`
+      // 表示「把章节标题这行删掉」），所以模式段也要先做变量替换。
+      final pattern = _substituteVars(chain.pattern, vars);
+      if (pattern.isEmpty) continue;
+      RegExp re;
       try {
-        out = out.replaceAllMapped(RegExp(chain.pattern), (m) {
-          if (!chain.replacement.contains(r'$')) return chain.replacement;
-          return chain.replacement.replaceAllMapped(refPattern, (r) {
+        re = RegExp(pattern);
+      } catch (_) {
+        // 模式不是合法正则（如花括号残留）：按字面量处理，
+        // 比直接跳过更接近书源作者的意图。
+        try {
+          re = RegExp(RegExp.escape(pattern));
+        } catch (_) {
+          continue;
+        }
+      }
+      try {
+        out = out.replaceAllMapped(re, (m) {
+          if (!withVars.contains(r'$')) return withVars;
+          return withVars.replaceAllMapped(refPattern, (r) {
             final k = r.group(1)!;
             if (k == '&') return m.group(0) ?? '';
             final idx = int.parse(k);
@@ -107,10 +129,19 @@ abstract final class RuleAnalyzer {
           });
         });
       } catch (_) {
-        // 非法正则：跳过，不影响其它链
+        // 替换过程异常：跳过该链，不影响其它链
       }
     }
     return out;
+  }
+
+  /// 替换 `{{name}}` / `{{chapter.title}}` 变量；未定义变量按空串处理。
+  static String _substituteVars(String s, Map<String, String> vars) {
+    if (!s.contains('{{')) return s;
+    return s.replaceAllMapped(RegExp(r'\{\{\s*([^{}]+?)\s*\}\}'), (m) {
+      final key = m.group(1)!.trim();
+      return vars[key] ?? '';
+    });
   }
 
   /// 规范空白：折叠连续空白为单个空格并去首尾（用于把 HTML 文本变干净）。

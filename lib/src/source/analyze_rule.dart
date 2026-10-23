@@ -53,13 +53,16 @@ xml.XmlDocument? parseXmlLoose(String html) {
 
 /// 规则求值器。
 class AnalyzeRule {
-  AnalyzeRule(this.document, {this.baseUrl = ''});
+  AnalyzeRule(this.document, {this.baseUrl = '', this.vars = const {}});
 
   /// 文档文本（HTML 或 JSON；也可为普通文本）。
   final String? document;
 
   /// 书源主地址（补全相对链接用，引擎内部暂不消费，M2 使用）。
   final String baseUrl;
+
+  /// 替换串里的变量（`{{chapter.title}}` 这类）：规则层只做纯文本替换。
+  final Map<String, String> vars;
 
   dom.Document? _htmlDoc;
   bool _jsonTried = false;
@@ -99,6 +102,10 @@ class AnalyzeRule {
 
   /// 取单个字符串结果（`||` 兜底取第一个非空）。
   String? getString(String rule, {Object? ctx}) {
+    final jsRemainder = _jsRemainder(rule);
+    if (jsRemainder != null) {
+      return jsRemainder.isEmpty ? null : getString(jsRemainder, ctx: ctx);
+    }
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
       final parts = RuleAnalyzer.splitConcat(alt);
       final buf = <String>[];
@@ -113,6 +120,10 @@ class AnalyzeRule {
 
   /// 取字符串列表（`||` 兜底取第一个非空列表）。
   List<String> getStrings(String rule, {Object? ctx}) {
+    final jsRemainder = _jsRemainder(rule);
+    if (jsRemainder != null) {
+      return jsRemainder.isEmpty ? const [] : getStrings(jsRemainder, ctx: ctx);
+    }
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
       final parts = RuleAnalyzer.splitConcat(alt);
       final out = <String>[];
@@ -126,6 +137,12 @@ class AnalyzeRule {
 
   /// 取元素列表（用于 bookList 这类“再迭代”的规则；CSS / XPath 皆可）。
   List<Object> getElements(String rule, {Object? ctx}) {
+    final jsRemainder = _jsRemainder(rule);
+    if (jsRemainder != null) {
+      return jsRemainder.isEmpty
+          ? const []
+          : getElements(jsRemainder, ctx: ctx);
+    }
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
       final raw = _evalPiece(alt, ctx);
       final els = raw
@@ -138,6 +155,10 @@ class AnalyzeRule {
 
   /// 取原始结果列表（保留原型：DOM 元素 / XML 节点 / JSON 值 / 字符串）。
   List<Object> getRawList(String rule, {Object? ctx}) {
+    final jsRemainder = _jsRemainder(rule);
+    if (jsRemainder != null) {
+      return jsRemainder.isEmpty ? const [] : getRawList(jsRemainder, ctx: ctx);
+    }
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
       final raw = _evalPiece(alt, ctx);
       if (raw.isNotEmpty) return raw;
@@ -145,11 +166,53 @@ class AnalyzeRule {
     return const [];
   }
 
+  /// 判断规则是否是 JS 规则，并返回可继续求值的剩余部分。
+  ///
+  /// - 非 JS 规则 → `null`
+  /// - 纯 JS（`<js>…</js>` / `@js:…`）→ 空串（当前引擎不执行 JS，交由上层
+  ///   的 JS 桥解析；这里返回空避免把 JS 源码当选择器求出垃圾结果）
+  /// - `<js>…</js>CSS` 混合写法 → 返回尾部的 CSS 规则
+  ///
+  /// 注意：不能在 JS 源码上直接 split `||` / `&&`（JS 里全是这两个符号），
+  /// 所以判断必须发生在拆分之前。
+  static String? _jsRemainder(String rule) {
+    final t = rule.trim();
+    final lower = t.toLowerCase();
+    if (lower.startsWith('<js>')) {
+      final end = lower.indexOf('</js>');
+      if (end < 0) return '';
+      final rest = t.substring(end + 5).trim();
+      return rest.isEmpty ? '' : rest;
+    }
+    if (lower.startsWith('@js:')) {
+      return '';
+    }
+    return null;
+  }
+
   // ---------- 内部求值 ----------
 
   List<Object> _evalPiece(String piece, Object? ctx) {
+    final jsRemainder = _jsRemainder(piece);
+    if (jsRemainder != null) {
+      return jsRemainder.isEmpty ? const [] : _evalPiece(jsRemainder, ctx);
+    }
     final parts = RuleAnalyzer.splitReplaces(piece);
-    final (mode, base) = RuleAnalyzer.parsePrefix(parts.base);
+    var rawBase = parts.base.trim();
+    // 结果切片：`[1]` 取第 2 个、`[0,2]` 取前三段（Legado 的列表写法）
+    final sliceMatch = RegExp(r'\[(-?\d+)(?:,(-?\d+))?\]$').firstMatch(rawBase);
+    final slice = sliceMatch == null
+        ? null
+        : (
+            int.parse(sliceMatch.group(1)!),
+            sliceMatch.group(2) == null
+                ? null
+                : int.parse(sliceMatch.group(2)!),
+          );
+    if (sliceMatch != null) {
+      rawBase = rawBase.substring(0, sliceMatch.start).trim();
+    }
+    final (mode, base) = RuleAnalyzer.parsePrefix(rawBase);
     List<Object> res;
     if (base.isEmpty) {
       final t = _ctxText(ctx);
@@ -157,9 +220,28 @@ class AnalyzeRule {
     } else {
       res = _evalBase(base, mode, ctx);
     }
+    if (slice != null) {
+      final (a, b) = slice;
+      if (b == null) {
+        final i = a < 0 ? res.length + a : a;
+        res = (i >= 0 && i < res.length) ? <Object>[res[i]] : const [];
+      } else {
+        final s = a < 0 ? res.length + a : a;
+        final e = b < 0 ? res.length + b : b;
+        res = (s >= 0 && s <= e && e < res.length)
+            ? res.sublist(s, e + 1)
+            : const [];
+      }
+    }
     if (parts.chains.isEmpty) return res;
     return res
-        .map((o) => RuleAnalyzer.applyReplaces(_toStr(o) ?? '', parts.chains))
+        .map(
+          (o) => RuleAnalyzer.applyReplaces(
+            _toStr(o) ?? '',
+            parts.chains,
+            vars: vars,
+          ),
+        )
         .toList();
   }
 
@@ -198,7 +280,23 @@ class AnalyzeRule {
     switch (m) {
       case RuleMode.css:
         final node = _ctxDomNode(ctx);
-        return evalCss(node, parseCssStages(rule));
+        final stages = parseCssStages(rule);
+        final result = evalCss(node, stages);
+        if (result.isNotEmpty) return result;
+        // 规则写成 `a@href`，但上下文元素**本身就是那个 <a>**（书源里很常见：
+        // bookList 是 `a.m-book-row`，bookUrl 却写 `a@href`）。
+        // 严格按「后代选择器」解析会得到空值，这里补一次「自身也参与匹配」的兜底。
+        if (ctx is dom.Element && stages.length > 1) {
+          final first = stages.first;
+          if (first.type == CssStageType.selector && first.value.isNotEmpty) {
+            final parent = ctx.parent;
+            if (parent != null &&
+                selectElements(parent, first.value).contains(ctx)) {
+              return evalCss(ctx, stages.sublist(1));
+            }
+          }
+        }
+        return result;
       case RuleMode.json:
         final root = _ctxJson(ctx);
         if (root == null) return const [];
