@@ -19,7 +19,8 @@ import 'package:sakura_read/src/data/txt_parser.dart';
 import 'package:sakura_read/src/platform/native_bridge.dart';
 
 /// 等 prefs 的 300ms 防抖落盘。
-Future<void> _settle() => Future<void>.delayed(const Duration(milliseconds: 450));
+Future<void> _settle() =>
+    Future<void>.delayed(const Duration(milliseconds: 450));
 
 /// 建一个临时目录并登记清理。
 AppDirs _tempDirs(List<Directory> trash) {
@@ -30,8 +31,7 @@ AppDirs _tempDirs(List<Directory> trash) {
 
 /// 生成一段最简单的多章小说文本。
 String _novel({int chapters = 3}) => [
-  for (var i = 1; i <= chapters; i++)
-    '第$i章 测试章节$i\n这是第$i章的正文内容，用来验证解析与导入。',
+  for (var i = 1; i <= chapters; i++) '第$i章 测试章节$i\n这是第$i章的正文内容，用来验证解析与导入。',
 ].join('\n');
 
 void main() {
@@ -70,8 +70,9 @@ void main() {
 
     test('老版本设置文件（无该键）不会崩，按默认值处理', () async {
       final dirs = _tempDirs(trash);
-      File('${dirs.files}/settings.json')
-          .writeAsStringSync(jsonEncode({'v': 2, 'fontSize': 20}));
+      File(
+        '${dirs.files}/settings.json',
+      ).writeAsStringSync(jsonEncode({'v': 2, 'fontSize': 20}));
 
       final prefs = AppPrefs(dirsOverride: dirs);
       await prefs.load();
@@ -242,8 +243,7 @@ void main() {
     });
 
     test('【】标题仍然支持', () {
-      final text = ['【序】', '序章正文，几句话铺垫一下。', '【第一章 归来】', '正文内容。']
-          .join('\n');
+      final text = ['【序】', '序章正文，几句话铺垫一下。', '【第一章 归来】', '正文内容。'].join('\n');
       final got = titles(text);
       expect(got, contains('【序】'));
       expect(got, contains('【第一章 归来】'));
@@ -251,8 +251,7 @@ void main() {
 
     test('正常 200 章小说全部识别，不多不少', () {
       final text = [
-        for (var i = 1; i <= 200; i++)
-          '第$i章 测试章节$i\n这是第$i章的正文内容，小樱正在测试章节目录。',
+        for (var i = 1; i <= 200; i++) '第$i章 测试章节$i\n这是第$i章的正文内容，小樱正在测试章节目录。',
       ].join('\n');
       final got = TxtParser.parseText(text).chapters;
       expect(got.length, 200);

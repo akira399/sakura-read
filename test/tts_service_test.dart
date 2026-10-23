@@ -126,9 +126,9 @@ void main() {
 
     test('分页模式的［插图］占位同样不朗读', () {
       const text = '正文一。\n［插图］\n正文二。';
-      final joined = splitForSpeechWithOffsets(text)
-          .map((p) => p.text)
-          .join('|');
+      final joined = splitForSpeechWithOffsets(
+        text,
+      ).map((p) => p.text).join('|');
       expect(joined.contains('插图'), isFalse);
       expect(joined.contains('正文一。'), isTrue);
       expect(joined.contains('正文二。'), isTrue);

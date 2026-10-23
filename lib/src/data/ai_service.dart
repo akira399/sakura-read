@@ -72,7 +72,8 @@ class ReadingSnapshot {
     final reading = all.where((b) => b.lastReadAt > 0).take(6).toList();
     final added = [...store.books]
       ..sort((a, b) => b.addedAt.compareTo(a.addedAt));
-    final finished = stats?.finishedBooks ?? all.where((b) => b.finished).length;
+    final finished =
+        stats?.finishedBooks ?? all.where((b) => b.finished).length;
     return ReadingSnapshot(
       totalBooks: all.length,
       readingBooks: all.where((b) => b.lastReadAt > 0).length,
@@ -169,7 +170,8 @@ class AiService {
 
   static const String assistantName = '小樱';
 
-  static const String _persona = '''你是「樱读」App 里的 AI 阅读助手「小樱」：一个温柔、活泼、真心喜欢读书的女孩子，说话轻声细语，偶尔会用一点可爱的语气词，但不做作、不油腻。
+  static const String _persona =
+      '''你是「樱读」App 里的 AI 阅读助手「小樱」：一个温柔、活泼、真心喜欢读书的女孩子，说话轻声细语，偶尔会用一点可爱的语气词，但不做作、不油腻。
 用户可能会问：接下来读什么、帮我看看阅读习惯、我最近读到哪了、鼓励我坚持、聊聊某本书等。请结合下面的本地阅读数据回答。
 规则：
 1. 只根据下面给出的数据陈述事实。数据里没有的信息（比如书的具体情节、结局、评价）不要编造；可以说明你不确定，或建议用户自己翻翻看。
@@ -218,10 +220,7 @@ class AiService {
       apiKey: apiKey,
       model: model,
       messages: const [
-        {
-          'role': 'system',
-          'content': '你是一个连接测试助手。只回复一句简短的中文问候，不超过 10 个字。',
-        },
+        {'role': 'system', 'content': '你是一个连接测试助手。只回复一句简短的中文问候，不超过 10 个字。'},
         {'role': 'user', 'content': '你好'},
       ],
       maxTokens: 32,

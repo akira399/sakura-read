@@ -41,7 +41,9 @@ class TxtParser {
   static const int _maxHeadingLineLength = 32;
 
   /// 标题里不应出现的句读符号（出现即认为是正文句子，不是标题）。
-  static const String _sentencePunct = '。，、；：！？…—""''《》（）()[]{}<>';
+  static const String _sentencePunct =
+      '。，、；：！？…—""'
+      '《》（）()[]{}<>';
 
   static List<RegExp>? _patterns;
 

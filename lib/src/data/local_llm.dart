@@ -50,8 +50,7 @@ class LocalModelSpec {
 
   double get megabytes => bytes / (1024 * 1024);
 
-  String get sizeLabel =>
-      megabytes >= 1024
+  String get sizeLabel => megabytes >= 1024
       ? '${(megabytes / 1024).toStringAsFixed(1)} GB'
       : '${megabytes.toStringAsFixed(0)} MB';
 }
@@ -69,7 +68,8 @@ const List<LocalModelSpec> localModelCatalog = [
     license: 'Apache-2.0',
     bytes: 546660344,
     fileName: 'qwen2.5-0.5b-instruct-q8.task',
-    summary: '机身存储约 521 MB，内存占用约 1 GB；闲聊、总结阅读习惯够用，'
+    summary:
+        '机身存储约 521 MB，内存占用约 1 GB；闲聊、总结阅读习惯够用，'
         '回答简单直接，不会编长篇大论。',
     mirrors: [
       'https://modelscope.cn/models/litert-community/Qwen2.5-0.5B-Instruct/resolve/master/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
@@ -81,7 +81,11 @@ const List<LocalModelSpec> localModelCatalog = [
 
 /// 原生侧推上来的一段流式输出。
 class LocalLlmEvent {
-  const LocalLlmEvent({required this.id, required this.type, required this.text});
+  const LocalLlmEvent({
+    required this.id,
+    required this.type,
+    required this.text,
+  });
 
   final int id;
 
@@ -190,9 +194,7 @@ class LocalLlmEngine {
     } catch (error) {
       // 通道异常：直接把错误交给调用方，别让 UI 卡在「正在想」。
       unawaited(controller.close());
-      return Stream<LocalLlmEvent>.error(
-        AiException(_friendly(error)),
-      );
+      return Stream<LocalLlmEvent>.error(AiException(_friendly(error)));
     }
     return controller.stream;
   }
@@ -384,7 +386,10 @@ class LocalModelManager extends ChangeNotifier {
             .send(request)
             .timeout(const Duration(seconds: 45));
         if (response.statusCode != 200) {
-          throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(url));
+          throw HttpException(
+            'HTTP ${response.statusCode}',
+            uri: Uri.parse(url),
+          );
         }
         final sink = tmp.openWrite();
         var received = 0;
@@ -523,10 +528,12 @@ class LocalLlmChat {
 
   static const String _imEnd = '<|im_end|>';
 
-  static const String _persona = '你是「樱读」App 里的阅读助手「小樱」，'
+  static const String _persona =
+      '你是「樱读」App 里的阅读助手「小樱」，'
       '温柔、简短，用简体中文，一般不超过 120 字。';
 
-  static const String _rules = '规则：只根据下面给出的资料回答；资料里没有的就说不知道，'
+  static const String _rules =
+      '规则：只根据下面给出的资料回答；资料里没有的就说不知道，'
       '不要编造书里的情节或数据；不要提这段说明。';
 
   /// 组一份 ChatML 提示词；超预算时先丢最早的对话，再丢阅读数据。
@@ -543,15 +550,14 @@ class LocalLlmChat {
       turns.removeRange(0, 2);
     }
     var prompt = _wrap(system, turns);
-    if (await LocalLlmEngine.tokenCount(prompt) <= LocalModelManager.promptBudget) {
+    if (await LocalLlmEngine.tokenCount(prompt) <=
+        LocalModelManager.promptBudget) {
       return prompt;
     }
     // 还是太长：去掉阅读数据（人设很短，基本能过）。
-    final lean = _wrap(
-      _systemContent(null, includeReading: false),
-      turns,
-    );
-    if (await LocalLlmEngine.tokenCount(lean) <= LocalModelManager.promptBudget) {
+    final lean = _wrap(_systemContent(null, includeReading: false), turns);
+    if (await LocalLlmEngine.tokenCount(lean) <=
+        LocalModelManager.promptBudget) {
       return lean;
     }
     // 最后手段：只留用户这一句，并截断到 300 字。
@@ -587,9 +593,11 @@ class LocalLlmChat {
       ..write('\n');
     for (final turn in turns) {
       buffer
-        ..write(turn.role == 'assistant'
-            ? '<|im_start|>assistant\n'
-            : '<|im_start|>user\n')
+        ..write(
+          turn.role == 'assistant'
+              ? '<|im_start|>assistant\n'
+              : '<|im_start|>user\n',
+        )
         ..write(turn.content)
         ..write(_imEnd)
         ..write('\n');

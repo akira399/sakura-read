@@ -721,9 +721,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 列表，用户一路往下滑就自然进入下一章，中间不会有跳转、闪屏或卡顿。
   List<_ScrollChapterText> get _scrollChapters {
     if (_scrollFlow.isEmpty) {
-      return [
-        _ScrollChapterText(chapter: _chapterIndex, text: _chapterText),
-      ];
+      return [_ScrollChapterText(chapter: _chapterIndex, text: _chapterText)];
     }
     // 当前章一定在流里：换章 / 换源后上层会清空流，这里再兜一次底，
     // 避免出现「流里没有当前章」导致定位到错误段落。
@@ -1899,8 +1897,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                         '已检测到：${engines.join('、')}'
                   : '这台设备没有可用的系统语音引擎。\n\n'
                         '不过没关系——小樱自带一套**内置离线语音**，'
-                        '点下面的「用内置语音」就能直接听，不需要装任何东西。')
-              + (reason == null || reason.isEmpty ? '' : '\n\n（原因：$reason）'),
+                        '点下面的「用内置语音」就能直接听，不需要装任何东西。') +
+              (reason == null || reason.isEmpty ? '' : '\n\n（原因：$reason）'),
           style: const TextStyle(height: 1.6, fontSize: 13),
         ),
         actions: [
@@ -2474,8 +2472,10 @@ class _ScrollReader extends StatefulWidget {
 
 class _ScrollReaderState extends State<_ScrollReader> {
   List<String> _paragraphs = const [];
+
   /// 每段所属章节号。
   List<int> _paraChapter = const [];
+
   /// 每段在本章正文里的起始偏移。
   List<int> _paraOffset = const [];
   String _sig = '';
@@ -2491,7 +2491,10 @@ class _ScrollReaderState extends State<_ScrollReader> {
   void initState() {
     super.initState();
     _rebuildItems();
-    _pendingParagraph = _paragraphFor(widget.initialChapter, widget.initialOffset);
+    _pendingParagraph = _paragraphFor(
+      widget.initialChapter,
+      widget.initialOffset,
+    );
   }
 
   @override
@@ -2538,9 +2541,10 @@ class _ScrollReaderState extends State<_ScrollReader> {
   /// 用和正文相同的 [TextStyle] 与可用宽度做一次 TextPainter 测量，
   /// 误差只来自字形舍入，视觉上察觉不到；比“按段数乘行高”准得多。
   double _prependedHeight(int oldFirstChapter) {
-    final width = (MediaQuery.sizeOf(context).width -
-            widget.marginH * 2)
-        .clamp(1.0, double.infinity);
+    final width = (MediaQuery.sizeOf(context).width - widget.marginH * 2).clamp(
+      1.0,
+      double.infinity,
+    );
     var total = 0.0;
     for (final c in widget.chapters) {
       if (c.chapter >= oldFirstChapter) break;

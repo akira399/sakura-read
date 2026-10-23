@@ -357,9 +357,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             trailing: IconButton(
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => AiSettingsPage(prefs: prefs),
-                ),
+                MaterialPageRoute(builder: (_) => AiSettingsPage(prefs: prefs)),
               ),
               icon: const Icon(Icons.settings_outlined, size: 20),
               tooltip: 'AI 设置',
