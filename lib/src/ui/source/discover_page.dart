@@ -71,7 +71,41 @@ class _DiscoverPageState extends State<DiscoverPage> {
   @override
   void initState() {
     super.initState();
+    // 书源在别的页面被导入 / 启用 / 删除时（本页常驻 IndexedStack），
+    // 及时刷新可用源列表，避免用户导入后回到发现页仍是空的。
+    widget.sourceStore.addListener(_onStoreChanged);
     _reloadSources(autoSelect: true);
+  }
+
+  @override
+  void dispose() {
+    widget.sourceStore.removeListener(_onStoreChanged);
+    super.dispose();
+  }
+
+  void _onStoreChanged() {
+    if (!mounted) return;
+    final list = _repo.exploreCapableSources();
+    final keep = _source;
+    final keepAlive = keep != null &&
+        list.any((s) => s.bookSourceUrl == keep.bookSourceUrl);
+    setState(() {
+      _sources = list;
+      _stats = _repo.exploreStats();
+      if (keepAlive) return;
+      _books = const [];
+      _error = null;
+      if (list.isEmpty) {
+        _source = null;
+        _categories = const [];
+        _category = null;
+        return;
+      }
+      _source = list.first;
+      _categories = OnlineRepo.parseExploreCategories(list.first);
+      _category = _categories.isEmpty ? null : _categories.first;
+    });
+    if (!keepAlive && _category != null) _load();
   }
 
   /// 重新枚举支持发现页的书源。
@@ -240,6 +274,29 @@ class _DiscoverPageState extends State<DiscoverPage> {
             '${_sources.length} 个可用',
             style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
           ),
+          // 用户反馈「希望能支持 js 格式的书源」：JS 引擎暂未内置，
+          // 这里明确告诉用户有多少个源因此用不了，避免以为是导入失败。
+          if ((_stats?.jsOnly ?? 0) > 0) ...[
+            const SizedBox(width: 6),
+            Tooltip(
+              message: '这些书源的发现地址是 JS 脚本（@js / <js>），当前版本还不支持执行',
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: scheme.tertiaryContainer.withValues(alpha: .7),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'JS 源 ${_stats!.jsOnly}',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onTertiaryContainer,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

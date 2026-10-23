@@ -31,10 +31,14 @@ enum ShelfSortMode {
 }
 
 /// 书架显示方式。
+///
+/// [cover] 是用户反馈里提到的那种「大封面」书架（类似 reeden）：
+/// 一屏只放 2~3 列，封面占比大、信息更少，挑书时更像实体书架。
 enum ShelfViewMode {
   grid('网格'),
   compact('小图'),
-  list('列表');
+  list('列表'),
+  cover('大封面');
 
   const ShelfViewMode(this.label);
 
@@ -55,6 +59,7 @@ ShelfSortMode shelfSortModeFrom(String? value) => switch (value) {
 ShelfViewMode shelfViewModeFrom(String? value) => switch (value) {
   'compact' => ShelfViewMode.compact,
   'list' => ShelfViewMode.list,
+  'cover' => ShelfViewMode.cover,
   _ => ShelfViewMode.grid,
 };
 

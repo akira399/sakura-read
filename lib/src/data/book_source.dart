@@ -191,7 +191,13 @@ BookContent createBookContent(Book book, BookStore store) {
 
 // ---------- isolate 入口 ----------
 
-String _decodeTxtIsolate(Uint8List bytes) => TxtParser.decodeBytes(bytes).text;
+String _decodeTxtIsolate(Uint8List bytes) {
+  final text = TxtParser.decodeBytes(bytes).text;
+  // 章节偏移是按 CRLF 归一化后的文本计算的（见 TxtParser.parseText），
+  // 这里必须同样归一化，否则 Windows 换行文本（\r\n）会让章节切片
+  // 逐章向前偏移，出现“标题是第 N 章、正文却是第 N-5 章”的问题。
+  return text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+}
 
 String _extractEpubChapterIsolate(Map<String, dynamic> args) {
   final path = args['path'] as String;

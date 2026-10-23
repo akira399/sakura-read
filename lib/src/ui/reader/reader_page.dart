@@ -75,6 +75,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   bool _pendingCross = false;
   GlobalKey<_PagedReaderState> _pagerKey = GlobalKey<_PagedReaderState>();
   GlobalKey<_ScrollReaderState> _scrollKey = GlobalKey<_ScrollReaderState>();
+
+  // ---- 滚动阅读的章节流（相邻章节拼进同一个列表，实现无缝衔接） ----
+  /// 已接入滚动流的连续章节（含正文），按章节号升序。
+  final List<_ScrollChapterText> _scrollFlow = [];
+
+  /// 正在把某章正文接进滚动流（避免重复请求）。
+  bool _scrollFlowLoading = false;
   bool? _lastKeepAwake;
   Timer? _clockTimer;
   String _clock = '';
@@ -85,6 +92,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   Timer? _readTimer;
   bool _readingActive = true;
   DateTime _lastActiveAt = DateTime.now();
+
+  /// 原生层当前是否正在接管音量键（避免重复下发）。
+  bool _volumeKeyActive = false;
 
   // ---- 朗读（TTS） ----
   final TtsService _tts = TtsService.instance;
@@ -129,6 +139,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _scheduleHide();
     _startClock();
     _startReadingTimer();
+    _bindVolumeKeys();
     // 桌宠：进入阅读器隐藏悬浮物；每天首次阅读送点心
     final pet = PetStore.shared;
     if (pet != null) {
@@ -155,6 +166,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _saveProgress();
     widget.prefs.removeListener(_onPrefsChanged);
     NativeBridge.setKeepScreenOn(false);
+    // 离开阅读页必须解除音量键接管，否则书架页音量键会失灵
+    unawaited(NativeBridge.setVolumeKeyPaging(false));
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _content?.dispose();
     super.dispose();
@@ -169,6 +182,22 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _settleReading();
       _readingActive = false;
     }
+  }
+
+  // ---------- 音量键翻页 ----------
+
+  /// 绑定原生音量键翻页：音量下 = 下一页，音量上 = 上一页。
+  void _bindVolumeKeys() {
+    NativeBridge.bindVolumeKeyHandler((action) {
+      if (!mounted) return;
+      if (action == 'next') {
+        _nextPage();
+      } else if (action == 'prev') {
+        _prevPage();
+      }
+    });
+    unawaited(NativeBridge.setVolumeKeyPaging(widget.prefs.volumeKeyPaging));
+    _volumeKeyActive = widget.prefs.volumeKeyPaging;
   }
 
   // ---------- 阅读计时 ----------
@@ -197,7 +226,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   void _onPrefsChanged() {
     if (!mounted) return;
     _syncKeepAwake();
+    _syncVolumeKeys();
     setState(() {});
+  }
+
+  /// 音量键翻页开关变化时，同步给原生层（避免无谓地拦截音量键）。
+  void _syncVolumeKeys() {
+    final wanted = widget.prefs.volumeKeyPaging;
+    if (wanted == _volumeKeyActive) return;
+    _volumeKeyActive = wanted;
+    unawaited(NativeBridge.setVolumeKeyPaging(wanted));
   }
 
   Future<void> _enterImmersive() async {
@@ -265,6 +303,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       if (!mounted) return;
       _chapterText = _processText(_chapterIndex, raw);
       _layoutSig = '';
+      // 滚动流的起点永远跟着「当前章」走：换章后重建，
+      // 避免上一章残留的拼接内容把新位置挤到错误的地方。
+      _resetScrollFlow();
       // 预加载命中时直接同帧切换（消除翻到章尾时的"顿一下"）
       List<PageSlice>? prePages;
       String? preSig;
@@ -350,6 +391,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _targetOffset = offset < 0 ? 1 << 30 : offset;
       _pageIndex = 0;
       _pages = [];
+      _scrollFlow.clear();
       _pagerKey = GlobalKey<_PagedReaderState>();
       _scrollKey = GlobalKey<_ScrollReaderState>();
     });
@@ -377,18 +419,44 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return '$chapterIndex|${widget.bookId}|'
         '${_viewport.width.round()}x${_viewport.height.round()}|'
         '${p.fontSize}|${p.lineHeight}|${p.letterSpacing}|${p.readerMarginH}|'
+        '${_effectiveMarginH.toStringAsFixed(1)}|'
         '${p.fontFamily}|${p.paragraphIndent}|${p.pageMode.name}|'
         '${p.readerPaddingTop}|${p.readerPaddingBottom}|'
         '${chapterText.length}|${chapterText.hashCode}';
   }
 
   Size _bodySize() {
-    final h = widget.prefs.readerMarginH;
-    final width = (_viewport.width - h * 2).clamp(60, 4000).toDouble();
+    final width = (_contentWidth).clamp(60, 4000).toDouble();
     final height = (_viewport.height - _topReserve - _bottomReserve)
         .clamp(60, 4000)
         .toDouble();
     return Size(width, height);
+  }
+
+  /// 平板 / 折叠屏上把正文版心收窄并居中。
+  ///
+  /// 用户反馈「希望适配一下平板」：宽屏如果仍按手机边距铺满，一行会排到
+  /// 40+ 字，眼睛要来回扫。这里把可读宽度限制在 [_maxColumnWidth] 以内，
+  /// 多出来的空间均分成左右留白；手机竖屏（宽度本来就小）完全不受影响。
+  static const double _maxColumnWidth = 680;
+
+  /// 实际可用的正文宽度（已扣除版心收窄后的左右留白）。
+  double get _contentWidth {
+    final w = _viewport.width;
+    if (w <= 0) return 0;
+    final h = widget.prefs.readerMarginH;
+    final inner = w - h * 2;
+    if (inner <= _maxColumnWidth) return inner;
+    return _maxColumnWidth;
+  }
+
+  /// 每一侧真正要留出的宽度（含平板居中带来的额外留白）。
+  double get _effectiveMarginH {
+    final w = _viewport.width;
+    if (w <= 0) return widget.prefs.readerMarginH;
+    final w2 = _contentWidth;
+    if (w2 <= 0) return widget.prefs.readerMarginH;
+    return ((w - w2) / 2).clamp(0.0, w / 2).toDouble();
   }
 
   /// 顶部留白（用户可调，见设置 → 排版）。
@@ -642,6 +710,107 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _afterPageChanged();
       unawaited(_preloadChapter(_chapterIndex + 1));
       unawaited(_preloadChapter(_chapterIndex - 1));
+    }
+  }
+
+  // ---------- 滚动阅读的章节流 ----------
+
+  /// 当前接进滚动视图的章节（首章是正在读的章）。
+  ///
+  /// 只有滚动模式才需要「多章拼接」：把已经预读好的下一章直接塞进同一个
+  /// 列表，用户一路往下滑就自然进入下一章，中间不会有跳转、闪屏或卡顿。
+  List<_ScrollChapterText> get _scrollChapters {
+    if (_scrollFlow.isEmpty) {
+      return [
+        _ScrollChapterText(chapter: _chapterIndex, text: _chapterText),
+      ];
+    }
+    // 当前章一定在流里：换章 / 换源后上层会清空流，这里再兜一次底，
+    // 避免出现「流里没有当前章」导致定位到错误段落。
+    if (!_scrollFlow.any((c) => c.chapter == _chapterIndex)) {
+      return [
+        _ScrollChapterText(chapter: _chapterIndex, text: _chapterText),
+        ..._scrollFlow.where((c) => c.chapter > _chapterIndex),
+      ];
+    }
+    return List<_ScrollChapterText>.of(_scrollFlow);
+  }
+
+  /// 复位滚动流（换书 / 跳章 / 换源时调用）。
+  void _resetScrollFlow() {
+    _scrollFlow
+      ..clear()
+      ..add(_ScrollChapterText(chapter: _chapterIndex, text: _chapterText));
+  }
+
+  /// 把下一章接进滚动流（滚到已加载内容的末尾时自动触发）。
+  ///
+  /// 只往前接；同一时间最多一个请求在飞，避免用户快速滑动时重复取正文。
+  Future<void> _extendScrollFlow() async {
+    if (widget.prefs.pageMode != PageTurnMode.scroll) return;
+    if (_scrollFlowLoading) return;
+    final book = _book;
+    if (book == null) return;
+    // 流为空时先把「当前章」放进去，否则会出现「只有下一章」的错位。
+    if (_scrollFlow.isEmpty) {
+      _scrollFlow.add(
+        _ScrollChapterText(chapter: _chapterIndex, text: _chapterText),
+      );
+    }
+    final last = _scrollFlow.last.chapter;
+    final next = last + 1;
+    if (next >= book.chapterCount) return;
+    _scrollFlowLoading = true;
+    try {
+      _content ??= createBookContent(book, widget.store);
+      var raw = _rawTextCache[next];
+      raw ??= await _content!.chapterText(next);
+      _rawTextCache[next] = raw;
+      if (!mounted) return;
+      final text = _processText(next, raw);
+      if (_scrollFlow.any((c) => c.chapter == next)) return;
+      setState(() {
+        _scrollFlow.add(_ScrollChapterText(chapter: next, text: text));
+      });
+    } catch (_) {
+      // 取下一章失败就安静停下：用户仍能看到已加载的内容
+    } finally {
+      _scrollFlowLoading = false;
+    }
+  }
+
+  /// 把上一章插到滚动流最前面（用户往上滚回首段时自动触发）。
+  ///
+  /// 与 [_extendScrollFlow] 对称：只有反向滚到已加载内容的最前面才补，
+  /// 同一次只补一章，避免一次性把整本书都读进内存。
+  Future<void> _prependScrollFlow() async {
+    if (widget.prefs.pageMode != PageTurnMode.scroll) return;
+    if (_scrollFlowLoading) return;
+    final book = _book;
+    if (book == null) return;
+    if (_scrollFlow.isEmpty) {
+      _scrollFlow.add(
+        _ScrollChapterText(chapter: _chapterIndex, text: _chapterText),
+      );
+    }
+    final prev = _scrollFlow.first.chapter - 1;
+    if (prev < 0) return;
+    _scrollFlowLoading = true;
+    try {
+      _content ??= createBookContent(book, widget.store);
+      var raw = _rawTextCache[prev];
+      raw ??= await _content!.chapterText(prev);
+      _rawTextCache[prev] = raw;
+      if (!mounted) return;
+      final text = _processText(prev, raw);
+      if (_scrollFlow.any((c) => c.chapter == prev)) return;
+      setState(() {
+        _scrollFlow.insert(0, _ScrollChapterText(chapter: prev, text: text));
+      });
+    } catch (_) {
+      // 上一章取不到就停在当前章首，不影响已加载内容
+    } finally {
+      _scrollFlowLoading = false;
     }
   }
 
@@ -932,19 +1101,42 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (mode == PageTurnMode.scroll) {
       reader = _ScrollReader(
         key: _scrollKey,
-        text: _chapterText,
+        chapters: _scrollChapters,
         style: _textStyle,
-        marginH: widget.prefs.readerMarginH,
+        marginH: _effectiveMarginH,
         topReserve: _topReserve,
         bottomReserve: _bottomReserve,
+        initialChapter: _chapterIndex,
         initialOffset: _targetOffset,
+        paragraphGap: widget.prefs.paragraphSpacing,
         imageDir: _imageDir,
-        onOffsetChanged: (offset) {
+        onPositionChanged: (chapter, offset) {
           _scrollOffset = offset;
+          if (chapter != _chapterIndex) {
+            // 滚动已越过章界：同步章节号（页眉 / 目录 / 进度 / 朗读都跟着变），
+            // 但**不重建**正文，视觉上完全无缝。
+            final crossed = _scrollFlow
+                .where((c) => c.chapter == chapter)
+                .toList();
+            setState(() {
+              _chapterIndex = chapter;
+              _targetOffset = offset;
+              _pages = [];
+              if (crossed.isNotEmpty) _chapterText = crossed.first.text;
+            });
+          }
           _saveProgressSoon();
         },
+        onNeedNext: _extendScrollFlow,
+        onNeedPrev: _prependScrollFlow,
         onToggleBars: _toggleBars,
       );
+      // 首次进入滚动模式时把下一章先接上，用户滑到底不用等加载。
+      if (_scrollFlow.length <= 1) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _extendScrollFlow();
+        });
+      }
     } else if (!_revealed || _pages.isEmpty) {
       reader = Center(
         child: SizedBox(
@@ -964,7 +1156,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         pages: _flow,
         style: _textStyle,
         backdrop: bg.color,
-        marginH: widget.prefs.readerMarginH,
+        marginH: _effectiveMarginH,
         initialPage: _flowChapterStart + _pageIndex,
         mode: mode,
         topReserve: _topReserve,
@@ -989,8 +1181,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         // 页眉：章节名（呼出菜单时自动隐藏，避免与菜单叠字；可在设置里关闭）
         if (widget.prefs.readerHeaderVisible)
           Positioned(
-            left: widget.prefs.readerMarginH,
-            right: widget.prefs.readerMarginH,
+            left: _effectiveMarginH,
+            right: _effectiveMarginH,
             top: (_topReserve - 24).clamp(2.0, 200.0),
             child: AnimatedOpacity(
               opacity: _barsVisible ? 0 : 1,
@@ -1009,8 +1201,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         // 页脚：页码 / 进度（呼出菜单时自动隐藏；可在设置里关闭）
         if (widget.prefs.readerFooterVisible)
           Positioned(
-            left: widget.prefs.readerMarginH,
-            right: widget.prefs.readerMarginH,
+            left: _effectiveMarginH,
+            right: _effectiveMarginH,
             bottom: (_bottomReserve - 30).clamp(2.0, 200.0),
             child: AnimatedOpacity(
               opacity: _barsVisible ? 0 : 1,
@@ -1414,35 +1606,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ),
               ),
               Expanded(
-                child: ListView.builder(
-                  itemCount: book.chapterCount,
-                  itemBuilder: (context, index) {
-                    final isCurrent = index == _chapterIndex;
-                    final chapter = book.chapters[index];
-                    return ListTile(
-                      dense: true,
-                      selected: isCurrent,
-                      title: Text(
-                        chapter.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontWeight: isCurrent
-                              ? FontWeight.w900
-                              : FontWeight.w500,
-                        ),
-                      ),
-                      trailing: chapter.charCount > 0
-                          ? Text(
-                              '${chapter.charCount} 字',
-                              style: const TextStyle(fontSize: 11),
-                            )
-                          : null,
-                      onTap: () {
-                        Navigator.of(sheetContext).pop();
-                        _goToChapter(index, 0);
-                      },
-                    );
+                child: _ChapterList(
+                  book: book,
+                  currentIndex: _chapterIndex,
+                  onTap: (index) {
+                    Navigator.of(sheetContext).pop();
+                    _goToChapter(index, 0);
                   },
                 ),
               ),
@@ -1509,7 +1678,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (index < 0 || index >= _ttsParagraphs.length) return;
     final offset = _ttsParagraphs[index].offset;
     if (widget.prefs.pageMode == PageTurnMode.scroll) {
-      _scrollKey.currentState?.scrollToOffset(offset);
+      _scrollKey.currentState?.scrollToOffset(_chapterIndex, offset);
     } else {
       final page = _pageForOffset(_pages, offset);
       if (page != _pageIndex) {
@@ -1706,9 +1875,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 设备无可用语音引擎时的引导弹窗。
+  /// 朗读初始化失败时的引导弹窗。
+  ///
+  /// 用户反馈：「为什么听不了书，是设置的问题吗」——只弹一句不可用太干。
+  /// 现在优先引导用户切到**内置离线语音**（装好语音包即可直接出声，
+  /// 不依赖手机厂商），其次才提示去系统设置装引擎。
   void _showTtsUnavailable(List<String> engines) {
     final hasEngine = engines.isNotEmpty;
+    final reason = _tts.lastError;
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -1718,19 +1892,41 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
         ),
         content: Text(
-          hasEngine
-              ? '检测到语音引擎，但无法初始化中文朗读。\n\n'
-                    '请到「系统设置 → 无障碍 / 语音合成」安装中文语音数据后重试。\n\n'
-                    '已检测到：${engines.join('、')}'
-              : '系统未安装语音合成（TTS）引擎。\n\n'
-                    '请安装语音引擎（如「Google 语音服务」或手机厂商语音服务），'
-                    '并在系统设置里设为默认后重试。',
+          (hasEngine
+                  ? '检测到语音引擎，但没能初始化中文朗读。\n\n'
+                        '可以直接换成小樱自带的「内置离线语音」，不用装任何东西；'
+                        '也可以到系统设置里补一份中文语音数据。\n\n'
+                        '已检测到：${engines.join('、')}'
+                  : '这台设备没有可用的系统语音引擎。\n\n'
+                        '不过没关系——小樱自带一套**内置离线语音**，'
+                        '点下面的「用内置语音」就能直接听，不需要装任何东西。')
+              + (reason == null || reason.isEmpty ? '' : '\n\n（原因：$reason）'),
           style: const TextStyle(height: 1.6, fontSize: 13),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('知道了'),
+            onPressed: () async {
+              final ok = await NativeBridge.openTtsSettings();
+              if (!ok && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('没能打开系统语音设置，请手动到「设置 → 无障碍 → 语音合成」里查看'),
+                  ),
+                );
+              }
+            },
+            child: const Text('去装系统语音'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              widget.prefs.setTtsEngine(TtsService.builtinEngineId);
+              await _tts.setPreferredEngine(TtsService.builtinEngineId);
+              if (!mounted) return;
+              _toastLate('正在启动内置语音，第一次会稍慢一点…');
+              await _startTts();
+            },
+            child: const Text('用内置语音'),
           ),
         ],
       ),
@@ -1968,6 +2164,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _targetOffset = 0;
     _pagerKey = GlobalKey<_PagedReaderState>();
     _scrollKey = GlobalKey<_ScrollReaderState>();
+    _scrollFlow.clear();
     _toastLate('已换源，正在重新加载本章…');
     _loadChapter(revealBars: true);
   }
@@ -2212,39 +2409,77 @@ class _FlowPage {
 
 // ==================== 滚动视图 ====================
 
+/// 滚动阅读里的一段章节正文。
+///
+/// 滚动模式不再是「一章一个 ListView」：相邻章节的正文被拼进同一个列表，
+/// 章与章之间没有任何跳转/停顿——这正是用户反馈的要求
+/// 「滚动阅读什么时候能支持直接滑到下一章」。
+class _ScrollChapterText {
+  const _ScrollChapterText({required this.chapter, required this.text});
+
+  final int chapter;
+  final String text;
+}
+
 class _ScrollReader extends StatefulWidget {
   const _ScrollReader({
     super.key,
-    required this.text,
+    required this.chapters,
     required this.style,
     required this.marginH,
     required this.topReserve,
     required this.bottomReserve,
+    required this.initialChapter,
     required this.initialOffset,
-    required this.onOffsetChanged,
+    required this.onPositionChanged,
+    required this.onNeedNext,
     required this.onToggleBars,
+    this.onNeedPrev,
     this.imageDir,
+    this.paragraphGap = 12,
   });
 
   /// 插图目录（EPUB 图片；空则正文里的图片标记显示为「［插图］」）。
   final String? imageDir;
 
-  final String text;
+  /// 参与的章节（按章节号升序、且连续），首个是本次阅读的起始章。
+  final List<_ScrollChapterText> chapters;
+
   final TextStyle style;
   final double marginH;
   final double topReserve;
   final double bottomReserve;
+
+  /// 打开时的定位章节与章内偏移。
+  final int initialChapter;
   final int initialOffset;
-  final ValueChanged<int> onOffsetChanged;
+
+  /// 可见位置变化（滚动停下后回调），用于保存进度与同步目录/页眉。
+  final void Function(int chapter, int offset) onPositionChanged;
+
+  /// 滚到已加载章节的末尾时回调，让上层把下一章接进来。
+  final VoidCallback onNeedNext;
+
+  /// 滚回已加载章节的最前面时回调，让上层把上一章接进来。
+  final VoidCallback? onNeedPrev;
+
   final VoidCallback onToggleBars;
+
+  /// 段间距（px，见 [AppPrefs.paragraphSpacing]）。
+  final double paragraphGap;
 
   @override
   State<_ScrollReader> createState() => _ScrollReaderState();
 }
 
 class _ScrollReaderState extends State<_ScrollReader> {
-  late final List<String> _paragraphs;
-  late final List<int> _cumulative;
+  List<String> _paragraphs = const [];
+  /// 每段所属章节号。
+  List<int> _paraChapter = const [];
+  /// 每段在本章正文里的起始偏移。
+  List<int> _paraOffset = const [];
+  String _sig = '';
+
   final Map<int, GlobalKey> _keys = {};
   ScrollController? _scroll;
   Timer? _settleTimer;
@@ -2255,15 +2490,75 @@ class _ScrollReaderState extends State<_ScrollReader> {
   @override
   void initState() {
     super.initState();
-    _paragraphs = widget.text.split('\n');
-    _cumulative = List.filled(_paragraphs.length + 1, 0);
-    var acc = 0;
-    for (var i = 0; i < _paragraphs.length; i++) {
-      _cumulative[i] = acc;
-      acc += _paragraphs[i].length + 1;
+    _rebuildItems();
+    _pendingParagraph = _paragraphFor(widget.initialChapter, widget.initialOffset);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ScrollReader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final sig = _signatureOf(widget.chapters);
+    if (sig == _sig) return;
+    final previousFirst = oldWidget.chapters.isEmpty
+        ? -1
+        : oldWidget.chapters.first.chapter;
+    final newFirst = widget.chapters.isEmpty
+        ? -1
+        : widget.chapters.first.chapter;
+    // 往前接章（新的首章号更小）：内容整体下移，必须把滚动位置同步
+    // 下移同样高度，否则用户会看到正文「跳一下」。
+    final prepended = previousFirst >= 0 && newFirst < previousFirst;
+    final double shift = prepended ? _prependedHeight(previousFirst) : 0;
+    _rebuildItems();
+    if (prepended) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final scroll = _scroll;
+        if (!mounted || scroll == null || !scroll.hasClients) return;
+        scroll.jumpTo(
+          (scroll.offset + shift).clamp(0.0, scroll.position.maxScrollExtent),
+        );
+      });
+      return;
     }
-    _cumulative[_paragraphs.length] = acc;
-    _pendingParagraph = _paragraphForOffset(widget.initialOffset);
+    // 章节列表只在尾部追加：滚动位置天然保持，不需要重算。
+    // 首章变了（换书 / 跳章 / 流重排）才重新定位。
+    if (previousFirst != newFirst) {
+      _keys.clear();
+      _pendingParagraph = _paragraphFor(
+        widget.initialChapter,
+        widget.initialOffset,
+      );
+      _correctAttempts = 10;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _tryCorrect());
+    }
+  }
+
+  /// 估算「新接进来的前序章节」渲染后的高度（用于滚动位置补偿）。
+  ///
+  /// 用和正文相同的 [TextStyle] 与可用宽度做一次 TextPainter 测量，
+  /// 误差只来自字形舍入，视觉上察觉不到；比“按段数乘行高”准得多。
+  double _prependedHeight(int oldFirstChapter) {
+    final width = (MediaQuery.sizeOf(context).width -
+            widget.marginH * 2)
+        .clamp(1.0, double.infinity);
+    var total = 0.0;
+    for (final c in widget.chapters) {
+      if (c.chapter >= oldFirstChapter) break;
+      for (final line in c.text.split('\n')) {
+        if (line.trim().isEmpty) {
+          total += widget.style.fontSize ?? 16;
+          continue;
+        }
+        final painter = TextPainter(
+          text: TextSpan(text: line, style: widget.style),
+          textDirection: TextDirection.ltr,
+          textScaler: TextScaler.noScaling,
+        )..layout(maxWidth: width);
+        total += painter.height + widget.paragraphGap;
+        painter.dispose();
+      }
+    }
+    return total;
   }
 
   @override
@@ -2273,7 +2568,8 @@ class _ScrollReaderState extends State<_ScrollReader> {
       _viewportHeight = MediaQuery.sizeOf(context).height;
       final estimate = _viewportHeight * 0.9;
       _scroll = ScrollController(
-        initialScrollOffset: _pendingParagraph * estimate,
+        initialScrollOffset:
+            _pendingParagraph.clamp(0, _paragraphs.length) * estimate,
       );
       if (_pendingParagraph > 0) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2291,18 +2587,63 @@ class _ScrollReaderState extends State<_ScrollReader> {
     super.dispose();
   }
 
-  int _paragraphForOffset(int offset) {
+  /// 章节列表签名：变化时重建段落 → 章节/偏移映射。
+  String _signatureOf(List<_ScrollChapterText> chapters) =>
+      chapters.map((c) => '${c.chapter}:${c.text.length}').join(',');
+
+  /// 把连续章节正文切成段落，并记录每段所属章节与章内偏移。
+  void _rebuildItems() {
+    final paragraphs = <String>[];
+    final chaptersOf = <int>[];
+    final offsets = <int>[];
+    for (final c in widget.chapters) {
+      final lines = c.text.split('\n');
+      var offset = 0;
+      for (final line in lines) {
+        paragraphs.add(line);
+        chaptersOf.add(c.chapter);
+        offsets.add(offset);
+        offset += line.length + 1;
+      }
+    }
+    _paragraphs = paragraphs;
+    _paraChapter = chaptersOf;
+    _paraOffset = offsets;
+    _sig = _signatureOf(widget.chapters);
+  }
+
+  /// (章节, 章内偏移) → 整个流里的段落下标。
+  int _paragraphFor(int chapter, int offset) {
     var lo = 0;
     var hi = _paragraphs.length - 1;
-    while (lo < hi) {
-      final mid = (lo + hi + 1) >> 1;
-      if (_cumulative[mid] <= offset) {
-        lo = mid;
+    if (hi < 0) return 0;
+    // 先按章节二分，定位该章第一个段落
+    var first = -1;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1;
+      if (_paraChapter[mid] < chapter) {
+        lo = mid + 1;
       } else {
+        if (_paraChapter[mid] == chapter) first = mid;
         hi = mid - 1;
       }
     }
-    return lo;
+    if (first < 0) return lo.clamp(0, _paragraphs.length - 1).toInt();
+    // 再在该章内按偏移二分
+    var a = first;
+    var b = first;
+    while (b + 1 < _paragraphs.length && _paraChapter[b + 1] == chapter) {
+      b++;
+    }
+    while (a < b) {
+      final mid = (a + b + 1) >> 1;
+      if (_paraOffset[mid] <= offset) {
+        a = mid;
+      } else {
+        b = mid - 1;
+      }
+    }
+    return a;
   }
 
   void _tryCorrect() {
@@ -2333,6 +2674,7 @@ class _ScrollReaderState extends State<_ScrollReader> {
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOut,
     );
+    widget.onNeedNext();
   }
 
   void scrollPageUp() {
@@ -2350,8 +2692,8 @@ class _ScrollReaderState extends State<_ScrollReader> {
   }
 
   /// 朗读自动跟随：把指定原文偏移处的段落滚动到视口顶部。
-  void scrollToOffset(int offset) {
-    final index = _paragraphForOffset(offset);
+  void scrollToOffset(int chapter, int offset) {
+    final index = _paragraphFor(chapter, offset);
     if (index < 0 || index >= _paragraphs.length) return;
     _pendingParagraph = index;
     _correctAttempts = 6;
@@ -2359,9 +2701,22 @@ class _ScrollReaderState extends State<_ScrollReader> {
   }
 
   bool _onNotification(ScrollNotification notification) {
+    // 快到已加载内容的末尾时，提前把下一章接进来，
+    // 这样手指不会先撞到"到底了"再等章节加载。
+    if (notification is ScrollUpdateNotification) {
+      final pos = notification.metrics;
+      if (pos.maxScrollExtent - pos.pixels < _viewportHeight * 1.2) {
+        widget.onNeedNext();
+      }
+      if (pos.pixels < _viewportHeight * 0.6) {
+        widget.onNeedPrev?.call();
+      }
+    }
     if (notification is ScrollEndNotification) {
       _settleTimer?.cancel();
       _settleTimer = Timer(const Duration(milliseconds: 180), _settle);
+      if (notification.metrics.extentAfter < 2) widget.onNeedNext();
+      if (notification.metrics.extentBefore < 2) widget.onNeedPrev?.call();
     }
     return false;
   }
@@ -2369,8 +2724,8 @@ class _ScrollReaderState extends State<_ScrollReader> {
   void _settle() {
     if (!mounted) return;
     final index = _firstVisibleParagraph();
-    final offset = index < _cumulative.length ? _cumulative[index] : 0;
-    widget.onOffsetChanged(offset);
+    if (index < 0 || index >= _paragraphs.length) return;
+    widget.onPositionChanged(_paraChapter[index], _paraOffset[index]);
   }
 
   int _firstVisibleParagraph() {
@@ -2425,7 +2780,8 @@ class _ScrollReaderState extends State<_ScrollReader> {
             behavior: HitTestBehavior.opaque,
             onTap: widget.onToggleBars,
             child: Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+              // 段间距可调（用户反馈：段与段之间的空隙太大/太小）
+              padding: EdgeInsets.only(bottom: widget.paragraphGap),
               child: Text(
                 paragraph,
                 style: widget.style,
@@ -2550,6 +2906,95 @@ class _BookSliderState extends State<_BookSlider> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 目录列表：打开时直接定位到「当前阅读的章节」。
+///
+/// 用户反馈（#1）：章节目录每次都从第 1 章开始选，长书翻起来很痛苦。
+/// 这里用固定行高 + initialScrollOffset 先把列表滚到当前章附近，
+/// 再在首帧后用 ensureVisible 精确对齐（行高因字体缩放可能略有偏差）。
+class _ChapterList extends StatefulWidget {
+  const _ChapterList({
+    required this.book,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  final Book book;
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  @override
+  State<_ChapterList> createState() => _ChapterListState();
+}
+
+class _ChapterListState extends State<_ChapterList> {
+  static const double _rowHeight = 48;
+  static const double _sheetRatio = .62;
+
+  final GlobalKey _currentKey = GlobalKey();
+  ScrollController? _controller;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_controller != null) return;
+    final viewport = MediaQuery.sizeOf(context).height * _sheetRatio;
+    final anchor = widget.currentIndex * _rowHeight - viewport / 3;
+    _controller = ScrollController(
+      initialScrollOffset: anchor < 0 ? 0 : anchor,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _alignCurrent());
+  }
+
+  void _alignCurrent() {
+    if (!mounted) return;
+    final current = _currentKey.currentContext;
+    if (current == null) return;
+    Scrollable.ensureVisible(current, alignment: .33, duration: Duration.zero);
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final book = widget.book;
+    return ListView.builder(
+      controller: _controller,
+      itemExtent: _rowHeight,
+      itemCount: book.chapterCount,
+      itemBuilder: (context, index) {
+        final isCurrent = index == widget.currentIndex;
+        final chapter = book.chapters[index];
+        return ListTile(
+          key: isCurrent ? _currentKey : null,
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          selected: isCurrent,
+          title: Text(
+            chapter.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: isCurrent ? FontWeight.w900 : FontWeight.w500,
+            ),
+          ),
+          trailing: chapter.charCount > 0
+              ? Text(
+                  '${chapter.charCount} 字',
+                  style: const TextStyle(fontSize: 11),
+                )
+              : null,
+          onTap: () => widget.onTap(index),
+        );
+      },
     );
   }
 }

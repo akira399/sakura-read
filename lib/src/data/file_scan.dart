@@ -22,8 +22,19 @@ const Set<String> _skippedNames = {
 bool isSkippedDirName(String name) =>
     _skippedNames.contains(name.toLowerCase()) || name.startsWith('.');
 
+/// 最后一个路径分隔符的下标（同时兼容 `/` 与 Windows 的 `\`）。
+///
+/// Android 上只可能出现 `/`，但桌面端（Windows）的 `Directory.list` 回传的是
+/// 反斜杠路径；只认 `/` 的话文件名 / 扩展名解析会把整条路径当成文件名，
+/// 于是导入时所有文件都被扩展名过滤掉。
+int _lastSeparator(String path) {
+  final slash = path.lastIndexOf('/');
+  final backslash = path.lastIndexOf('\\');
+  return slash > backslash ? slash : backslash;
+}
+
 String pathFileName(String path) {
-  final i = path.lastIndexOf('/');
+  final i = _lastSeparator(path);
   return i < 0 ? path : path.substring(i + 1);
 }
 

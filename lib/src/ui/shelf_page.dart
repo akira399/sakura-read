@@ -7,10 +7,12 @@ import '../data/file_scan.dart';
 import '../data/models.dart';
 import '../data/prefs.dart';
 import '../data/shelf_sort.dart';
+import '../data/stats_store.dart';
 import '../platform/native_bridge.dart';
 import '../source/source_store.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
+import 'ai_chat_page.dart';
 import 'book_detail_page.dart';
 import 'folder_picker_page.dart';
 import 'reader/reader_page.dart';
@@ -27,11 +29,15 @@ class ShelfPage extends StatefulWidget {
     required this.store,
     required this.prefs,
     required this.sourceStore,
+    this.statsStore,
   });
 
   final BookStore store;
   final AppPrefs prefs;
   final SourceStore sourceStore;
+
+  /// 阅读统计（AI 助手用来总结阅读习惯；测试里可以没有）。
+  final StatsStore? statsStore;
 
   @override
   State<ShelfPage> createState() => _ShelfPageState();
@@ -145,6 +151,34 @@ class _ShelfPageState extends State<ShelfPage> {
             onMenu: () => _showBookMenu(books[index]),
           ),
         );
+      case ShelfViewMode.cover:
+        // 用户反馈：想要 reeden 那种「大封面」书架——封面做主视觉，
+        // 书名压在封面下方，一屏 2~3 列，挑书更像逛实体书架。
+        // 列数按屏宽给固定值（手机 3 列 / 平板更多），避免宽屏排成一片小图。
+        final width = MediaQuery.sizeOf(context).width;
+        final columns = width >= 1100
+            ? 6
+            : width >= 840
+            ? 5
+            : width >= 600
+            ? 4
+            : 3;
+        return SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: 18,
+            crossAxisSpacing: 18,
+            childAspectRatio: .58,
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (context, index) => _CoverBookCard(
+              book: books[index],
+              onOpen: () => _openDetail(books[index]),
+              onMenu: () => _showBookMenu(books[index]),
+            ),
+            childCount: books.length,
+          ),
+        );
     }
   }
 
@@ -238,6 +272,22 @@ class _ShelfPageState extends State<ShelfPage> {
                       ),
                     ],
                   ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AiChatPage(
+                        store: widget.store,
+                        prefs: widget.prefs,
+                        statsStore: widget.statsStore,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Colors.white,
+                  ),
+                  tooltip: 'AI 助手',
                 ),
                 PetGuideTarget(
                   id: 'shelf_search',
@@ -457,6 +507,7 @@ class _ShelfPageState extends State<ShelfPage> {
     ShelfViewMode.grid => Icons.grid_view_rounded,
     ShelfViewMode.compact => Icons.apps_rounded,
     ShelfViewMode.list => Icons.view_list_rounded,
+    ShelfViewMode.cover => Icons.photo_library_rounded,
   };
 
   String _directionHint(AppPrefs prefs) {
@@ -726,81 +777,86 @@ class _ShelfPageState extends State<ShelfPage> {
   void _showBookMenu(Book book) {
     showModalBottomSheet<void>(
       context: context,
+      // 横屏 / 小屏设备上条目会超出默认高度（曾报 BOTTOM OVERFLOWED），
+      // 这里让面板整体可滚动，并允许按内容高度展开。
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.menu_book_rounded),
-              title: Text(
-                book.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.menu_book_rounded),
+                title: Text(
+                  book.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  book.author.isEmpty ? book.path : book.author,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11),
+                ),
               ),
-              subtitle: Text(
-                book.author.isEmpty ? book.path : book.author,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.play_arrow_rounded),
+                title: const Text('继续阅读'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _continueReading(book);
+                },
               ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.play_arrow_rounded),
-              title: const Text('继续阅读'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _continueReading(book);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.info_outline_rounded),
-              title: const Text('书籍详情'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _openDetail(book);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.drive_file_rename_outline_rounded),
-              title: const Text('重命名'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _renameBook(book);
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                book.finished
-                    ? Icons.restart_alt_rounded
-                    : Icons.check_circle_outline_rounded,
+              ListTile(
+                leading: const Icon(Icons.info_outline_rounded),
+                title: const Text('书籍详情'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _openDetail(book);
+                },
               ),
-              title: Text(book.finished ? '标记为未读' : '标记为已读'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                if (book.finished) {
-                  widget.store.markUnread(book.id);
-                } else {
-                  widget.store.markFinished(book.id);
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.delete_outline_rounded,
-                color: Colors.redAccent,
+              ListTile(
+                leading: const Icon(Icons.drive_file_rename_outline_rounded),
+                title: const Text('重命名'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _renameBook(book);
+                },
               ),
-              title: const Text(
-                '从书架移除',
-                style: TextStyle(color: Colors.redAccent),
+              ListTile(
+                leading: Icon(
+                  book.finished
+                      ? Icons.restart_alt_rounded
+                      : Icons.check_circle_outline_rounded,
+                ),
+                title: Text(book.finished ? '标记为未读' : '标记为已读'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  if (book.finished) {
+                    widget.store.markUnread(book.id);
+                  } else {
+                    widget.store.markFinished(book.id);
+                  }
+                },
               ),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _confirmRemove(book);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.redAccent,
+                ),
+                title: const Text(
+                  '从书架移除',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _confirmRemove(book);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -837,32 +893,73 @@ class _ShelfPageState extends State<ShelfPage> {
   }
 
   Future<void> _confirmRemove(Book book) async {
+    // 只有本地书（TXT / EPUB）才有文件可删；在线书没有本地文件。
+    final canDeleteFile = book.format != BookFormat.online;
+    var deleteFile = false;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: const Text(
-          '从书架移除？',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-        ),
-        content: Text(
-          '「${book.title}」会从书架移除（本地文件不会被删除）。',
-          style: const TextStyle(height: 1.5, fontSize: 13.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('移除'),
+          title: const Text(
+            '从书架移除？',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
           ),
-        ],
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                canDeleteFile
+                    ? '「${book.title}」会从书架移除，本地文件默认保留。'
+                    : '「${book.title}」会从书架移除。',
+                style: const TextStyle(height: 1.5, fontSize: 13.5),
+              ),
+              if (canDeleteFile)
+                // 用户反馈：移除的时候想连本地文件一起删掉
+                CheckboxListTile(
+                  value: deleteFile,
+                  onChanged: (v) =>
+                      setDialogState(() => deleteFile = v ?? false),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: const Text(
+                    '同时删除本地文件',
+                    style: TextStyle(fontSize: 13.5),
+                  ),
+                  subtitle: Text(
+                    book.path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('移除'),
+            ),
+          ],
+        ),
       ),
     );
-    if (ok == true) widget.store.removeById(book.id);
+    if (ok == true) {
+      await widget.store.removeById(book.id, deleteLocalFile: deleteFile);
+      if (!mounted || !deleteFile) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已移除并删除「${book.title}」的本地文件')));
+    }
   }
 }
 
@@ -995,6 +1092,114 @@ class _BookCard extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 大封面卡片：封面占据主体，书名 / 作者放在下方（类似 reeden 的书架）。
+class _CoverBookCard extends StatelessWidget {
+  const _CoverBookCard({
+    required this.book,
+    required this.onOpen,
+    required this.onMenu,
+  });
+
+  final Book book;
+  final VoidCallback onOpen;
+  final VoidCallback onMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final percent = (book.progress * 100).round();
+    return GestureDetector(
+      onLongPress: onMenu,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onOpen,
+          borderRadius: BorderRadius.circular(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: .18),
+                        blurRadius: 14,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        BookCover(book: book, radius: 14),
+                        if (book.finished)
+                          const Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Icon(
+                              Icons.check_circle_rounded,
+                              color: Color(0xFF9BE89B),
+                              size: 20,
+                            ),
+                          ),
+                        // 进度条压在封面底部（不做信息遮罩，保持封面干净）
+                        Positioned(
+                          left: 10,
+                          right: 10,
+                          bottom: 10,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(3),
+                            child: LinearProgressIndicator(
+                              value: book.progress,
+                              minHeight: 3,
+                              backgroundColor: Colors.white.withValues(
+                                alpha: .35,
+                              ),
+                              valueColor: const AlwaysStoppedAnimation<Color>(
+                                Color(0xFFFFB7C5),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                book.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  height: 1.25,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '${book.author.isEmpty ? '佚名' : book.author} · '
+                '${book.finished ? '已读完' : '$percent%'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
         ),
       ),

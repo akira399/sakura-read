@@ -95,11 +95,21 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
         _sliderRow(
           label: '行距',
           value: widget.prefs.lineHeight,
-          min: 1.2,
+          min: 1.0,
           max: 2.6,
-          divisions: 14,
+          divisions: 16,
           display: widget.prefs.lineHeight.toStringAsFixed(1),
           onChanged: widget.prefs.setLineHeight,
+        ),
+        // 用户反馈：段与段之间的间隔有点大，希望能自己调
+        _sliderRow(
+          label: '段间距',
+          value: widget.prefs.paragraphSpacing,
+          min: 0,
+          max: 40,
+          divisions: 20,
+          display: widget.prefs.paragraphSpacing.round().toString(),
+          onChanged: widget.prefs.setParagraphSpacing,
         ),
         _sliderRow(
           label: '字间距',
@@ -292,6 +302,18 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           value: widget.prefs.keepScreenOn,
           onChanged: widget.prefs.setKeepScreenOn,
           title: const Text('阅读时保持屏幕常亮', style: TextStyle(fontSize: 13.5)),
+        ),
+        // 用户反馈「音量键翻页」：很多读者习惯单手用音量键翻页
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: widget.prefs.volumeKeyPaging,
+          onChanged: widget.prefs.setVolumeKeyPaging,
+          title: const Text('音量键翻页', style: TextStyle(fontSize: 13.5)),
+          subtitle: Text(
+            '音量上 = 上一页，音量下 = 下一页（仅在阅读页生效）',
+            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ),
         ),
         // 用户反馈：页眉 / 页脚也想能关掉（有些书源章节名很长，看着乱）
         SwitchListTile(

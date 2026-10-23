@@ -34,6 +34,15 @@ class TxtParser {
   /// 单章最大标题长度（超过视为正文行，不当作章节标题）。
   static const int maxTitleLength = 50;
 
+  /// 判定标题时允许的最大行长（比 [maxTitleLength] 更严）。
+  ///
+  /// 用户反馈「目录识别过于松垮」：正文里以「第 N 章」开头的整句也会被当成
+  /// 章节标题，目录里就会多出大量假条目。真正的标题很少超过 32 个字。
+  static const int _maxHeadingLineLength = 32;
+
+  /// 标题里不应出现的句读符号（出现即认为是正文句子，不是标题）。
+  static const String _sentencePunct = '。，、；：！？…—""''《》（）()[]{}<>';
+
   static List<RegExp>? _patterns;
 
   static List<RegExp> get _chapterPatterns => _patterns ??= [
@@ -76,8 +85,10 @@ class TxtParser {
       final trimmed = line.trim();
 
       if (trimmed.isNotEmpty &&
-          trimmed.length <= maxTitleLength &&
-          !trimmed.contains('　　') && // 带首行缩进的通常是正文
+          trimmed.length <= _maxHeadingLineLength &&
+          // 带首行缩进的通常是正文（注意：trim 会把行首缩进吃掉，
+          // 所以必须用未 trim 的原始行判断，之前这里有 bug → 目录过松）
+          !_hasBodyIndent(line) &&
           _looksLikeTitle(trimmed)) {
         markers.add(_Marker(title: _normalizeTitle(trimmed), start: lineStart));
       }
@@ -108,13 +119,47 @@ class TxtParser {
 
   static bool _looksLikeTitle(String line) {
     for (final re in _chapterPatterns) {
-      if (re.hasMatch(line)) {
-        // 排除误匹配：标题里不含句号结尾的长句
-        if (line.endsWith('。') && line.length > 20) return false;
-        return true;
+      if (!re.hasMatch(line)) continue;
+      // 排除误匹配：标题里不含句读 / 不以句号收尾（正文被当成标题）。
+      // 用户反馈「目录识别过于松垮」：以句号收尾的整句一律不是标题，
+      // 不管多短（「第三章正文，故事继续往下走。」就是正文）。
+      if (line.endsWith('。') || line.endsWith('.')) return false;
+      if (_sentencePunctCount(line) > 2) return false;
+      if (line.endsWith('！') || line.endsWith('？')) {
+        // 短标题偶尔带问号（「第一章 谁在那里？」），长句基本是正文
+        return line.length <= 16;
       }
+      return true;
     }
     return false;
+  }
+
+  /// 行首是否带「正文缩进」（2 个全角空格 / 4 个半角空格起步）。
+  ///
+  /// 必须用未 trim 的原始行判断：正文首行缩进在 `trim()` 后就看不出来了，
+  /// 这正是旧实现「目录过于松垮」的原因。
+  static bool _hasBodyIndent(String line) {
+    var fullWidth = 0;
+    var halfWidth = 0;
+    for (var i = 0; i < line.length && i < 8; i++) {
+      final c = line.codeUnitAt(i);
+      if (c == 0x3000) {
+        fullWidth++;
+      } else if (c == 0x20 || c == 0x09) {
+        halfWidth++;
+      } else {
+        break;
+      }
+    }
+    return fullWidth >= 2 || halfWidth >= 4;
+  }
+
+  static int _sentencePunctCount(String line) {
+    var n = 0;
+    for (var i = 0; i < line.length; i++) {
+      if (_sentencePunct.contains(line[i])) n++;
+    }
+    return n;
   }
 
   static String _normalizeTitle(String line) {

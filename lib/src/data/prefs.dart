@@ -60,6 +60,13 @@ class AppPrefs extends ChangeNotifier {
   double letterSpacing = 0;
   double readerMarginH = 20;
 
+  /// 段间距（每段之间的额外空隙，单位 px）。
+  ///
+  /// 用户反馈：「行距、段距不能调到负的，间隔还是有点大」——原先行距最小
+  /// 只能到 1.2、段间距写死 12px，想让排版更紧凑也没办法。这里把行距下限
+  /// 放开到 1.0，并把段间距做成可调（0 = 完全紧贴）。
+  double paragraphSpacing = 12;
+
   /// 正文区距屏幕顶部的留白（上边距）。
   ///
   /// 用户反馈：希望能自己定「正文离顶部多远」（原先是写死的 30）。
@@ -85,6 +92,12 @@ class AppPrefs extends ChangeNotifier {
   bool keepScreenOn = true;
   bool paragraphIndent = true;
 
+  /// 音量键翻页：打开后阅读页内音量上/下键 = 上一页/下一页。
+  ///
+  /// 用户反馈「音量键翻页」——很多人习惯单手用音量键翻页，所以默认开启；
+  /// 只在阅读页内生效，退出阅读页立刻解绑，不影响其它页面调音量。
+  bool volumeKeyPaging = true;
+
   // ---- 朗读（TTS） ----
   /// 语速（0.5~2.0）。
   double ttsRate = 1.0;
@@ -103,6 +116,28 @@ class AppPrefs extends ChangeNotifier {
   /// 用户反馈：一加等机型自带引擎不会被系统选为默认 → 朗读不可用。
   /// 允许手动指定，并持久化。
   String ttsEngine = '';
+
+  // ---- AI 助手（小樱） ----
+  /// 兼容 OpenAI Chat Completions 的接口地址（如 https://api.openai.com/v1）。
+  String aiBaseUrl = '';
+
+  /// API Key（只保存在本机设置文件里）。
+  String aiApiKey = '';
+
+  /// 模型名（如 gpt-4o-mini / deepseek-chat）。
+  String aiModel = '';
+
+  /// 聊天时把书架 / 进度 / 时长等阅读数据一起发给模型。
+  bool aiIncludeReading = true;
+
+  /// 使用内置的本地小模型（离线运行，不联网、不需要 Key）。
+  ///
+  /// 用户反馈集中在两点：不想额外花钱配 API Key、担心阅读数据被上传。
+  /// 打开后整个对话都在本机跑（模型文件需要先下载，见 [aiLocalModelId]）。
+  bool aiUseLocalModel = false;
+
+  /// 选中的本地模型 id（空 = 用 [localModelCatalog] 里推荐的默认模型）。
+  String aiLocalModelId = '';
 
   // ---- 新手引导 ----
   /// 是否已看过新手引导（看完或跳过后都为 true，只首次启动引导一次）。
@@ -149,6 +184,12 @@ class AppPrefs extends ChangeNotifier {
           lineHeight = (data['lineHeight'] as num?)?.toDouble() ?? 1.75;
           letterSpacing = (data['letterSpacing'] as num?)?.toDouble() ?? 0;
           readerMarginH = (data['readerMarginH'] as num?)?.toDouble() ?? 20;
+          // v10：段间距可调（用户反馈：段与段之间的空隙太大）
+          paragraphSpacing =
+              ((data['paragraphSpacing'] as num?)?.toDouble() ?? 12).clamp(
+                0,
+                40,
+              );
           // v8：正文上下留白 + 页眉页脚开关（用户反馈：想自己定这些距离）
           readerPaddingTop =
               ((data['readerPaddingTop'] as num?)?.toDouble() ?? 30).clamp(
@@ -174,6 +215,7 @@ class AppPrefs extends ChangeNotifier {
           pageMode = _pageModeFrom(data['pageMode'] as String?);
           keepScreenOn = data['keepScreenOn'] as bool? ?? true;
           paragraphIndent = data['paragraphIndent'] as bool? ?? true;
+          volumeKeyPaging = data['volumeKeyPaging'] as bool? ?? true;
           // v3：书架排列（老版本无此键时保持默认）
           shelfSort = shelfSortModeFrom(data['shelfSort'] as String?);
           shelfAscending = data['shelfAscending'] as bool? ?? false;
@@ -198,6 +240,14 @@ class AppPrefs extends ChangeNotifier {
           // v7：更新检查
           autoCheckUpdate = data['autoCheckUpdate'] as bool? ?? true;
           skipUpdateVersion = data['skipUpdateVersion'] as String? ?? '';
+          // v9：AI 助手接口配置
+          aiBaseUrl = data['aiBaseUrl'] as String? ?? '';
+          aiApiKey = data['aiApiKey'] as String? ?? '';
+          aiModel = data['aiModel'] as String? ?? '';
+          aiIncludeReading = data['aiIncludeReading'] as bool? ?? true;
+          // v10：本地小模型（离线 AI）
+          aiUseLocalModel = data['aiUseLocalModel'] as bool? ?? false;
+          aiLocalModelId = data['aiLocalModelId'] as String? ?? '';
         }
       }
     } catch (_) {
@@ -313,9 +363,18 @@ class AppPrefs extends ChangeNotifier {
   }
 
   void setLineHeight(double v) {
-    v = v.clamp(1.2, 2.6).toDouble();
+    // 下限放到 1.0：用户反馈想把行距调得更紧凑（原来最小 1.2）
+    v = v.clamp(1.0, 2.6).toDouble();
     if (lineHeight == v) return;
     lineHeight = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setParagraphSpacing(double v) {
+    v = v.clamp(0, 40).toDouble();
+    if (paragraphSpacing == v) return;
+    paragraphSpacing = v;
     _saveSoon();
     notifyListeners();
   }
@@ -415,6 +474,13 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setVolumeKeyPaging(bool v) {
+    if (volumeKeyPaging == v) return;
+    volumeKeyPaging = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void setParagraphIndent(bool v) {
     if (paragraphIndent == v) return;
     paragraphIndent = v;
@@ -454,6 +520,47 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 保存 AI 助手接口配置（地址 / Key / 模型 / 是否附带阅读数据）。
+  void setAiConfig({
+    required String baseUrl,
+    required String apiKey,
+    required String model,
+    required bool includeReading,
+  }) {
+    aiBaseUrl = baseUrl.trim();
+    aiApiKey = apiKey.trim();
+    aiModel = model.trim();
+    aiIncludeReading = includeReading;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 切换「内置本地模型 / 在线接口」。
+  void setAiUseLocalModel(bool value) {
+    aiUseLocalModel = value;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 选择要用的本地模型（空字符串 = 用推荐默认模型）。
+  void setAiLocalModelId(String id) {
+    aiLocalModelId = id.trim();
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 是否已填好可用的在线 AI 接口配置。
+  ///
+  /// Key 允许为空：Ollama 等本机服务通常不需要鉴权。
+  bool get aiHttpConfigured =>
+      aiBaseUrl.trim().isNotEmpty && aiModel.trim().isNotEmpty;
+
+  /// AI 助手是否已经可用（在线接口已填 / 或选了本地模型）。
+  ///
+  /// 本地模型还要看模型文件有没有下载好，那是 LocalModelManager 的事，
+  /// 这里只回答「用户选了哪种方式」。
+  bool get aiConfigured => aiUseLocalModel || aiHttpConfigured;
+
   void _saveSoon() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 300), () {
@@ -475,6 +582,7 @@ class AppPrefs extends ChangeNotifier {
           'lineHeight': lineHeight,
           'letterSpacing': letterSpacing,
           'readerMarginH': readerMarginH,
+          'paragraphSpacing': paragraphSpacing,
           'readerPaddingTop': readerPaddingTop,
           'readerPaddingBottom': readerPaddingBottom,
           'readerHeaderVisible': readerHeaderVisible,
@@ -484,6 +592,7 @@ class AppPrefs extends ChangeNotifier {
           'lightBgIndex': lightBgIndex,
           'pageMode': pageMode.name,
           'keepScreenOn': keepScreenOn,
+          'volumeKeyPaging': volumeKeyPaging,
           'paragraphIndent': paragraphIndent,
           'shelfSort': shelfSort.name,
           'shelfAscending': shelfAscending,
@@ -497,6 +606,12 @@ class AppPrefs extends ChangeNotifier {
           'agreementAccepted': agreementAccepted,
           'autoCheckUpdate': autoCheckUpdate,
           'skipUpdateVersion': skipUpdateVersion,
+          'aiBaseUrl': aiBaseUrl,
+          'aiApiKey': aiApiKey,
+          'aiModel': aiModel,
+          'aiIncludeReading': aiIncludeReading,
+          'aiUseLocalModel': aiUseLocalModel,
+          'aiLocalModelId': aiLocalModelId,
         }),
       );
     } catch (_) {
