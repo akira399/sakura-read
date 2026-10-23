@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -22,6 +23,9 @@ class MainActivity : FlutterActivity() {
     /// 独立通道：文件打开事件（与 native 通道分开，避免覆盖 TTS 的事件处理器）。
     private val openChannelName = "sakuramanga/open"
 
+    /// 独立通道：音量键翻页事件（原生 → Dart）。
+    private val keysChannelName = "sakuramanga/keys"
+
     // ---- 朗读（TTS）状态 ----
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -31,6 +35,9 @@ class MainActivity : FlutterActivity() {
     private var currentEngine: String? = null
     private var ttsChannel: MethodChannel? = null
     private var openChannel: MethodChannel? = null
+
+    /** 内置本地小模型（离线 AI 助手）推理通道。 */
+    private var localLlm: LocalLlmEngine? = null
 
     // ---- 文件打开（VIEW intent）状态 ----
     // 冷启动时系统把文件 intent 传进来，Dart 尚未就绪 → 先存路径等 Dart 来取；
@@ -56,6 +63,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ttsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        // 内置本地小模型（离线 AI）通道，与 TTS 一样挂在这个 Activity 上
+        localLlm = LocalLlmEngine(this, flutterEngine.dartExecutor.binaryMessenger)
+        // 音量键事件通道：原生 onKeyDown 通过它把翻页动作送回 Dart
+        keyChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, keysChannelName)
         // 文件打开通道：独立于 native 通道（两处都要 setMethodCallHandler，
         // 同一通道会互相覆盖）
         openChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, openChannelName)
@@ -133,6 +144,9 @@ class MainActivity : FlutterActivity() {
                 }
                 // ---------- 朗读（TTS） ----------
                 "ttsEngines" -> result.success(listTtsEngines())
+                // 跳转系统语音合成设置：用户机器上没有中文语音引擎时，
+                // 把他直接送到能安装 / 选择引擎的地方（用户反馈）。
+                "openTtsSettings" -> result.success(openTtsSettings())
                 "ttsInit" -> {
                     val engine = call.argument<String>("engine")
                     initTts(engine, result)
@@ -146,6 +160,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "ttsStop" -> {
                     tts?.stop()
+                    stopOfflinePlayer()
                     result.success(null)
                 }
                 "ttsSetRate" -> {
@@ -163,12 +178,97 @@ class MainActivity : FlutterActivity() {
                     shutdownTts()
                     result.success(null)
                 }
+                // ---------- 内置离线语音（Dart 侧合成，这里只负责播放） ----------
+                // 用户反馈：很多机型没有系统语音引擎 → App 自带一套离线合成，
+                // Dart 合成出 WAV 后交给这里播放（复用同一套 ttsState 事件）。
+                "ttsPlayFile" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    val utteranceId = call.argument<String>("utteranceId") ?: "u"
+                    result.success(playAudioFile(path, utteranceId))
+                }
+                // ---------- 音量键翻页 ----------
+                // Dart 进入/退出阅读页时开关；开启后 onKeyDown 拦截音量键。
+                "setVolumeKeyPaging" -> {
+                    volumeKeyPaging = call.arguments as? Boolean ?: false
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
     }
 
+    // ==================== 音量键翻页 ====================
+
+    /**
+     * 音量键翻页开关：只有在阅读页且用户打开了这个开关时才接管音量键。
+     *
+     * 用户反馈「音量键翻页」是很多阅读器用户的习惯操作。默认关闭，
+     * 打开后音量键不再调音量，而是交给阅读器翻页。
+     */
+    private var volumeKeyPaging = false
+
+    /** 音量键事件通道（原生 → Dart 主动 invoke）。 */
+    private var keyChannel: MethodChannel? = null
+
+    /**
+     * 拦截音量键：音量下 = 下一页，音量上 = 上一页。
+     *
+     * 只有 Dart 侧明确开启（阅读页 + 用户开了开关）才吞掉事件，
+     * 其它场景照常交给系统调音量，不会影响用户日常使用。
+     */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (volumeKeyPaging) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    keyChannel?.invokeMethod("volumeKeyPage", "next")
+                    return true
+                }
+                KeyEvent.KEYCODE_VOLUME_UP -> {
+                    keyChannel?.invokeMethod("volumeKeyPage", "prev")
+                    return true
+                }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     // ==================== 朗读（TTS）实现 ====================
+
+    /**
+     * 打开系统「语音合成 / TTS 输出」设置页。
+     *
+     * 用户反馈：手机没装语音引擎时只看到一句「朗读暂时不可用」，
+     * 完全不知道去哪解决。这里按优先级尝试多个系统入口，
+     * 都拉不起来就退到本应用的详情页（用户可自行进系统设置）。
+     */
+    private fun openTtsSettings(): Boolean {        val candidates = listOf(
+            Intent("com.android.settings.TTS_SETTINGS"),
+            Intent(android.provider.Settings.ACTION_SETTINGS).apply {
+                putExtra(":settings:show_fragment", "com.android.settings.TtsSettings")
+            },
+            Intent("com.android.settings.TTS_SETTINGS"),
+        )
+        for (intent in candidates) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+                return true
+            } catch (_: Exception) {
+                // 换下一个入口
+            }
+        }
+        // 兜底：本应用详情页（里面有「默认设置」等系统入口）
+        return try {
+            val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.fromParts("package", packageName, null)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     /** 列出系统可用的 TTS 引擎包名。 */
     private fun listTtsEngines(): List<String> {
@@ -296,6 +396,61 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ==================== 内置离线语音播放 ====================
+
+    /** 播放离线合成出来的 WAV 文件（Dart 侧用 sherpa-onnx 合成）。 */
+    private var offlinePlayer: android.media.MediaPlayer? = null
+
+    /**
+     * 播放一段合成好的音频，并像系统 TTS 一样回传 start / done / error 事件。
+     *
+     * 为什么用 MediaPlayer 而不是 Dart 侧的音频库：项目本来就有原生通道，
+     * 复用它能少一个依赖，而且文件播放没有延迟、也不用申请音频焦点权限。
+     */
+    private fun playAudioFile(path: String, utteranceId: String): Boolean {
+        if (path.isEmpty()) return false
+        val file = java.io.File(path)
+        if (!file.exists() || file.length() == 0L) return false
+        stopOfflinePlayer()
+        return try {
+            val player = android.media.MediaPlayer()
+            player.setDataSource(path)
+            player.setOnCompletionListener {
+                notifyTts("done", utteranceId)
+                stopOfflinePlayer()
+            }
+            player.setOnErrorListener { _, _, _ ->
+                notifyTts("error", utteranceId)
+                stopOfflinePlayer()
+                true
+            }
+            player.prepare()
+            player.start()
+            offlinePlayer = player
+            notifyTts("start", utteranceId)
+            true
+        } catch (e: Exception) {
+            notifyTts("error", utteranceId)
+            stopOfflinePlayer()
+            false
+        }
+    }
+
+    /** 停止内置语音播放（暂停 / 停止朗读时调用）。 */
+    private fun stopOfflinePlayer() {
+        val player = offlinePlayer
+        offlinePlayer = null
+        if (player == null) return
+        try {
+            if (player.isPlaying) player.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            player.release()
+        } catch (_: Exception) {
+        }
+    }
+
     private fun shutdownTts() {
         try {
             tts?.stop()
@@ -306,6 +461,7 @@ class MainActivity : FlutterActivity() {
         ttsReady = false
         ttsInitRequested = false
         currentEngine = null
+        stopOfflinePlayer()
     }
 
     /** 用系统浏览器打开链接（失败时返回 false，由 Dart 侧提示）。 */
@@ -451,6 +607,9 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        // 本地模型占着几百 MB native 内存，Activity 退出时务必释放
+        localLlm?.dispose()
+        localLlm = null
         shutdownTts()
         super.onDestroy()
     }

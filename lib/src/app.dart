@@ -8,6 +8,7 @@ import 'source/source_store.dart';
 import 'source/webview_engine.dart';
 import 'theme/app_theme.dart';
 import 'ui/agreement_gate.dart';
+import 'ui/ai_chat_page.dart' show kAiChatActive;
 import 'ui/home_page.dart';
 import 'ui/splash_gate.dart';
 import 'ui/widgets/pet_egg.dart';
@@ -58,12 +59,22 @@ class SakuraApp extends StatelessWidget {
                 child: Stack(
                   children: [
                     child ?? const SizedBox.shrink(),
-                    // 新手引导进行中时隐藏常规桌宠（由引导层自己摆位）
+                    // 新手引导 / AI 对话进行中时隐藏常规桌宠
+                    // （引导由引导层自己摆位；对话时避免挡住气泡和输入框）
                     ValueListenableBuilder<bool>(
                       valueListenable: kPetGuideActive,
-                      builder: (context, guiding, _) => guiding
-                          ? const SizedBox.shrink()
-                          : PetOverlay(pet: petStore, hostReady: kPetHostReady),
+                      builder: (context, guiding, _) {
+                        if (guiding) return const SizedBox.shrink();
+                        return ValueListenableBuilder<bool>(
+                          valueListenable: kAiChatActive,
+                          builder: (context, chatting, _) => chatting
+                              ? const SizedBox.shrink()
+                              : PetOverlay(
+                                  pet: petStore,
+                                  hostReady: kPetHostReady,
+                                ),
+                        );
+                      },
                     ),
                     // 新手引导（首次启动）：自我介绍 + 指引点击。
                     // 需要先同意首启条款（enabled）才会开始。

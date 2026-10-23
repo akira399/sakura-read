@@ -53,11 +53,30 @@ class SourceHttpException implements Exception {
 class SourceHttpClient {
   SourceHttpClient({http.Client? client, Duration? timeout})
     : _client = client ?? http.Client(),
+      _ownsClient = client == null,
       defaultTimeout = timeout ?? const Duration(seconds: 15);
 
-  final http.Client _client;
+  http.Client _client;
+
+  /// 只有自己创建的 client 才能在连接异常后安全重建。
+  final bool _ownsClient;
   final Duration defaultTimeout;
   final _CookieJar _cookies = _CookieJar();
+
+  /// 丢掉缓冲在连接池里的坏连接。
+  ///
+  /// 用户反馈的「请求失败：Connection closed before full header was received」
+  /// 就是 keep-alive 连接被对端提前关掉后继续复用的结果：重试时如果还拿着
+  /// 同一个 client，会一直撞在同一条死连接上，所以必须换一个。
+  void _resetConnectionPool() {
+    if (!_ownsClient) return;
+    try {
+      _client.close();
+    } catch (_) {
+      // 关闭失败不影响后续重试
+    }
+    _client = http.Client();
+  }
 
   /// GET。
   Future<SourceResponse> get(
@@ -65,7 +84,7 @@ class SourceHttpClient {
     Map<String, String>? headers,
     String? charset,
     Duration? timeout,
-    int retries = 1,
+    int retries = 2,
   }) => request(
     'GET',
     url,
@@ -82,7 +101,7 @@ class SourceHttpClient {
     String? body,
     String? charset,
     Duration? timeout,
-    int retries = 1,
+    int retries = 2,
   }) => request(
     'POST',
     url,
@@ -101,7 +120,7 @@ class SourceHttpClient {
     String? body,
     String? charset,
     Duration? timeout,
-    int retries = 1,
+    int retries = 2,
   }) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.hasScheme) {
@@ -150,18 +169,47 @@ class SourceHttpClient {
           finalUrl: resp.request?.url.toString() ?? url,
         );
       } on TimeoutException {
-        if (attempt <= retries) continue;
+        if (attempt <= retries) {
+          _resetConnectionPool();
+          continue;
+        }
         throw SourceHttpException(
           '请求超时（${(timeout ?? defaultTimeout).inSeconds}s）',
         );
       } on SocketException catch (e) {
-        if (attempt <= retries) continue;
+        if (attempt <= retries) {
+          _resetConnectionPool();
+          continue;
+        }
         throw SourceHttpException('网络错误：${e.message}');
       } on http.ClientException catch (e) {
-        if (attempt <= retries) continue;
-        throw SourceHttpException('请求失败：${e.message}');
+        if (attempt <= retries) {
+          _resetConnectionPool();
+          continue;
+        }
+        throw SourceHttpException(_friendlyClientMessage(e));
+      } on HandshakeException catch (e) {
+        if (attempt <= retries) {
+          _resetConnectionPool();
+          continue;
+        }
+        throw SourceHttpException('安全连接失败：${e.message}');
       }
     }
+  }
+
+  /// 把底层 socket 报错翻译成用户看得懂的提示。
+  static String _friendlyClientMessage(http.ClientException e) {
+    final raw = e.message;
+    if (raw.contains('Connection closed') ||
+        raw.contains('Connection reset') ||
+        raw.contains('Connection terminated')) {
+      return '连接被对方中断（网站不稳定或需要重试）';
+    }
+    if (raw.contains('timed out')) {
+      return '连接超时，请检查网络后重试';
+    }
+    return '请求失败：$raw';
   }
 
   void close() => _client.close();

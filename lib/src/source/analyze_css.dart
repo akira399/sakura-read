@@ -42,6 +42,11 @@ List<CssStage> parseCssStages(String rule) {
         CssStage(CssStageType.selector, _normalizeSelector(m.group(1)!)),
       );
       stages.add(CssStage(CssStageType.position, m.group(2)!));
+    } else if (_isBareTag(p)) {
+      // 裸标签名（`h3@text` / `span@text`）是选择器，不是属性名。
+      // 真实书源里这种写法极常见（如得奇 `ruleExplore.name = "h3@text"`），
+      // 若不识别会把 h3 当成属性名，导致整条规则取不到值、发现页空白。
+      stages.add(CssStage(CssStageType.selector, _normalizeSelector(p)));
     } else if (_isExtractor(p)) {
       stages.add(CssStage(CssStageType.extractor, p));
     } else {
@@ -59,6 +64,25 @@ final _suffixIndex = RegExp(r'^(.+)\.(\d+)$');
 int _indexValue(String p) => int.parse(p.startsWith('.') ? p.substring(1) : p);
 
 const _extractorKeywords = {'text', 'textNodes', 'ownText', 'html', 'all'};
+
+/// 常见 HTML 标签名。用于区分「裸标签选择器」与「属性名」：
+/// `h3@text` 里的 h3 是标签，`@href` 里的 href 是属性。
+///
+/// 刻意不收 `title` / `meta` / `link` / `html`：它们在书源里几乎总是
+/// 属性名（`a@title`）或提取器关键字（`@html`），收进来会误判。
+const _bareTags = {
+  'a', 'abbr', 'article', 'aside', 'audio', 'b', 'blockquote', 'body', 'br',
+  'button', 'canvas', 'caption', 'center', 'code', 'dd', 'del', 'details',
+  'dialog', 'div', 'dl', 'dt', 'em', 'figcaption', 'figure', 'font', 'footer',
+  'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'i', 'iframe',
+  'img', 'input', 'ins', 'label', 'legend', 'li', 'main', 'mark', 'nav', 'ol',
+  'option', 'p', 'picture', 'pre', 'progress', 'q', 's', 'section', 'select',
+  'small', 'source', 'span', 'strike', 'strong', 'sub', 'summary', 'sup',
+  'table', 'tbody', 'td', 'textarea', 'tfoot', 'th', 'thead', 'time', 'tr',
+  'u', 'ul', 'video',
+};
+
+bool _isBareTag(String p) => _bareTags.contains(p.toLowerCase());
 
 bool _isExtractor(String p) {
   if (_extractorKeywords.contains(p)) return true;

@@ -291,7 +291,16 @@ class EpubParser {
           }
         }
       }
-      fixed.add(EpubChapter(href: ch.href, title: title, text: ch.text));
+      // 注意：这里必须带上 images，否则「补全目录标题」这一步会把前面
+      // 抽出来的插图全丢掉（正文里只剩 \u0001IMG:...\u0001 标记，渲染时找不到文件）。
+      fixed.add(
+        EpubChapter(
+          href: ch.href,
+          title: title,
+          text: ch.text,
+          images: ch.images,
+        ),
+      );
     }
 
     return EpubParseResult(

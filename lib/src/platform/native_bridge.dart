@@ -103,4 +103,48 @@ class NativeBridge {
   static Future<void> openInstallPermission() async {
     await _invoke<void>('openInstallPermission');
   }
+
+  /// 跳转系统「语音合成（TTS）」设置页。
+  ///
+  /// 用户反馈：手机没有装语音引擎时，App 只弹一句「未安装 TTS 引擎」，
+  /// 用户不知道该去哪里处理。这里把系统 TTS 设置页拉起来，
+  /// 让他能直接安装 / 选择语音引擎与中文语音数据。
+  ///
+  /// 返回 true = 已拉起系统页面。
+  static Future<bool> openTtsSettings() async {
+    if (!_supported) return false;
+    final ok = await _invoke<bool>('openTtsSettings');
+    return ok ?? false;
+  }
+
+  // ---------- 音量键翻页 ----------
+
+  /// 原生 → Dart 的事件通道（volumekey 由原生 onKeyDown 主动 invoke）。
+  static const MethodChannel _keyChannel = MethodChannel('sakuramanga/keys');
+
+  static bool _keyHandlerBound = false;
+
+  /// 打开 / 关闭音量键翻页。
+  ///
+  /// 用户反馈「音量键翻页」：进入阅读页时打开，离开时关闭，
+  /// 避免在书架 / 设置页误吞音量键。
+  static Future<void> setVolumeKeyPaging(bool enabled) async {
+    await _invoke<void>('setVolumeKeyPaging', enabled);
+  }
+
+  /// 注册音量键回调（幂等）。
+  ///
+  /// 原生在用户按音量键时通过 `volumeKeyPage` 方法回传 `next` / `prev`，
+  /// 这里把它转成 Dart 侧的回调。只注册一次，避免重复绑定。
+  static void bindVolumeKeyHandler(void Function(String action) onAction) {
+    if (!_supported || _keyHandlerBound) return;
+    _keyChannel.setMethodCallHandler((call) async {
+      if (call.method == 'volumeKeyPage') {
+        final action = call.arguments?.toString() ?? '';
+        if (action.isNotEmpty) onAction(action);
+      }
+      return null;
+    });
+    _keyHandlerBound = true;
+  }
 }

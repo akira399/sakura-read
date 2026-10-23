@@ -109,6 +109,15 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
     _load();
   }
 
+  /// 详情页读取失败时，直接跳到下一个可用来源重试。
+  ///
+  /// 某个书源整站挂掉时（用户反馈的「读取详情失败」），换源比反复重试有效。
+  void _switchToAnotherSource() {
+    if (widget.variants.length < 2) return;
+    final next = (_sel + 1) % widget.variants.length;
+    _switchSource(next);
+  }
+
   // ---------- 书架 / 换源 / 阅读 ----------
 
   Future<void> _addToShelf({bool silent = false}) async {
@@ -265,6 +274,7 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
     }
     final error = _error;
     if (error != null) {
+      final canSwitch = widget.variants.length > 1;
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -284,11 +294,36 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(height: 1.6, fontSize: 13),
               ),
+              const SizedBox(height: 6),
+              Text(
+                canSwitch
+                    ? '网点偶尔会抽风，重试一次，或换个书源再试'
+                    : '网点偶尔会抽风，稍等几秒再重试',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  height: 1.5,
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
               const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _load,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('重试'),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton.icon(
+                    onPressed: _load,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('重试'),
+                  ),
+                  if (canSwitch) ...[
+                    const SizedBox(width: 12),
+                    OutlinedButton.icon(
+                      onPressed: _switchToAnotherSource,
+                      icon: const Icon(Icons.swap_horiz_rounded),
+                      label: const Text('换个书源'),
+                    ),
+                  ],
+                ],
               ),
             ],
           ),

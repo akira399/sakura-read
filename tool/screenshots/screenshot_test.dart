@@ -24,7 +24,9 @@ import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:sakura_read/src/app.dart';
+import 'package:sakura_read/src/ui/source/source_search_page.dart';
 import 'package:sakura_read/src/data/book_store.dart';
+import 'package:sakura_read/src/data/local_llm.dart';
 import 'package:sakura_read/src/data/pet_guide.dart';
 import 'package:sakura_read/src/data/pet_store.dart';
 import 'package:sakura_read/src/data/prefs.dart';
@@ -32,7 +34,11 @@ import 'package:sakura_read/src/data/stats_store.dart';
 import 'package:sakura_read/src/platform/native_bridge.dart';
 import 'package:sakura_read/src/source/source_store.dart';
 import 'package:sakura_read/src/theme/app_theme.dart';
+import 'package:sakura_read/src/ui/ai_chat_page.dart';
+import 'package:sakura_read/src/ui/ai_settings_page.dart';
 import 'package:sakura_read/src/ui/reader/reader_page.dart';
+import 'package:sakura_read/src/ui/reader/reader_settings_panel.dart';
+import 'package:sakura_read/src/ui/stats_page.dart';
 import 'package:sakura_read/src/ui/widgets/pet_overlay.dart';
 
 // ---------- 基本参数 ----------
@@ -79,6 +85,11 @@ Future<void> _loadFonts() async {
   // 图标字体：Material Icons
   final icons = FontLoader('MaterialIcons')..addFont(Future.value(iconBytes));
   await icons.load();
+  // 兜底族名：AppBarTheme / CustomPainter 里那些没写 fontFamily 的文字会落到
+  // 测试环境的默认族（FlutterTest，每个字都是方框）。把楷体也注册成 FlutterTest，
+  // 这些「无字体名」的文字才能正常显示中文。
+  final fallback = FontLoader('FlutterTest')..addFont(Future.value(kaiBytes));
+  await fallback.load();
 }
 
 // ---------- 环境与数据 ----------
@@ -272,6 +283,33 @@ Widget _app(_Ctx ctx) => SakuraApp(
   petStore: ctx.pet,
 );
 
+/// 截图用的「模型已下载」替身：真机上 `isDownloaded` 取决于文件是否存在，
+/// 测试环境里没有那 521 MB 文件，所以直接把状态钉成已就绪。
+class _ReadyModelManager extends LocalModelManager {
+  _ReadyModelManager() : super(supportedOverride: true);
+
+  @override
+  bool get isDownloaded => true;
+
+  @override
+  bool get isReady => true;
+
+  @override
+  LocalModelPhase get phase => LocalModelPhase.ready;
+}
+
+/// 把本地模型管理器换成「已下载」，返回还原函数。
+VoidCallback _stubLocalModelReady() {
+  final old = LocalModelManager.instance;
+  LocalModelManager.instance = _ReadyModelManager();
+  return () => LocalModelManager.instance = old;
+}
+
+String _dateKey(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -459,11 +497,23 @@ void main() {
     final ctx = await _setup(tester);
     _hidePet();
 
-    await tester.pumpWidget(_wrap(_app(ctx)));
+    // 直接渲染搜索页（不用从书架点进去：路由动画 / 开屏动画的时序很难掐准，
+    // 容易拍到两页叠在一起的中间帧）。
+    await tester.pumpWidget(
+      _wrap(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: SakuraTheme.build(ctx.prefs.accent, Brightness.light),
+          home: SourceSearchPage(
+            store: ctx.sources,
+            bookStore: ctx.store,
+            prefs: ctx.prefs,
+          ),
+        ),
+      ),
+    );
     await _cycle(tester);
-    _hidePet();
-    await tester.tap(find.byIcon(Icons.search_rounded));
-    await _pumpFrames(tester, frames: 14);
+    await _settle(tester, rounds: 4);
     _hidePet();
     await _capture(tester, 'search_idle');
     await _finish(tester);
@@ -625,6 +675,162 @@ void main() {
     await _settle(tester, rounds: 8);
     _hidePet();
     await _capture(tester, 'agreement');
+    await _finish(tester);
+  });
+
+  // ---------- 13. AI 助手（本地小模型）对话页 ----------
+  testWidgets('shot: AI 助手', (tester) async {
+    configureView(tester);
+    final ctx = await _setup(tester);
+    final restore = _stubLocalModelReady();
+    addTearDown(restore);
+    ctx.prefs.setAiUseLocalModel(true);
+    _hidePet();
+
+    await tester.pumpWidget(
+      _wrap(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: SakuraTheme.build(ctx.prefs.accent, Brightness.light),
+          home: AiChatPage(
+            store: ctx.store,
+            prefs: ctx.prefs,
+            statsStore: ctx.stats,
+          ),
+        ),
+      ),
+    );
+    await _cycle(tester);
+    await _settle(tester, rounds: 4);
+    await _capture(tester, 'ai_chat');
+    await _finish(tester);
+  });
+
+  // ---------- 13b. AI 助手对话示例（问答一轮） ----------
+  testWidgets('shot: AI 助手-对话', (tester) async {
+    configureView(tester);
+    final ctx = await _setup(tester);
+    final restore = _stubLocalModelReady();
+    addTearDown(restore);
+    ctx.prefs.setAiUseLocalModel(true);
+    _hidePet();
+
+    await tester.pumpWidget(
+      _wrap(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: SakuraTheme.build(ctx.prefs.accent, Brightness.light),
+          home: AiChatPage(
+            store: ctx.store,
+            prefs: ctx.prefs,
+            statsStore: ctx.stats,
+            debugSeedBubbles: const [
+              ('我最近读到哪了？', true),
+              (
+                '你最近在读《星夜下的约定》，停在第 5 章，'
+                    '这本书已经读了 26%。要不要接着往下翻？'
+                    '睡前读一小段，明天醒来正好接得上～',
+                false,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await _cycle(tester);
+    await _settle(tester, rounds: 4);
+    await _capture(tester, 'ai_chat_talk');
+    await _finish(tester);
+  });
+
+  // ---------- 14. AI 设置（内置本地模型 / 在线接口） ----------
+  testWidgets('shot: AI 设置', (tester) async {
+    configureView(tester);
+    final ctx = await _setup(tester);
+    final restore = _stubLocalModelReady();
+    addTearDown(restore);
+    ctx.prefs.setAiUseLocalModel(true);
+    _hidePet();
+
+    await tester.pumpWidget(
+      _wrap(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: SakuraTheme.build(ctx.prefs.accent, Brightness.light),
+          home: AiSettingsPage(prefs: ctx.prefs),
+        ),
+      ),
+    );
+    await _cycle(tester);
+    await _settle(tester, rounds: 4);
+    await _capture(tester, 'ai_settings');
+    await _finish(tester);
+  });
+
+  // ---------- 15. 阅读统计（时长曲线） ----------
+  testWidgets('shot: 阅读统计', (tester) async {
+    configureView(tester);
+    final ctx = await _setup(tester);
+    // 造一段有起伏的阅读时长：最近 14 天
+    const curve = <int>[0, 18, 42, 25, 0, 12, 36, 54, 8, 21, 47, 30, 15, 40];
+    final today = DateTime.now();
+    for (var i = 0; i < curve.length; i++) {
+      final day = today.subtract(Duration(days: curve.length - 1 - i));
+      if (curve[i] > 0) {
+        // ignore: invalid_use_of_visible_for_testing_member
+        ctx.stats.debugAddSecondsForDate(_dateKey(day), curve[i] * 60);
+      }
+    }
+    ctx.stats.addFinishedBook();
+    ctx.stats.addFinishedBook();
+    _hidePet();
+
+    await tester.pumpWidget(
+      _wrap(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: SakuraTheme.build(ctx.prefs.accent, Brightness.light),
+          home: StatsPage(statsStore: ctx.stats),
+        ),
+      ),
+    );
+    await _cycle(tester);
+    await _settle(tester, rounds: 4);
+    await _capture(tester, 'stats');
+    await _finish(tester);
+  });
+
+  // ---------- 16. 阅读设置面板（排版） ----------
+  testWidgets('shot: 阅读设置', (tester) async {
+    configureView(tester);
+    final ctx = await _setup(tester);
+    _hidePet();
+
+    await tester.pumpWidget(
+      _wrap(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: SakuraTheme.build(ctx.prefs.accent, Brightness.dark),
+          home: Scaffold(
+            backgroundColor: const Color(0xFF1B1622),
+            body: SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+                  child: ReaderSettingsPanel(
+                    prefs: ctx.prefs,
+                    petStore: ctx.pet,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await _cycle(tester);
+    await _settle(tester, rounds: 4);
+    await _capture(tester, 'reader_settings');
     await _finish(tester);
   });
 }

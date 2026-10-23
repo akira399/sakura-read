@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -205,6 +206,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return StoragePermissionPage(onRecheck: _check);
     }
     return Scaffold(
+      // 底栏要「毛玻璃」观感：正文滚动到栏底下时能被模糊透出来，
+      // 所以主体延伸到栏后面（用户反馈：底栏玻璃没效果、全是透明）。
+      extendBody: true,
       body: AnnotatedRegion<SystemUiOverlayStyle>(
         value: Theme.of(context).brightness == Brightness.dark
             ? SystemUiOverlayStyle.light
@@ -216,6 +220,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               store: widget.store,
               prefs: widget.prefs,
               sourceStore: widget.sourceStore,
+              statsStore: widget.statsStore,
             ),
             // 发现页（原在书架右上角，改到常驻底栏，用户要求）
             DiscoverPage(
@@ -281,33 +286,78 @@ class _GuidedNavBar extends StatelessWidget {
           child: PetGuideTarget(
             id: 'nav_settings',
             rectOf: _cell(3),
-            child: NavigationBar(
-              selectedIndex: index,
-              onDestinationSelected: onSelect,
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.auto_stories_outlined),
-                  selectedIcon: Icon(Icons.auto_stories),
-                  label: '书架',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.explore_outlined),
-                  selectedIcon: Icon(Icons.explore),
-                  label: '发现',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.history_outlined),
-                  selectedIcon: Icon(Icons.history),
-                  label: '最近',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.favorite_outline_rounded),
-                  selectedIcon: Icon(Icons.favorite_rounded),
-                  label: '设置',
-                ),
-              ],
+            child: _GlassBar(
+              child: NavigationBar(
+                selectedIndex: index,
+                onDestinationSelected: onSelect,
+                // 让 NavigationBar 自身透明，透出下面的模糊层，
+                // 否则它的实色背景会把毛玻璃整块盖住（正是用户反馈的现象）。
+                backgroundColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                elevation: 0,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.auto_stories_outlined),
+                    selectedIcon: Icon(Icons.auto_stories),
+                    label: '书架',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.explore_outlined),
+                    selectedIcon: Icon(Icons.explore),
+                    label: '发现',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.history_outlined),
+                    selectedIcon: Icon(Icons.history),
+                    label: '最近',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.favorite_outline_rounded),
+                    selectedIcon: Icon(Icons.favorite_rounded),
+                    label: '设置',
+                  ),
+                ],
+              ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 底栏毛玻璃：真实模糊底下的内容 + 半透明着色 + 顶部高光描边。
+///
+/// 用户反馈「底栏什么玻璃没效果啊都是透明」：原先底栏背景是不透明纯色
+/// （主题里 `navigationBarTheme.backgroundColor`），既没有模糊也看不出玻璃质感。
+/// 这里用 [ImageFiltered] 做真实高斯模糊，再叠一层半透明主题色与细描边，
+/// 配合 [Scaffold.extendBody] 就能看到正文从底栏下面透出来的玻璃效果。
+class _GlassBar extends StatelessWidget {
+  const _GlassBar({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final tint = isDark ? const Color(0xFF1D1626) : Colors.white;
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            // 透明度留一点，避免完全遮住底下滚动的内容（玻璃质感的关键）
+            color: tint.withValues(alpha: isDark ? .72 : .78),
+            border: Border(
+              top: BorderSide(
+                color: (isDark ? Colors.white : Colors.black).withValues(
+                  alpha: .07,
+                ),
+              ),
+            ),
+          ),
+          child: child,
         ),
       ),
     );

@@ -149,6 +149,66 @@ void main() {
       sw.stop();
       expect(sw.elapsedMilliseconds, greaterThanOrEqualTo(700));
     });
+
+    test('连接被中断后自动重试并成功', () async {
+      // 用户反馈：详情页偶发「Connection closed before full header was received」，
+      // 本质是 keep-alive 死连接。第一次抛 ClientException，第二次应恢复正常。
+      var calls = 0;
+      final client = SourceHttpClient(
+        client: MockClient((req) async {
+          calls++;
+          if (calls == 1) {
+            throw http.ClientException(
+              'Connection closed before full header was received',
+            );
+          }
+          return http.Response('recovered', 200);
+        }),
+      );
+      final resp = await client.get('https://x.com/flaky');
+      expect(calls, 2);
+      expect(resp.ok, true);
+      expect(resp.body, 'recovered');
+    });
+
+    test('重试耗尽后给出可读的错误提示', () async {
+      var calls = 0;
+      final client = SourceHttpClient(
+        client: MockClient((req) async {
+          calls++;
+          throw http.ClientException(
+            'Connection closed before full header was received',
+          );
+        }),
+      );
+      await expectLater(
+        client.get('https://x.com/dead', retries: 1),
+        throwsA(
+          isA<SourceHttpException>().having(
+            (e) => e.message,
+            'message',
+            contains('连接被对方中断'),
+          ),
+        ),
+      );
+      // retries: 1 → 总共尝试 2 次
+      expect(calls, 2);
+    });
+
+    test('默认重试次数为 2（共 3 次尝试）', () async {
+      var calls = 0;
+      final client = SourceHttpClient(
+        client: MockClient((req) async {
+          calls++;
+          throw http.ClientException('boom');
+        }),
+      );
+      await expectLater(
+        client.get('https://x.com/always-bad'),
+        throwsA(isA<SourceHttpException>()),
+      );
+      expect(calls, 3);
+    });
   });
 
   group('书源仓库（SourceStore）', () {

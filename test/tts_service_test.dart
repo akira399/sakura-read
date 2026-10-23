@@ -100,5 +100,38 @@ void main() {
         splitForSpeechWithOffsets(text).map((p) => p.text).toList(),
       );
     });
+
+    test('EPUB 插图标记不会被念出来', () {
+      // 正文里插图是一行标记（见 EpubParser），朗读前必须整段剔除，
+      // 否则语音会把文件名读成「IMG pic1 png」。
+      const marker = '\u0001IMG:pic1.png\u0001';
+      const text = '第一段。\n$marker\n第二段。';
+      final paras = splitForSpeechWithOffsets(text);
+      final joined = paras.map((p) => p.text).join('|');
+      expect(joined.contains('IMG'), isFalse);
+      expect(joined.contains('pic1'), isFalse);
+      expect(joined.contains('第一段。'), isTrue);
+      expect(joined.contains('第二段。'), isTrue);
+      // 偏移仍指向原文（相邻短行会合并成一段，所以按 offset 校验起点）
+      for (final p in paras) {
+        expect(p.offset, greaterThanOrEqualTo(0));
+        expect(p.offset, lessThan(text.length));
+      }
+    });
+
+    test('只有插图标记的行不产生空段落', () {
+      const text = '\u0001IMG:a.png\u0001\n\u0001IMG:b.png\u0001';
+      expect(splitForSpeechWithOffsets(text), isEmpty);
+    });
+
+    test('分页模式的［插图］占位同样不朗读', () {
+      const text = '正文一。\n［插图］\n正文二。';
+      final joined = splitForSpeechWithOffsets(text)
+          .map((p) => p.text)
+          .join('|');
+      expect(joined.contains('插图'), isFalse);
+      expect(joined.contains('正文一。'), isTrue);
+      expect(joined.contains('正文二。'), isTrue);
+    });
   });
 }

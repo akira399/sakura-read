@@ -6,11 +6,14 @@ import '../data/pet_guide.dart';
 import '../data/pet_store.dart';
 import '../data/prefs.dart';
 import '../data/stats_store.dart';
+import '../platform/native_bridge.dart';
 import '../platform/tts_service.dart';
 import '../platform/url_launcher.dart';
 import '../platform/update_service.dart';
 import '../source/source_store.dart';
 import '../util/format.dart';
+import 'ai_chat_page.dart';
+import 'ai_settings_page.dart';
 import 'reader/reader_page.dart';
 import 'reader/reader_settings_panel.dart';
 import 'source/source_manager_page.dart';
@@ -110,6 +113,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _petCard(context),
               const SizedBox(height: 14),
               _statsCard(context),
+              const SizedBox(height: 14),
+              _aiCard(context),
               const SizedBox(height: 14),
               _sourceCard(context),
               const SizedBox(height: 14),
@@ -323,6 +328,52 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => _showBookmarks(context, bookmarkStore),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _aiCard(BuildContext context) {
+    final prefs = widget.prefs;
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle(icon: Icons.auto_awesome_rounded, title: 'AI 助手'),
+          const SizedBox(height: 6),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: CircleAvatar(
+              radius: 18,
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              backgroundImage: const AssetImage('assets/images/pet_wave.png'),
+            ),
+            title: const Text('小樱 AI 助手', style: TextStyle(fontSize: 14)),
+            subtitle: Text(
+              prefs.aiConfigured
+                  ? '已配置 · ${prefs.aiModel}${prefs.aiIncludeReading ? ' · 可读取阅读数据' : ''}'
+                  : '还没配置接口，点右侧设置',
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: IconButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AiSettingsPage(prefs: prefs),
+                ),
+              ),
+              icon: const Icon(Icons.settings_outlined, size: 20),
+              tooltip: 'AI 设置',
+            ),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AiChatPage(
+                  store: widget.store,
+                  prefs: prefs,
+                  statsStore: widget.statsStore,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -548,7 +599,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 4),
           Text(
-            '没声音？试试换个语音引擎，或点「测试朗读」看看是否正常',
+            '没声音？换一个语音引擎试试；系统没有引擎也能用「内置离线语音」',
             style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
@@ -579,26 +630,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           : const Icon(Icons.chevron_right_rounded),
                       onTap: _ttsProbing ? null : _probeTtsEngines,
                     )
-                  else if (engines.isEmpty)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      leading: Icon(
-                        Icons.warning_amber_rounded,
-                        size: 20,
-                        color: scheme.error,
-                      ),
-                      title: const Text(
-                        '未检测到语音引擎',
-                        style: TextStyle(fontSize: 14),
-                      ),
-                      subtitle: const Text(
-                        '请先安装系统语音服务（如「讯飞语记」「Google 语音服务」）',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      onTap: _probeTtsEngines,
-                    )
-                  else
+                  else ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: DropdownButtonFormField<String>(
@@ -616,7 +648,12 @@ class _SettingsPageState extends State<SettingsPage> {
                         items: [
                           const DropdownMenuItem(
                             value: '',
-                            child: Text('系统默认'),
+                            child: Text('系统默认（推荐）'),
+                          ),
+                          // 内置离线语音：系统没引擎时的兜底，永远可选
+                          const DropdownMenuItem(
+                            value: TtsService.builtinEngineId,
+                            child: Text('内置离线语音 · 小樱（无需安装）'),
                           ),
                           for (final e in engines)
                             DropdownMenuItem(
@@ -630,6 +667,32 @@ class _SettingsPageState extends State<SettingsPage> {
                         onChanged: (v) => _changeTtsEngine(v ?? ''),
                       ),
                     ),
+                    if (engines.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline_rounded,
+                              size: 15,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                '这台设备没检测到系统语音引擎，可以直接用上面的「内置离线语音」；'
+                                '想用系统音色就点下面的按钮去安装。',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  height: 1.5,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                   if (_ttsProbeResult != null) ...[
                     const SizedBox(height: 8),
                     Row(
@@ -675,6 +738,21 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: const Icon(Icons.play_arrow_rounded, size: 18),
                 label: const Text('测试朗读'),
               ),
+              if (_ttsEngines != null && _ttsEngines!.isEmpty)
+                TextButton.icon(
+                  onPressed: () async {
+                    final ok = await NativeBridge.openTtsSettings();
+                    if (!ok && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('没能打开系统语音设置，请手动到「设置 → 无障碍 → 语音合成」查看'),
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                  label: const Text('去装系统语音'),
+                ),
             ],
           ),
         ],
@@ -705,9 +783,10 @@ class _SettingsPageState extends State<SettingsPage> {
       _ttsEngines = list;
       _ttsProbing = false;
       _ttsProbeResult = list.isEmpty
-          ? '未找到语音引擎，请先安装系统语音服务'
+          ? '没有系统语音引擎，可以改用上面的「内置离线语音」'
           : '检测到 ${list.length} 个引擎';
-      _ttsProbeOk = list.isNotEmpty;
+      // 系统引擎为空不算失败：内置离线语音能兜住
+      _ttsProbeOk = true;
     });
   }
 
@@ -718,7 +797,9 @@ class _SettingsPageState extends State<SettingsPage> {
     await tts.setPreferredEngine(engine);
     if (!mounted) return;
     setState(() {
-      _ttsProbeResult = '已切换引擎，点「测试朗读」验证';
+      _ttsProbeResult = engine == TtsService.builtinEngineId
+          ? '已切到内置离线语音（首次使用会释放语音模型，约需几秒）'
+          : '已切换引擎，点「测试朗读」验证';
       _ttsProbeOk = true;
     });
   }
@@ -747,7 +828,9 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _ttsProbing = false;
       _ttsProbeOk = true;
-      _ttsProbeResult = '正在播放测试语音…能听到声音就说明可用';
+      _ttsProbeResult = tts.usingOffline
+          ? '正在用内置离线语音播放…能听到声音就说明可用'
+          : '正在播放测试语音…能听到声音就说明可用';
     });
   }
 

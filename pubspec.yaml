@@ -17,7 +17,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.0+56
+version: 1.2.0+57
 
 environment:
   sdk: ^3.9.0
@@ -47,6 +47,7 @@ dependencies:
   fast_gbk: ^1.0.0
   http: ^1.6.0
   webview_flutter: ^4.14.1
+  sherpa_onnx: 1.13.8
 
 dev_dependencies:
   flutter_test:
@@ -74,6 +75,10 @@ flutter:
   assets:
     - assets/images/
     - assets/sources/
+    # 内置离线语音包（sherpa-onnx + VITS「超文」中文模型）。
+    # 用户反馈：很多机型没装系统语音引擎，朗读直接不可用 → 这里自带一份，
+    # 装好就能听。模型授权见 assets/tts/chaowen/MODEL_CARD。
+    - assets/tts/chaowen/
 
   # 内置字体：霞鹜文楷（LXGW WenKai Lite，OFL-1.1 授权）
   fonts:

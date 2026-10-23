@@ -133,14 +133,32 @@ class BookStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void removeById(String id) {
+  /// 从书架移除一本书。
+  ///
+  /// [deleteLocalFile] 为 true 时顺带删除这本书的本地文件（用户反馈：
+  /// 想把书移走时直接连着本地文件一起删掉）。只删书架里登记的那个文件，
+  /// 同一路径被另一本书引用时保留，避免误删别人还在用的书。
+  Future<void> removeById(String id, {bool deleteLocalFile = false}) async {
+    final book = byId(id);
+    if (book == null) return;
     final before = _books.length;
     _books.removeWhere((b) => b.id == id);
-    if (_books.length != before) {
-      // 移除书时联动清理其书签
-      BookmarkStore.shared?.removeForBook(id);
-      _saveSoon();
-      notifyListeners();
+    if (_books.length == before) return;
+    // 移除书时联动清理其书签
+    BookmarkStore.shared?.removeForBook(id);
+    _saveSoon();
+    notifyListeners();
+    if (!deleteLocalFile) return;
+    final path = book.path;
+    if (path.isEmpty) return;
+    // 还有别的书在用同一个文件 → 不删
+    final shared = _books.any((b) => b.path == path);
+    if (shared) return;
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // 删除失败（权限 / 文件已被外部删掉）不影响「移除」本身
     }
   }
 

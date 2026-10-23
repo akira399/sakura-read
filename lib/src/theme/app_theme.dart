@@ -17,13 +17,27 @@ class SakuraTheme {
         ? const Color(0xFF171220)
         : const Color(0xFFFFF6FA);
 
-    return ThemeData(
+    final base = ThemeData(
       useMaterial3: true,
       colorScheme: scheme.copyWith(
         surface: surface,
         primary: accent,
         secondary: lavender,
       ),
+    );
+    final titleColor = isDark ? Colors.white : const Color(0xFF3A2B3D);
+    // 顶栏标题从 textTheme.titleLarge 派生，而不是写一个「裸 TextStyle」：
+    // 裸样式会把主题里的字体族覆盖成 null（回到系统默认），派生写法能保持
+    // 与正文一致的字体设置。
+    final titleStyle = base.textTheme.titleLarge!.copyWith(
+      color: titleColor,
+      fontSize: 20,
+      fontWeight: FontWeight.w800,
+      letterSpacing: .5,
+    );
+
+    return base.copyWith(
+      textTheme: base.textTheme.copyWith(titleLarge: titleStyle),
       scaffoldBackgroundColor: background,
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
@@ -33,29 +47,28 @@ class SakuraTheme {
         systemOverlayStyle: isDark
             ? SystemUiOverlayStyle.light
             : SystemUiOverlayStyle.dark,
-        titleTextStyle: TextStyle(
-          color: isDark ? Colors.white : const Color(0xFF3A2B3D),
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
-          letterSpacing: .5,
-        ),
-        iconTheme: IconThemeData(
-          color: isDark ? Colors.white : const Color(0xFF3A2B3D),
-        ),
+        iconTheme: IconThemeData(color: titleColor),
       ),
       navigationBarTheme: NavigationBarThemeData(
         height: 68,
         backgroundColor: isDark ? const Color(0xFF1D1626) : Colors.white,
         indicatorColor: accent.withValues(alpha: .18),
-        labelTextStyle: const WidgetStatePropertyAll(
-          TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        // 同样从 textTheme 派生：裸 TextStyle 会把字体族覆盖成 null，
+        // 导致底栏文字与正文不是同一套字体（离线渲染时更是直接变成方框）。
+        labelTextStyle: WidgetStatePropertyAll(
+          base.textTheme.labelMedium!.copyWith(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           shape: const StadiumBorder(),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          textStyle: base.textTheme.labelLarge!.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
