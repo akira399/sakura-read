@@ -278,16 +278,7 @@ UpdateInfo? parseReleaseJson(Object? json) {
   final tag = _firstString(release, ['tag_name', 'tag']);
   if (tag.isEmpty) return null;
 
-  Map? asset;
-  final assets = release['assets'];
-  if (assets is List) {
-    for (final item in assets) {
-      if (item is Map) {
-        asset = item;
-        break;
-      }
-    }
-  }
+  final asset = _pickApkAsset(release['assets']);
 
   final downloadUrl = asset == null
       ? ''
@@ -307,6 +298,39 @@ UpdateInfo? parseReleaseJson(Object? json) {
     publishedAt: publishedAt,
     pageUrl: htmlUrl.isEmpty ? '${AppInfo.repo}/releases' : htmlUrl,
   );
+}
+
+/// 从 release 的 `assets[]` 里挑出「应该给这台手机装」的那个 APK。
+///
+/// 一个 release 同时挂 arm64 与 x86_64 两个包时，GitHub 按**文件名**返回，
+/// `…-x86_64.apk` 会排在 `…-arm64.apk` 前面——直接取 `assets[0]` 会让手机
+/// 下到只能跑在模拟器上的包（安装报 INSTALL_FAILED_NO_MATCHING_ABIS）。
+/// 因此按架构打分：arm64 / aarch64 > universal > 无架构标记 > x86 / x64。
+Map? _pickApkAsset(Object? assets) {
+  if (assets is! List) return null;
+  Map? best;
+  var bestScore = -1;
+  for (final item in assets) {
+    if (item is! Map) continue;
+    final name = _firstString(item, ['name', 'browser_download_url', 'downloadUrl'])
+        .toLowerCase();
+    if (!name.contains('.apk')) continue;
+    final int score;
+    if (name.contains('arm64') || name.contains('aarch64')) {
+      score = 3;
+    } else if (name.contains('universal') || name.contains('all-abi')) {
+      score = 2;
+    } else if (name.contains('x86') || name.contains('x64')) {
+      score = 0;
+    } else {
+      score = 1;
+    }
+    if (score > bestScore) {
+      best = item;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 String _firstString(Map map, List<String> keys) {
