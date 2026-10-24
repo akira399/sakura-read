@@ -11,25 +11,34 @@
 [![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-lightgrey?logo=android)]()
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Version](https://img.shields.io/badge/version-1.2.3-ec5f8f)]()
-[![Tests](https://img.shields.io/badge/tests-348%20passed-brightgreen)]()
+[![Version](https://img.shields.io/badge/version-1.2.4-ec5f8f)]()
+[![Tests](https://img.shields.io/badge/tests-349%20passed-brightgreen)]()
 [![Analyze](https://img.shields.io/badge/analyze-0%20issues-brightgreen)]()
 
-[功能特性](#-功能特性) · [截图预览](#-截图预览) · [1.2.3 更新](#-123-更新了什么) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
+[功能特性](#-功能特性) · [截图预览](#-截图预览) · [1.2.4 更新](#-124-更新了什么) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
 
 </div>
 
 ---
 
-## 🆕 1.2.3 更新了什么
+## 🆕 1.2.4 更新了什么
 
 > 完整清单见 [CHANGELOG](CHANGELOG.md) 与 [Releases](../../releases/latest)，这里只放这一版最关键的三点。
 
 | 更新 | 一句话 |
 | --- | --- |
+| 🤖 **引导讲全了新功能** | AI 助手、发现页书源、EPUB 插图、内置离线语音、翻页与高刷新率，各有一站 |
+| 🧭 **引导跟着页面走** | 走到「发现 / 最近 / 设置」时底栏自动切过去，高亮的就是你眼前这一页 |
+| 🔍 **放大镜真的会打开搜索页** | 引导里点一下就能进搜索页，说明书和实际页面不再对不上 |
+
+## 🆕 1.2.3 更新了什么
+
+> 完整清单见 [CHANGELOG](CHANGELOG.md) 与 [Releases](../../releases/latest)，这里只放这一版最关键的两点。
+
+| 更新 | 一句话 |
+| --- | --- |
 | ➕ **加号不再压住底栏** | 书架与设置页的浮动按钮上移，不再和底栏「设置」重叠误触 |
 | 🧭 **引导不会再卡死** | 点错两次就放行、旁白步骤有「继续」按钮，步骤走不动时能自己往下点 |
-| 🔓 **黑屏彩蛋能退出了** | 长按 5 秒认错即可退出，60 秒也会自动放行，不需要重启 App |
 
 线上反馈的两处问题都出在同一个前提：`extendBody` 让底栏盖在正文上，而浮动按钮仍按
 「底栏之外」定位——按钮视觉上落在「设置」格子里，点击也会被底栏吃掉，新手引导因此
@@ -205,8 +214,8 @@ Q 版看板娘头像，三种形态（方形 / 圆角 / 圆形）+ 自适应图�
 
 前往 [Releases](../../releases/latest) 页面下载最新版 APK：
 
-- **手机 / 平板（绝大多数设备）**：`SakuraRead-v1.2.2-arm64.apk`（约 48 MB）
-- **模拟器 / x86_64 设备**：`SakuraRead-v1.2.2-x86_64.apk`
+- **手机 / 平板（绝大多数设备）**：`SakuraRead-v1.2.4-arm64.apk`（约 48 MB）
+- **模拟器 / x86_64 设备**：`SakuraRead-v1.2.4-x86_64.apk`
 
 两个包签名一致，可直接覆盖安装旧版本。
 
