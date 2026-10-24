@@ -11,13 +11,32 @@
 [![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-lightgrey?logo=android)]()
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Version](https://img.shields.io/badge/version-1.2.2-ec5f8f)]()
-[![Tests](https://img.shields.io/badge/tests-343%20passed-brightgreen)]()
+[![Version](https://img.shields.io/badge/version-1.2.3-ec5f8f)]()
+[![Tests](https://img.shields.io/badge/tests-348%20passed-brightgreen)]()
 [![Analyze](https://img.shields.io/badge/analyze-0%20issues-brightgreen)]()
 
-[功能特性](#-功能特性) · [截图预览](#-截图预览) · [1.2.2 更新](#-122-更新了什么) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
+[功能特性](#-功能特性) · [截图预览](#-截图预览) · [1.2.3 更新](#-123-更新了什么) · [下载安装](#-下载安装) · [从源码构建](#-从源码构建) · [常见问题](#-常见问题)
 
 </div>
+
+---
+
+## 🆕 1.2.3 更新了什么
+
+> 完整清单见 [CHANGELOG](CHANGELOG.md) 与 [Releases](../../releases/latest)，这里只放这一版最关键的三点。
+
+| 更新 | 一句话 |
+| --- | --- |
+| ➕ **加号不再压住底栏** | 书架与设置页的浮动按钮上移，不再和底栏「设置」重叠误触 |
+| 🧭 **引导不会再卡死** | 点错两次就放行、旁白步骤有「继续」按钮，步骤走不动时能自己往下点 |
+| 🔓 **黑屏彩蛋能退出了** | 长按 5 秒认错即可退出，60 秒也会自动放行，不需要重启 App |
+
+线上反馈的两处问题都出在同一个前提：`extendBody` 让底栏盖在正文上，而浮动按钮仍按
+「底栏之外」定位——按钮视觉上落在「设置」格子里，点击也会被底栏吃掉，新手引导因此
+永远点不到目标、连续劝导后触发黑屏彩蛋。现在按钮整体上移、引导也补上了退路。
+
+上一版（1.2.2）的高刷新率与性能优化、1.2.1 的第三方书源兼容、1.2.0 的 AI 阅读助手、
+内置离线语音、滚动跨章无缝、音量键翻页等功能全部保留。
 
 ---
 
