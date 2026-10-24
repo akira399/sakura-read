@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../data/book_store.dart';
 import '../data/file_scan.dart';
 import '../data/models.dart';
+import '../data/pet_guide.dart';
 import '../data/prefs.dart';
 import '../data/shelf_sort.dart';
 import '../data/stats_store.dart';
@@ -56,6 +57,33 @@ class _ShelfPageState extends State<ShelfPage> {
     '嘘……在等你的故事呢',
     '先放一本书进来，好不好？',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    kPetGuideStepId.addListener(_onGuideStepForSearch);
+  }
+
+  @override
+  void dispose() {
+    kPetGuideStepId.removeListener(_onGuideStepForSearch);
+    super.dispose();
+  }
+
+  /// 引导走到「搜索页」那一步时，替用户把搜索面板打开。
+  ///
+  /// 引导遮罩会吃掉放大镜的点击（遮罩要推进步骤，不能同时把点击透下去），
+  /// 于是「点一下这个放大镜」只会让对话前进，搜索页并不会真的打开，
+  /// 下一步就会停在书架上说「这里就是搜索页」。这里由引导驱动打开，
+  /// 用户看到的就是真实的搜索页，返回箭头也是真实可点的。
+  void _onGuideStepForSearch() {
+    if (kPetGuideStepId.value != 'search_return' || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || kPetGuideStepId.value != 'search_return') return;
+      if (ModalRoute.of(context)?.isCurrent != true) return;
+      _openSearch(context);
+    });
+  }
 
   String get _headerLine {
     final h = DateTime.now().hour;

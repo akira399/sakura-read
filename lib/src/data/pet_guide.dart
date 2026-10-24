@@ -1,7 +1,8 @@
 // 新手引导：小樱带新用户走一遍核心功能。
 //
 // 设计（与 UI 解耦、可单测）：
-//  - 流程很短：自我介绍 → 在线搜书 → 导入本地书 → 设置入口 → 收尾；
+//  - 流程很短：自我介绍 → 在线搜书 → 导入本地书 → AI 助手 → 发现 →
+//    最近 → 设置 → 收尾；
 //  - 开头可跳过（`skip()`）；
 //  - 用户不按指引点击时「劝导」：语气逐次变差（[petGuideNags]）；
 //  - 劝导满 [petGuideNags].length 次后，再有一次不听话 → 直接锁屏彩蛋。
@@ -14,6 +15,13 @@ import 'pet_mood.dart';
 
 /// 引导是否进行中（全局通知：桌宠本体在此间隐藏，由引导层自己摆位）。
 final ValueNotifier<bool> kPetGuideActive = ValueNotifier<bool>(false);
+
+/// 当前引导步骤 id（null = 引导未进行）。
+///
+/// 宿主（HomePage）据此**跟随引导切页**：引导走到「发现」「最近」「设置」
+/// 时自动把底栏切到对应页，用户点下去就是真的进入了那一页，而不是只让
+/// 高亮框跳一下。
+final ValueNotifier<String?> kPetGuideStepId = ValueNotifier<String?>(null);
 
 /// 「重看新手引导」请求信号（自增计数）：设置页入口触发。
 ///
@@ -93,11 +101,24 @@ const List<PetGuideStep> petGuideSteps = [
   PetGuideStep(
     id: 'import',
     anchorId: 'shelf_add',
-    text: '手机里的 TXT / EPUB 小说，从这个「＋」导入，我会帮你整整齐齐摆上书架。',
+    text: '手机里的 TXT / EPUB 小说，从这个「＋」导入，我会帮你整整齐齐摆上书架。\nEPUB 里的插图也能显示哦。',
     hint: '点一下这个「＋」',
     hideWhileOpen: true,
   ),
-  // ── 第 3 站：底部两个常驻入口 ──
+  // ── 第 3 站：新功能巡礼（不挡操作，看完点一下继续） ──
+  PetGuideStep(
+    id: 'ai',
+    text:
+        '书架右上角那个 ✨ 是 AI 助手：\n可以接在线模型，也能在设置里下载本地小模型，断网也能聊。\n你读到哪、读了多久它都看得见，能接着你的进度继续聊。',
+    hint: '看完点一下继续',
+  ),
+  PetGuideStep(
+    id: 'discover',
+    anchorId: 'nav_discover',
+    text: '想找新书就点「发现」——里面是内置的在线书源，按分类挑就行。\n书源失效了也不怕，设置里能导入新的。',
+    hint: '点一下「发现」',
+  ),
+  // ── 第 4 站：底部常驻入口 ──
   PetGuideStep(
     id: 'recent',
     anchorId: 'nav_recent',
@@ -107,7 +128,7 @@ const List<PetGuideStep> petGuideSteps = [
   PetGuideStep(
     id: 'settings',
     anchorId: 'nav_settings',
-    text: '书源、朗读、还有我的各种开关，都藏在「设置」里，记得去看看。',
+    text: '最后是「设置」：书源管理、朗读（内置离线语音，不用另装引擎）、\n翻页方式与连续滚动、高刷新率开关，都在这里。',
     hint: '点一下「设置」',
   ),
   PetGuideStep(
@@ -207,6 +228,7 @@ class PetGuideController extends ChangeNotifier {
     _exhausted = false;
     current = this;
     kPetGuideActive.value = true;
+    kPetGuideStepId.value = step.id;
     _armIdle();
     _armAnchorWatch();
     notifyListeners();
@@ -226,6 +248,7 @@ class PetGuideController extends ChangeNotifier {
     }
     _stepIndex++;
     _softened = false;
+    kPetGuideStepId.value = step.id;
     _armIdle();
     _armAnchorWatch();
     notifyListeners();
@@ -240,6 +263,7 @@ class PetGuideController extends ChangeNotifier {
     _nagCount = 0;
     _nagLine = null;
     _softened = false;
+    kPetGuideStepId.value = step.id;
     _armIdle();
     _armAnchorWatch();
     notifyListeners();

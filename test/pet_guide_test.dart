@@ -6,7 +6,7 @@ import 'package:sakura_read/src/data/pet_mood.dart';
 
 void main() {
   test('引导流程：覆盖核心入口且不过长', () {
-    expect(petGuideSteps.length, lessThanOrEqualTo(8), reason: '流程不宜过长');
+    expect(petGuideSteps.length, lessThanOrEqualTo(9), reason: '流程不宜过长');
     expect(petGuideSteps.length, greaterThanOrEqualTo(3));
     final ids = petGuideSteps.map((s) => s.id).toList();
     expect(ids.first, 'intro');
@@ -18,13 +18,16 @@ void main() {
     }
   });
 
-  test('流程覆盖关键功能：搜书 → 返回 → 导入 → 最近 → 设置', () {
+  test('流程覆盖关键功能：搜书 → 返回 → 导入 → AI → 发现 → 最近 → 设置', () {
     // 这是「不砍功能」的保障：跨页引导必须完整表达
-    // 「点放大镜 → 进搜索页 → 点返回 → 回书架 → 点＋」这条链路。
+    // 「点放大镜 → 进搜索页 → 点返回 → 回书架 → 点＋」这条链路，
+    // 并巡礼新功能（AI 助手 / 本地小模型、发现页在线书源）。
     final ids = petGuideSteps.map((s) => s.id).toList();
     expect(ids, contains('search'));
     expect(ids, contains('search_return')); // 必须引导用户点返回
     expect(ids, contains('import'));
+    expect(ids, contains('ai'));
+    expect(ids, contains('discover'));
     expect(ids, contains('recent'));
     expect(ids, contains('settings'));
 

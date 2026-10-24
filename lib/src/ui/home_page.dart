@@ -55,6 +55,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // 「重看新手引导」：切回书架页（引导从书架开始，后续锚点也在书架 / 导航栏）
     kPetGuideReplay.addListener(_onGuideReplay);
+    kPetGuideStepId.addListener(_onGuideStepChanged);
     // 「用樱读打开文件」：接住系统文件打开事件（冷启动取一次 + 热启动持续监听）
     OpenFileService.instance
       ..onOpenFile = _handleOpenedFile
@@ -191,9 +192,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     kPetGuideReplay.removeListener(_onGuideReplay);
+    kPetGuideStepId.removeListener(_onGuideStepChanged);
     _updateCheckTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// 引导走到「发现 / 最近 / 设置」时，底栏跟着切过去。
+  ///
+  /// 引导遮罩参与手势竞争：用户点底栏时引导虽然推进了，底栏自己的点击
+  /// 偶尔会被竞技场取消，于是「点一下『发现』」看起来没反应。让引导驱动
+  /// 切页后，高亮的页面与实际页面永远是同一个。
+  void _onGuideStepChanged() {
+    const tabs = {'shelf': 0, 'discover': 1, 'recent': 2, 'settings': 3};
+    final target = tabs[kPetGuideStepId.value];
+    if (target == null) return;
+
+    void apply() {
+      if (!mounted) return;
+      // 步骤可能已经被推进/跳过，别把用户又拽回旧页面。
+      if (tabs[kPetGuideStepId.value] != target) return;
+      if (_index != target) setState(() => _index = target);
+    }
+
+    apply();
+    // 同一次点击里底栏自己也会处理 onSelect（引导推进 + 底栏点击会竞争），
+    // 它可能在本方法之后才写回旧下标，所以这一帧结束后再对一次。
+    WidgetsBinding.instance.addPostFrameCallback((_) => apply());
   }
 
   @override
