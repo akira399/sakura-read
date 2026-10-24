@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 
 import '../../data/pet_guide.dart';
 import '../../data/pet_store.dart';
-import 'pet_overlay.dart';
 
 /// 桌宠新手引导的宿主：决定何时开始引导，并把结果写回设置。
 ///
@@ -95,8 +94,9 @@ class _PetGuideHostState extends State<PetGuideHost> {
   void _onFinished() => widget.onSeen();
 
   void _onPatienceRunOut() {
-    // 不耐烦了 → 直接锁屏（与生气彩蛋共用黑屏界面）
-    _enterEgg();
+    // 引导绝不锁屏：礼貌劝导只影响语气，到点就结束引导并记为「已看过」。
+    // （曾经走到黑屏彩蛋，等于把点不中目标的用户直接关在门外。）
+    widget.onSeen();
   }
 
   @override
@@ -109,11 +109,6 @@ class _PetGuideHostState extends State<PetGuideHost> {
       },
     );
   }
-}
-
-/// 进入全黑锁定彩蛋（引导耐心耗尽）。
-void _enterEgg() {
-  kPetEggActive.value = true;
 }
 
 /// 引导用的路由观察者。
@@ -268,6 +263,42 @@ class PetGuideOverlay extends StatelessWidget {
                 ),
               ),
             ),
+            // ---- 继续按钮 ----
+            // 自由参观 / 已软化的步骤没有「点目标」这个判定点，而气泡本身
+            // 不吃手势（点击穿透到遮罩）。曾经因此出现过死路：旁白让用户
+            // 去搜索页点返回箭头，但用户根本没进搜索页 → 怎么点都不前进
+            //（线上反馈「跳不到下一步」）。这里给一个显式出口。
+            if (controller.step.freeRoam || controller.softened)
+              Positioned(
+                bottom: media.padding.bottom + 18,
+                left: 0,
+                right: 0,
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: TextButton.icon(
+                    onPressed: controller.advance,
+                    style: TextButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF7EB6),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 9,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                    label: const Text(
+                      '继续',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

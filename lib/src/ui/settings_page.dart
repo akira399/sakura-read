@@ -86,13 +86,17 @@ class _SettingsPageState extends State<SettingsPage> {
       builder: (context, _) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return Scaffold(
-          floatingActionButton: FloatingActionButton.small(
-            // 与书架的 FAB 区分（两者同时在 IndexedStack 中存活，避免 Hero tag 冲突）
-            heroTag: 'settings-theme-fab',
-            onPressed: _toggleTheme,
-            tooltip: isDark ? '切换到浅色模式' : '切换到深色模式',
-            child: Icon(
-              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+          // 与书架同一个坑：底栏 extendBody 盖住正文，默认 FAB 会压在「设置」格上。
+          floatingActionButton: Padding(
+            padding: const EdgeInsets.only(bottom: 96),
+            child: FloatingActionButton.small(
+              // 与书架的 FAB 区分（两者同时在 IndexedStack 中存活，避免 Hero tag 冲突）
+              heroTag: 'settings-theme-fab',
+              onPressed: _toggleTheme,
+              tooltip: isDark ? '切换到浅色模式' : '切换到深色模式',
+              child: Icon(
+                isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              ),
             ),
           ),
           body: ListView(
