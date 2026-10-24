@@ -44,6 +44,9 @@ class ShelfPage extends StatefulWidget {
 }
 
 class _ShelfPageState extends State<ShelfPage> {
+  /// 底栏（NavigationBar 80 + 间距）占的高度：加号按钮要让出这一段。
+  static const double _navBarClearance = 96;
+
   /// 空书架的看板娘台词。
   static const _emptyShelfLines = [
     '书架上还空着哦',
@@ -71,15 +74,21 @@ class _ShelfPageState extends State<ShelfPage> {
         final books = widget.store.books.toList();
         _sortBooks(books);
         return Scaffold(
-          floatingActionButton: PetGuideTarget(
-            id: 'shelf_add',
-            child: FloatingActionButton(
-              // 显式 heroTag：书架与设置页的 FAB 同时在 IndexedStack 里存活，
-              // 使用默认 tag 会在路由切换（Hero 动画扫描）时冲突
-              heroTag: 'shelf-add-fab',
-              onPressed: () => _showAddSheet(context),
-              tooltip: '导入书籍',
-              child: const Icon(Icons.add_rounded, size: 30),
+          // 底栏用 extendBody 盖在正文上，Scaffold 感知不到它的高度：
+          // 默认 endFloat 会把「＋」摆进底栏区域，正好压住最右侧的「设置」，
+          // 导致点不到加号、还容易误跳设置（线上反馈）。这里显式抬高一段。
+          floatingActionButton: Padding(
+            padding: const EdgeInsets.only(bottom: _navBarClearance),
+            child: PetGuideTarget(
+              id: 'shelf_add',
+              child: FloatingActionButton(
+                // 显式 heroTag：书架与设置页的 FAB 同时在 IndexedStack 里存活，
+                // 使用默认 tag 会在路由切换（Hero 动画扫描）时冲突
+                heroTag: 'shelf-add-fab',
+                onPressed: () => _showAddSheet(context),
+                tooltip: '导入书籍',
+                child: const Icon(Icons.add_rounded, size: 30),
+              ),
             ),
           ),
           body: CustomScrollView(

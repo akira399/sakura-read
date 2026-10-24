@@ -261,4 +261,25 @@ void main() {
 
     await _teardown(tester, c);
   });
+
+  testWidgets('自由参观步骤有「继续」按钮，点了确实前进（回归：旁白死路）', (tester) async {
+    final c = PetGuideController();
+    addTearDown(c.dispose);
+    c.start();
+    c.goToStep('search_return');
+    expect(c.step.freeRoam, isTrue);
+
+    await tester.pumpWidget(_host(c));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('继续'), findsOneWidget, reason: '自由参观必须给显式出口');
+
+    final before = c.stepIndex;
+    await tester.tap(find.text('继续'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(c.stepIndex, before + 1, reason: '点「继续」要真的前进，不能是装饰');
+
+    await _teardown(tester, c);
+  });
 }

@@ -124,6 +124,7 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
     });
     _seenFeedAt = widget.pet.lastFeedAt;
     widget.pet.addListener(_onPetChanged);
+    kPetEggActive.addListener(_onEggClosed);
     _checkPendingGains();
     _startDozeTimer();
     _startRoamWatch();
@@ -134,6 +135,7 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
   @override
   void dispose() {
     widget.pet.removeListener(_onPetChanged);
+    kPetEggActive.removeListener(_onEggClosed);
     _lineTimer?.cancel();
     _dozeTimer?.cancel();
     _faceTimer?.cancel();
@@ -422,15 +424,17 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
     }
   }
 
-  /// 从彩蛋恢复。
+  /// 彩蛋被关掉（长按认错 / 自动放行）后的收尾：清空怒气、换回常态差分。
   ///
-  /// 注意：正式流程下**只有重启 App** 能恢复（彩蛋层是全屏锁定且无出口），
-  /// 这里保留入口供测试 / 将来做「后悔药」功能使用。
-  // ignore: unused_element
-  void _exitEgg() {
-    kPetEggActive.value = false;
+  /// 彩蛋曾经「只能重启 App 才能退出」，把用户真的锁在软件外面；现在由
+  /// [PetEggOverlay] 提供长按出口，这里负责把状态复位，避免下一次生气立刻
+  /// 又进黑屏。
+  void _onEggClosed() {
+    if (kPetEggActive.value) return;
     _mood.reset();
-    if (mounted) setState(() => _faceIndex = 0);
+    if (mounted && _faceIndex == _faceOf(_rageFace)) {
+      setState(() => _faceIndex = 0);
+    }
   }
 
   /// 记录一次互动；若正处于瞌睡状态则先"叫醒"（叫醒必定生气）。

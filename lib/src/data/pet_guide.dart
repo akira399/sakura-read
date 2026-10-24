@@ -133,6 +133,14 @@ class PetGuideController extends ChangeNotifier {
   /// 超时未操作也算一次「不听话」（比误点温和，间隔给足）。
   static const Duration idleNagDelay = Duration(seconds: 20);
 
+  /// 点不中目标达到这个次数就「软化」该步骤：点任意处即可继续。
+  ///
+  /// 引导是新手唯一的入口，**绝不允许把人堵在里面**：目标被底栏盖住、
+  /// 被弹层挡住、或者用户就是不想点时，多给两次机会就放行。
+  /// （线上事故：加号按钮与底栏「设置」重合，用户点不到、连续劝导后
+  /// 触发黑屏彩蛋，等于把新用户锁死在 App 外。）
+  static const int softenAfterNags = 2;
+
   /// 当前步骤的锚点迟迟没出现在屏幕上时，等这么久就「软化」该步骤
   /// （点任意处即可继续），避免引导卡死在不可见的控件上。
   static const Duration anchorGrace = Duration(milliseconds: 1500);
@@ -281,22 +289,21 @@ class PetGuideController extends ChangeNotifier {
 
   /// 用户点了别处 / 迟迟不动 → 劝导。
   ///
-  /// 返回 true 表示本次触发了锁屏（第 6 次不听话）。
+  /// 返回值保留给历史调用方（引导不再有任何锁屏路径，恒为 false）。
   bool reportWrong() {
     if (!_active || _exhausted) return false;
     // 自由参观步骤：允许随便逛，不计"不听话"（功能要符合直觉）
     if (step.freeRoam) return false;
     _nagCount++;
-    if (_nagCount > petGuideNags.length) {
-      _exhausted = true;
-      _idleTimer?.cancel();
-      _active = false;
-      kPetGuideActive.value = false;
+    // 点不中目标两次就软化：点任意处继续（引导不能堵人）
+    if (step.hasAnchor && _nagCount >= softenAfterNags) {
+      _softened = true;
+      _nagLine = null;
+      _armIdle();
       notifyListeners();
-      onPatienceRunOut?.call();
-      return true;
+      return false;
     }
-    _nagLine = petGuideNags[_nagCount - 1];
+    _nagLine = petGuideNags[(_nagCount - 1).clamp(0, petGuideNags.length - 1)];
     _armIdle();
     notifyListeners();
     return false;

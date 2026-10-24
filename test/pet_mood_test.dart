@@ -163,7 +163,7 @@ void main() {
       expect(petEggFooter.contains('重启'), isFalse);
     });
 
-    test('引导劝导词共 5 句（第 6 次不听话触发锁屏）', () {
+    test('引导劝导词共 5 句（只影响语气，不再触发锁屏）', () {
       expect(petGuideNags.length, 5);
     });
 

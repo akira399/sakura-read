@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/pet_mood.dart';
+import 'pet_overlay.dart' show kPetEggActive;
 
-/// 彩蛋层：全黑锁定界面（不可操作），正中只有阴沉脸桌宠 + 台词 + 血字。
+/// 彩蛋层：全黑锁定界面，正中阴沉脸桌宠 + 台词 + 血字。
 ///
 /// 触发：生气第 4 次及以上按概率进入（见 `PetMood.escalate`）。
-/// 退出：只有重启 App。
+/// 出口：**长按 5 秒认错**（或 60 秒后自动放行）——曾经的「只能重启 App」
+/// 让用户真的被锁在软件外面（酷安反馈「不让我用软件了」），已废弃。
 class PetEggOverlay extends StatelessWidget {
   const PetEggOverlay({super.key, required this.active});
 
@@ -23,18 +27,65 @@ class PetEggOverlay extends StatelessWidget {
   }
 }
 
-class _EggView extends StatelessWidget {
+class _EggView extends StatefulWidget {
   const _EggView();
+
+  @override
+  State<_EggView> createState() => _EggViewState();
+}
+
+class _EggViewState extends State<_EggView> {
+  /// 长按多久算「认错」。
+  static const Duration holdToRelease = Duration(seconds: 5);
+
+  /// 兜底：无论如何都不会永久锁死。
+  static const Duration autoRelease = Duration(seconds: 60);
+
+  Timer? _holdTimer;
+  Timer? _autoTimer;
+  bool _holding = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoTimer = Timer(autoRelease, _release);
+  }
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    _autoTimer?.cancel();
+    super.dispose();
+  }
+
+  void _release() {
+    _holdTimer?.cancel();
+    _autoTimer?.cancel();
+    if (kPetEggActive.value) kPetEggActive.value = false;
+  }
+
+  void _onHoldStart(LongPressStartDetails _) {
+    _holdTimer?.cancel();
+    setState(() => _holding = true);
+    _holdTimer = Timer(holdToRelease, _release);
+  }
+
+  void _onHoldEnd() {
+    _holdTimer?.cancel();
+    if (mounted && _holding) setState(() => _holding = false);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Positioned.fill(
-      // 全屏黑幕；本层吃掉所有手势 → 整个界面被锁定
+      // 全屏黑幕：吃掉背景手势（避免点穿到下面的书架），但保留自己的长按出口
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {},
         onDoubleTap: () {},
-        onLongPress: () {},
+        onLongPressStart: _onHoldStart,
+        onLongPressEnd: (_) => _onHoldEnd(),
+        onLongPressCancel: _onHoldEnd,
         onVerticalDragStart: (_) {},
         onHorizontalDragStart: (_) {},
         child: Material(
@@ -109,6 +160,36 @@ class _EggView extends StatelessWidget {
                             Shadow(color: Color(0xFFFF2B45), blurRadius: 14),
                           ],
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 34),
+                    // 出口：长按认错（避免把用户真的锁在软件外面）
+                    AnimatedOpacity(
+                      opacity: _holding ? 1 : .55,
+                      duration: const Duration(milliseconds: 160),
+                      child: Column(
+                        children: [
+                          Text(
+                            _holding ? '松手就前功尽弃了…' : '长按 5 秒认错',
+                            style: const TextStyle(
+                              color: Color(0xFFA98588),
+                              fontSize: 12.5,
+                              letterSpacing: 1.6,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: _holding ? 132 : 92,
+                            height: 2,
+                            decoration: BoxDecoration(
+                              color: _holding
+                                  ? const Color(0xFFFF2B45)
+                                  : const Color(0xFF4A2226),
+                              borderRadius: BorderRadius.circular(1),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
