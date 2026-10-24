@@ -151,6 +151,13 @@ class AppPrefs extends ChangeNotifier {
   /// 启动时自动检查更新（默认开启；设置页可关闭）。
   bool autoCheckUpdate = true;
 
+  /// 显示帧率/耗时浮层（排查卡顿用；默认关闭）。
+  bool showPerformanceOverlay = false;
+
+  /// 高刷新率渲染（默认开启）：有 120Hz 屏幕时按最高刷新率出帧，
+  /// 而不是被系统钉在 60Hz。关掉更省电。
+  bool highRefreshRate = true;
+
   /// 用户点过「以后再说」的版本（该版本不再自动弹窗；空 = 无）。
   ///
   /// 只影响自动弹窗：设置页「检查更新」仍会展示。
@@ -239,6 +246,9 @@ class AppPrefs extends ChangeNotifier {
           agreementAccepted = data['agreementAccepted'] as bool? ?? false;
           // v7：更新检查
           autoCheckUpdate = data['autoCheckUpdate'] as bool? ?? true;
+          showPerformanceOverlay =
+              data['showPerformanceOverlay'] as bool? ?? false;
+          highRefreshRate = data['highRefreshRate'] as bool? ?? true;
           skipUpdateVersion = data['skipUpdateVersion'] as String? ?? '';
           // v9：AI 助手接口配置
           aiBaseUrl = data['aiBaseUrl'] as String? ?? '';
@@ -512,6 +522,22 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 高刷新率渲染开关。
+  void setHighRefreshRate(bool v) {
+    if (highRefreshRate == v) return;
+    highRefreshRate = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 显示帧率浮层开关。
+  void setShowPerformanceOverlay(bool v) {
+    if (showPerformanceOverlay == v) return;
+    showPerformanceOverlay = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
   /// 记住用户点过「以后再说」的版本（该版本不再自动弹窗）。
   void setSkipUpdateVersion(String v) {
     if (skipUpdateVersion == v) return;
@@ -605,6 +631,8 @@ class AppPrefs extends ChangeNotifier {
           'guideSeen': guideSeen,
           'agreementAccepted': agreementAccepted,
           'autoCheckUpdate': autoCheckUpdate,
+          'showPerformanceOverlay': showPerformanceOverlay,
+          'highRefreshRate': highRefreshRate,
           'skipUpdateVersion': skipUpdateVersion,
           'aiBaseUrl': aiBaseUrl,
           'aiApiKey': aiApiKey,

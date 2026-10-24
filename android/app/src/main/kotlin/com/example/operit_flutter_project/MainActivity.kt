@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.core.content.FileProvider
@@ -25,6 +26,9 @@ class MainActivity : FlutterActivity() {
 
     /// 独立通道：音量键翻页事件（原生 → Dart）。
     private val keysChannelName = "sakuramanga/keys"
+
+    /// 独立通道：屏幕刷新率（Dart → 原生）。
+    private val displayChannelName = "sakuramanga/display"
 
     // ---- 朗读（TTS）状态 ----
     private var tts: TextToSpeech? = null
@@ -70,6 +74,20 @@ class MainActivity : FlutterActivity() {
         // 文件打开通道：独立于 native 通道（两处都要 setMethodCallHandler，
         // 同一通道会互相覆盖）
         openChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, openChannelName)
+
+        // 刷新率通道：默认按屏幕支持的最高刷新率出帧（用户可在设置里关掉省电）。
+        val displayChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, displayChannelName)
+        displayChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setHighRefresh" -> {
+                    val high = call.arguments as? Boolean ?: true
+                    applyPreferredRefreshRate(high)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
         openChannel!!.setMethodCallHandler { call, result ->
             when (call.method) {
                 // Dart 就绪后调用：取走启动时收到的文件路径（取后清除）
@@ -278,6 +296,51 @@ class MainActivity : FlutterActivity() {
             services.mapNotNull { it.serviceInfo?.packageName }.distinct()
         } catch (_: Exception) {
             emptyList()
+        }
+    }
+
+    /**
+     * 请求屏幕以最高刷新率出帧。
+     *
+     * Android 的系统默认模式经常是 60Hz：即使屏幕支持 120Hz，App 不主动声明
+     * 就只能按 60Hz 拿 vsync，看起来像"锁帧"。这里取屏幕支持的模式里刷新率
+     * 最高的那个，通过 preferredDisplayModeId（API 23+）告诉系统"我要高刷"，
+     * 退出 App 后系统会自己恢复。
+     */
+    private fun applyPreferredRefreshRate(high: Boolean) {
+        runOnUiThread {
+            try {
+                val display =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        display
+                    } else {
+                        @Suppress("DEPRECATION")
+                        windowManager.defaultDisplay
+                    } ?: return@runOnUiThread
+                val modes = display.supportedModes
+                if (modes.isNullOrEmpty()) return@runOnUiThread
+                val current = display.mode
+                // 只在「同分辨率」的模式里挑最高刷新率，避免顺手改了显示尺寸
+                val sameSize = modes.filter {
+                    it.physicalWidth == current.physicalWidth &&
+                        it.physicalHeight == current.physicalHeight
+                }
+                val target = (sameSize.ifEmpty { modes.toList() })
+                    .maxByOrNull { it.refreshRate } ?: return@runOnUiThread
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val want = high && target.refreshRate > current.refreshRate + 0.5f
+                    val attrs = window.attributes
+                    attrs.preferredDisplayModeId = if (want) target.modeId else 0
+                    window.attributes = attrs
+                    Log.i(
+                        "SakuraDisplay",
+                        "high=$high want=$want mode=${target.modeId} " +
+                            "maxHz=${target.refreshRate} curHz=${current.refreshRate}",
+                    )
+                }
+            } catch (_: Throwable) {
+                // 个别 ROM 的 display 模式切换会抛异常：忽略即可，不影响阅读
+            }
         }
     }
 

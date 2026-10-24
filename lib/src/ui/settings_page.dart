@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../platform/display_service.dart';
 import '../app_info.dart';
 import '../data/book_store.dart';
 import '../data/pet_guide.dart';
@@ -111,6 +112,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _ttsCard(context),
               const SizedBox(height: 14),
               _petCard(context),
+              const SizedBox(height: 14),
+              _performanceCard(context),
               const SizedBox(height: 14),
               _statsCard(context),
               const SizedBox(height: 14),
@@ -830,6 +833,44 @@ class _SettingsPageState extends State<SettingsPage> {
           ? '正在用内置离线语音播放…能听到声音就说明可用'
           : '正在播放测试语音…能听到声音就说明可用';
     });
+  }
+
+  /// 性能：帧率浮层开关（排查「卡」的时候最直接）。
+  Widget _performanceCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle(icon: Icons.speed_rounded, title: '性能'),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.monitor_heart_outlined),
+            title: const Text('显示帧率', style: TextStyle(fontSize: 14)),
+            subtitle: Text(
+              '在屏幕上方叠加实时帧率与每帧耗时（排查卡顿用）',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+            value: widget.prefs.showPerformanceOverlay,
+            onChanged: (v) => widget.prefs.setShowPerformanceOverlay(v),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.slow_motion_video_rounded),
+            title: const Text('高刷新率', style: TextStyle(fontSize: 14)),
+            subtitle: Text(
+              '有 120Hz 屏幕时按最高刷新率出帧，而不是固定 60Hz；关掉更省电',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+            value: widget.prefs.highRefreshRate,
+            onChanged: (v) {
+              widget.prefs.setHighRefreshRate(v);
+              DisplayService.setHighRefresh(v);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   /// 更新卡片：手动检查更新 + 启动自动检查开关。
