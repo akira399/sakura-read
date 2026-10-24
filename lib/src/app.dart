@@ -39,6 +39,8 @@ class SakuraApp extends StatelessWidget {
         return MaterialApp(
           title: '樱读',
           debugShowCheckedModeBanner: false,
+          // 帧率浮层：设置页「性能」卡片可开，用来当场看真实帧率
+          showPerformanceOverlay: prefs.showPerformanceOverlay,
           // 根导航键：全局覆盖层（桌宠）用它打开面板（覆盖层 context 无 Navigator）
           navigatorKey: kRootNavigatorKey,
           // 路由观察者：引导锚点靠它感知「被其它页面盖住 / 重新露出」，

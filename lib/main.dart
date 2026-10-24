@@ -6,13 +6,18 @@ import 'src/data/book_store.dart';
 import 'src/data/pet_store.dart';
 import 'src/data/prefs.dart';
 import 'src/data/stats_store.dart';
+import 'src/platform/perf_probe.dart';
+import 'src/platform/display_service.dart';
 import 'src/source/source_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  PerfProbe.start();
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   final prefs = AppPrefs();
   await prefs.load();
+  // 默认按屏幕支持的最高刷新率出帧（可在设置 → 性能里关掉）
+  DisplayService.setHighRefresh(prefs.highRefreshRate);
   final store = BookStore();
   await store.load();
   final sourceStore = SourceStore();

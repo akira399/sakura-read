@@ -700,42 +700,47 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
                                           child: _PetHearts(animation: _hearts),
                                         ),
                                       ),
-                                    AnimatedSwitcher(
-                                      duration: const Duration(
-                                        milliseconds: 200,
-                                      ),
-                                      child: Stack(
-                                        key: ValueKey<int>(_faceIndex),
-                                        fit: StackFit.expand,
-                                        children: [
-                                          // 轮廓阴影：同一张立绘染黑 + 模糊 + 轻微下移。
-                                          // 阴影形状跟随人物剪影（不是矩形投影，避免"黑圈"）。
-                                          Transform.translate(
-                                            offset: const Offset(0, 3),
-                                            child: ImageFiltered(
-                                              imageFilter: ui.ImageFilter.blur(
-                                                sigmaX: 2.5,
-                                                sigmaY: 2.5,
-                                              ),
-                                              child: ColorFiltered(
-                                                colorFilter: ColorFilter.mode(
-                                                  Colors.black.withValues(
-                                                    alpha: .13,
+                                    // RepaintBoundary：立绘 + 模糊剪影只光栅化一次，
+                                    // 呼吸浮动 / 弹跳只做图层合成，避免每帧重新模糊。
+                                    RepaintBoundary(
+                                      child: AnimatedSwitcher(
+                                        duration: const Duration(
+                                          milliseconds: 200,
+                                        ),
+                                        child: Stack(
+                                          key: ValueKey<int>(_faceIndex),
+                                          fit: StackFit.expand,
+                                          children: [
+                                            // 轮廓阴影：同一张立绘染黑 + 模糊 + 轻微下移。
+                                            // 阴影形状跟随人物剪影（不是矩形投影，避免"黑圈"）。
+                                            Transform.translate(
+                                              offset: const Offset(0, 3),
+                                              child: ImageFiltered(
+                                                imageFilter:
+                                                    ui.ImageFilter.blur(
+                                                      sigmaX: 2.5,
+                                                      sigmaY: 2.5,
+                                                    ),
+                                                child: ColorFiltered(
+                                                  colorFilter: ColorFilter.mode(
+                                                    Colors.black.withValues(
+                                                      alpha: .13,
+                                                    ),
+                                                    BlendMode.srcIn,
                                                   ),
-                                                  BlendMode.srcIn,
-                                                ),
-                                                child: Image.asset(
-                                                  _petFaces[_faceIndex],
-                                                  fit: BoxFit.contain,
+                                                  child: Image.asset(
+                                                    _petFaces[_faceIndex],
+                                                    fit: BoxFit.contain,
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                          Image.asset(
-                                            _petFaces[_faceIndex],
-                                            fit: BoxFit.contain,
-                                          ),
-                                        ],
+                                            Image.asset(
+                                              _petFaces[_faceIndex],
+                                              fit: BoxFit.contain,
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ],
