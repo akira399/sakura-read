@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../platform/display_service.dart';
@@ -6,6 +8,8 @@ import '../data/book_store.dart';
 import '../data/pet_guide.dart';
 import '../data/pet_store.dart';
 import '../data/prefs.dart';
+import '../data/tts_voice_catalog.dart';
+import '../data/tts_voice_store.dart';
 import '../data/stats_store.dart';
 import '../platform/native_bridge.dart';
 import '../platform/tts_service.dart';
@@ -15,6 +19,8 @@ import '../source/source_store.dart';
 import '../util/format.dart';
 import 'ai_chat_page.dart';
 import 'ai_settings_page.dart';
+import 'backup_page.dart';
+import 'legado_import_page.dart';
 import 'reader/reader_page.dart';
 import 'reader/reader_settings_panel.dart';
 import 'source/source_manager_page.dart';
@@ -50,6 +56,12 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 设备上可用的朗读引擎（懒加载）。
   List<String>? _ttsEngines;
 
+  /// 当前引擎的音色名列表（null = 还没加载）。
+  List<String>? _ttsVoices;
+
+  /// 音色加载中。
+  bool _ttsVoicesLoading = false;
+
   /// 朗读引擎探测中。
   bool _ttsProbing = false;
 
@@ -60,6 +72,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(TtsVoiceStore.instance.refresh());
     _loadCacheSize();
   }
 
@@ -77,6 +90,262 @@ class _SettingsPageState extends State<SettingsPage> {
       _ => MediaQuery.platformBrightnessOf(context) == Brightness.dark,
     };
     prefs.setNightMode(!effectiveDark);
+  }
+
+  /// 「语音包」区块：内置音色 + 可下载的语音包，多说话人的还能挑音色。
+  ///
+  /// 用户反馈「语音模型应该是选择下载的，不是打在包里」——所以除了随包的
+  /// 超文，其余都是点了才下载、可单独删除。
+  Widget _voicePackSection(BuildContext context, ColorScheme scheme) {
+    final store = TtsVoiceStore.instance;
+    return AnimatedBuilder(
+      animation: store,
+      builder: (context, _) {
+        final currentId = widget.prefs.ttsVoicePack;
+        final current = ttsVoicePackById(currentId) ?? builtinVoicePack;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.graphic_eq_rounded,
+                  size: 18,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '语音包',
+                  style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '内置只有一个音色，想要男声 / 女声自己下载',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final pack in ttsVoiceCatalog)
+              _voicePackTile(context, scheme, store, pack, currentId),
+            if (current.isMultiSpeaker) ...[
+              const SizedBox(height: 10),
+              Text(
+                '音色（共 ${current.speakerCount} 个说话人，先挑几个常用的）',
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final preset in current.presets)
+                    ChoiceChip(
+                      label: Text(
+                        preset.label,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      selected: widget.prefs.ttsVoiceSid == preset.sid,
+                      onSelected: (_) {
+                        widget.prefs.setTtsVoiceSid(preset.sid);
+                        unawaited(
+                          TtsService.instance.setVoicePack(
+                            current.id,
+                            preset.sid,
+                          ),
+                        );
+                        setState(() {});
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _voicePackTile(
+    BuildContext context,
+    ColorScheme scheme,
+    TtsVoiceStore store,
+    TtsVoicePack pack,
+    String currentId,
+  ) {
+    final installed = store.isInstalled(pack.id);
+    final downloading = store.isDownloading(pack.id);
+    final active = currentId == pack.id;
+    final error = store.errorOf(pack.id);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+        border: active
+            ? Border.all(color: scheme.primary.withValues(alpha: 0.55))
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          pack.name,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          pack.bundled
+                              ? '内置'
+                              : '${pack.sizeMb.toStringAsFixed(0)} MB',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (active) ...[
+                          const SizedBox(width: 6),
+                          Icon(
+                            Icons.check_circle_rounded,
+                            size: 14,
+                            color: scheme.primary,
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      pack.tagline,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (downloading)
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    value: store.progressOf(pack.id) == 0
+                        ? null
+                        : store.progressOf(pack.id),
+                  ),
+                )
+              else if (installed)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!active)
+                      TextButton(
+                        onPressed: () => _selectVoicePack(pack),
+                        child: const Text('使用', style: TextStyle(fontSize: 12)),
+                      ),
+                    if (!pack.bundled)
+                      IconButton(
+                        tooltip: '删除这个语音包',
+                        onPressed: store.downloadingId == null
+                            ? () async {
+                                await store.remove(pack.id);
+                                if (widget.prefs.ttsVoicePack == pack.id) {
+                                  widget.prefs.setTtsVoicePack(
+                                    builtinVoicePack.id,
+                                  );
+                                  widget.prefs.setTtsVoiceSid(0);
+                                  unawaited(
+                                    TtsService.instance.setVoicePack(
+                                      builtinVoicePack.id,
+                                      0,
+                                    ),
+                                  );
+                                }
+                                if (mounted) setState(() {});
+                              }
+                            : null,
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 18,
+                        ),
+                      ),
+                  ],
+                )
+              else
+                FilledButton.tonal(
+                  onPressed: store.downloadingId == null
+                      ? () => _downloadVoicePack(pack)
+                      : null,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    minimumSize: const Size(0, 32),
+                  ),
+                  child: const Text('下载', style: TextStyle(fontSize: 12)),
+                ),
+            ],
+          ),
+          if (downloading) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: store.progressOf(pack.id) == 0
+                  ? null
+                  : store.progressOf(pack.id),
+              minHeight: 4,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              store.progressOf(pack.id) >= 0.99
+                  ? '下载完成，正在解压…'
+                  : '下载中 ${(store.progressOf(pack.id) * 100).toStringAsFixed(0)}%',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
+          ],
+          if (error != null) ...[
+            const SizedBox(height: 6),
+            Text(error, style: TextStyle(fontSize: 11.5, color: scheme.error)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _downloadVoicePack(TtsVoicePack pack) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await TtsVoiceStore.instance.install(pack);
+    if (!mounted) return;
+    if (ok) {
+      await _selectVoicePack(pack);
+      messenger.showSnackBar(SnackBar(content: Text('「${pack.name}」装好了，已切换')));
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _selectVoicePack(TtsVoicePack pack) async {
+    widget.prefs.setTtsVoicePack(pack.id);
+    widget.prefs.setTtsVoiceSid(pack.defaultSid);
+    await TtsService.instance.setVoicePack(pack.id, pack.defaultSid);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -126,6 +395,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _sourceCard(context),
               const SizedBox(height: 14),
               _storageCard(context),
+              const SizedBox(height: 14),
+              _dataCard(context),
               const SizedBox(height: 14),
               _helpCard(context),
               const SizedBox(height: 14),
@@ -179,6 +450,19 @@ class _SettingsPageState extends State<SettingsPage> {
             selected: {prefs.themeMode},
             onSelectionChanged: (s) => prefs.setThemeMode(s.first),
             showSelectedIcon: false,
+          ),
+          const SizedBox(height: 6),
+          // 用户反馈「调来调去都没有磨砂」：以前只有半透明蒙层，没有真模糊
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: prefs.frostedGlass,
+            onChanged: prefs.setFrostedGlass,
+            secondary: const Icon(Icons.blur_on_rounded),
+            title: const Text('磨砂玻璃', style: TextStyle(fontSize: 14)),
+            subtitle: const Text(
+              '阅读页顶栏 / 底栏用实时模糊，透出下面的正文；低端机上会略耗电',
+              style: TextStyle(fontSize: 12),
+            ),
           ),
           const SizedBox(height: 16),
           const Text(
@@ -521,6 +805,44 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
           ),
+          // 用户反馈：「书源搜索能不能设置线程，搜索太慢了」——并发数可调
+          AnimatedBuilder(
+            animation: widget.prefs,
+            builder: (_, _) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.speed_rounded),
+                  title: const Text('搜索并发数', style: TextStyle(fontSize: 14)),
+                  subtitle: Text(
+                    '同时搜索 ${widget.prefs.searchConcurrency} 个书源 · '
+                    '调大更快，弱网时容易失败',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                Slider(
+                  value: widget.prefs.searchConcurrency.clamp(1, 32).toDouble(),
+                  min: 1,
+                  max: 32,
+                  divisions: 31,
+                  label: '${widget.prefs.searchConcurrency} 个',
+                  onChanged: (v) =>
+                      widget.prefs.setSearchConcurrency(v.round()),
+                ),
+                // 用户反馈「并发数改无上限可让用户选择」：滑杆到 32 之后
+                // 还能手填，最大 32（再多也只会被系统网络栈拖死）。
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _customConcurrency(context),
+                    icon: const Icon(Icons.tune_rounded, size: 18),
+                    label: const Text('自定义（最多 32）'),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -553,6 +875,55 @@ class _SettingsPageState extends State<SettingsPage> {
             },
             icon: const Icon(Icons.delete_sweep_rounded, size: 18),
             label: const Text('清除缓存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 用户反馈：「后期考不考虑添加 WebDAV 或其他备份功能」「能把阅读的数据导进来吗」
+  Widget _dataCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle(icon: Icons.inventory_2_rounded, title: '数据'),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.backup_rounded),
+            title: const Text('备份与恢复', style: TextStyle(fontSize: 14)),
+            subtitle: Text(
+              widget.prefs.lastBackupAt.isEmpty
+                  ? '本地 zip 备份，也可以传到 WebDAV'
+                  : '上次备份：${widget.prefs.lastBackupAt.replaceFirst('T', ' ').split('.').first}',
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => BackupPage(prefs: widget.prefs),
+              ),
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.move_to_inbox_rounded),
+            title: const Text('从「阅读」导入', style: TextStyle(fontSize: 14)),
+            subtitle: Text(
+              '读取「阅读 3.0」的备份文件，把书架搬过来',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => LegadoImportPage(
+                  prefs: widget.prefs,
+                  shelf: widget.store,
+                  sources: widget.sourceStore,
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -707,6 +1078,110 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                   ],
+                  // 音色（男声 / 女声）：系统引擎的 voices 列表
+                  if (engines != null &&
+                      engines.isNotEmpty &&
+                      widget.prefs.ttsEngine != TtsService.builtinEngineId) ...[
+                    const SizedBox(height: 8),
+                    if (_ttsVoices == null)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        leading: const Icon(Icons.record_voice_over, size: 20),
+                        title: const Text(
+                          '音色（男声 / 女声）',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        subtitle: const Text(
+                          '点「检测引擎」后就能选这台手机里的音色',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        trailing: _ttsVoicesLoading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.chevron_right_rounded),
+                        onTap: _ttsVoicesLoading ? null : _loadTtsVoices,
+                      )
+                    else if (_ttsVoices!.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '这个引擎没提供音色列表，只能用默认声音。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    else
+                      DropdownButtonFormField<String>(
+                        initialValue:
+                            _ttsVoices!.contains(widget.prefs.ttsVoice)
+                            ? widget.prefs.ttsVoice
+                            : '',
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: '音色（男声 / 女声）',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('引擎默认音色'),
+                          ),
+                          for (final v in _ttsVoices!)
+                            DropdownMenuItem(
+                              value: v,
+                              child: Text(v, overflow: TextOverflow.ellipsis),
+                            ),
+                        ],
+                        onChanged: (v) async {
+                          widget.prefs.setTtsVoice(v ?? '');
+                          final ok = await tts.setPreferredVoice(v ?? '');
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                ok ? '音色已切换，点「测试朗读」听听看' : '这个音色暂时用不了，先保持默认',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                  // 音色风格：内置离线语音只有一种声音，用音调模拟男女声
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [_voicePackSection(context, scheme)],
+                    ),
+                  ),
+                  // AI 分角色朗读：本地规则区分旁白 / 对白，不联网
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: widget.prefs.ttsRolePlay,
+                    onChanged: widget.prefs.setTtsRolePlay,
+                    secondary: const Icon(Icons.theater_comedy_rounded),
+                    title: const Text(
+                      'AI 分角色朗读',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    subtitle: const Text(
+                      '旁白和对白用不同音调，同一角色保持一致；完全本地，不花 token',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
                   if (_ttsProbeResult != null) ...[
                     const SizedBox(height: 8),
                     Row(
@@ -774,6 +1249,57 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// 加载当前引擎的音色列表（男声 / 女声）。
+  Future<void> _loadTtsVoices() async {
+    if (_ttsVoicesLoading) return;
+    setState(() => _ttsVoicesLoading = true);
+    try {
+      final tts = TtsService.instance;
+      await tts.ensureReady();
+      final list = await tts.voices();
+      if (!mounted) return;
+      setState(() => _ttsVoices = list);
+    } finally {
+      if (mounted) setState(() => _ttsVoicesLoading = false);
+    }
+  }
+
+  /// 自定义并发数（1~32）。
+  Future<void> _customConcurrency(BuildContext context) async {
+    final controller = TextEditingController(
+      text: '${widget.prefs.searchConcurrency}',
+    );
+    final value = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('自定义并发数'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: '同时搜索的书源个数',
+            helperText: '1 ~ 32；太多容易被书源站限流',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final v = int.tryParse(controller.text.trim());
+              Navigator.of(dialogContext).pop(v);
+            },
+            child: const Text('好'),
+          ),
+        ],
+      ),
+    );
+    if (value == null) return;
+    widget.prefs.setSearchConcurrency(value.clamp(1, 32));
+  }
+
   /// 引擎包名 → 友好短名（如 `com.iflytek.tts` → `iflytek`）。
   String _shortEngineName(String pkg) {
     final parts = pkg.split('.');
@@ -793,8 +1319,12 @@ class _SettingsPageState extends State<SettingsPage> {
     // 把用户已选引擎同步给服务（首次进入设置页时）
     await tts.setPreferredEngine(widget.prefs.ttsEngine);
     if (!mounted) return;
+    // 引擎列表出来后顺手把音色也读一次，省得用户再点一次（男声 / 女声）
+    final voices = list.isEmpty ? const <String>[] : await tts.voices();
+    if (!mounted) return;
     setState(() {
       _ttsEngines = list;
+      _ttsVoices = voices;
       _ttsProbing = false;
       _ttsProbeResult = list.isEmpty
           ? '没有系统语音引擎，可以改用上面的「内置离线语音」'

@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import '../data/persistence.dart';
 
 import 'package:flutter/foundation.dart';
@@ -42,8 +43,7 @@ class SourceImportReport {
 
 /// 书源仓库（可监听，UI 依赖它刷新）。
 class SourceStore extends ChangeNotifier with ReliablePersistence {
-  SourceStore({AppDirs? dirsOverride, List<BookSource>? initial})
-    : _dirsOverride = dirsOverride {
+  SourceStore({this._dirsOverride, List<BookSource>? initial}) {
     if (initial != null) _sources.addAll(initial);
   }
 

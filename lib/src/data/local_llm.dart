@@ -56,11 +56,17 @@ class LocalModelSpec {
       : '${megabytes.toStringAsFixed(0)} MB';
 }
 
-/// 内置模型目录。
+/// 可选下载的模型目录。
 ///
-/// 只放一个「够小、够快、手机上跑得动」的档位：
-/// Qwen2.5-0.5B-Instruct 的 q8 量化版（521 MB，Apache-2.0，支持中文）。
-/// 引擎本身与模型无关，想换成 1.5B / 3B 只需在这里加一条。
+/// 为什么是一个「目录」而不是一档写死：手机差异太大，一档模型没法同时讨好
+/// 千元机和旗舰机。所以模型不进安装包（最小的也 521 MB，最大的 3 GB），
+/// 这里只登记「能下哪些」，设置页让用户按内存和耐心自己挑、自己下。
+/// 三档 Qwen2.5 是同家族，参数量越大回答越完整、也越吃内存与速度；
+/// DeepSeek-R1-Distill 会先把思考过程吐出来，给想看得见推理的人。
+///
+/// 顺序 = 设置页的展示顺序，第一条是最轻的默认档。
+/// 每个模型给三个镜像：modelscope 国内直连最稳，后两个是备用，
+/// [LocalModelManager] 下载失败会自动按顺位换下一个。
 const List<LocalModelSpec> localModelCatalog = [
   LocalModelSpec(
     id: 'qwen2.5-0.5b-instruct-q8',
@@ -76,6 +82,48 @@ const List<LocalModelSpec> localModelCatalog = [
       'https://modelscope.cn/models/litert-community/Qwen2.5-0.5B-Instruct/resolve/master/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
       'https://hf-mirror.com/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
       'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    ],
+  ),
+  LocalModelSpec(
+    id: 'qwen2.5-1.5b-instruct-q8',
+    name: 'Qwen2.5-1.5B-Instruct',
+    params: '1.5B',
+    license: 'Apache-2.0',
+    bytes: 1597913616,
+    fileName: 'qwen2.5-1.5b-instruct-q8.task',
+    summary: '约 1.5 GB，内存约 2 GB；回答更完整，适合写大纲和长问答。',
+    mirrors: [
+      'https://modelscope.cn/models/litert-community/Qwen2.5-1.5B-Instruct/resolve/master/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+      'https://hf-mirror.com/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+      'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    ],
+  ),
+  LocalModelSpec(
+    id: 'qwen2.5-3b-instruct-q8',
+    name: 'Qwen2.5-3B-Instruct',
+    params: '3B',
+    license: 'Apache-2.0',
+    bytes: 3202099100,
+    fileName: 'qwen2.5-3b-instruct-q8.task',
+    summary: '约 3 GB，内存约 5 GB；本机推理明显变慢，只推荐高配机上尝鲜。',
+    mirrors: [
+      'https://modelscope.cn/models/litert-community/Qwen2.5-3B-Instruct/resolve/master/Qwen2.5-3B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+      'https://hf-mirror.com/litert-community/Qwen2.5-3B-Instruct/resolve/main/Qwen2.5-3B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+      'https://huggingface.co/litert-community/Qwen2.5-3B-Instruct/resolve/main/Qwen2.5-3B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    ],
+  ),
+  LocalModelSpec(
+    id: 'deepseek-r1-distill-qwen-1.5b-q8',
+    name: 'DeepSeek-R1-Distill-Qwen-1.5B',
+    params: '1.5B',
+    license: 'MIT',
+    bytes: 1861094737,
+    fileName: 'deepseek-r1-distill-qwen-1.5b-q8.task',
+    summary: '约 1.7 GB，会先输出思考过程；想了解推理过程可以选它。',
+    mirrors: [
+      'https://modelscope.cn/models/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/master/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
+      'https://hf-mirror.com/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
+      'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
     ],
   ),
 ];
@@ -247,12 +295,10 @@ class LocalModelManager extends ChangeNotifier {
   LocalModelManager({
     AppDirs? dirs,
     http.Client? client,
-    bool? supportedOverride,
-    LocalModelSpec? specOverride,
+    this._supportedOverride,
+    this._specOverride,
   }) : _dirsOverride = dirs,
-       _client = client ?? http.Client(),
-       _supportedOverride = supportedOverride,
-       _specOverride = specOverride {
+       _client = client ?? http.Client() {
     if (supported) unawaited(refresh());
   }
 
@@ -278,7 +324,7 @@ class LocalModelManager extends ChangeNotifier {
   Future<void>? _downloading;
   Future<void>? _loading;
 
-  /// 当前选中的模型（目前目录里只有一个）。
+  /// 当前选中的模型；目录里查不到时回落到第一档，UI 永远有东西可显示。
   LocalModelSpec get spec {
     if (_specOverride != null) return _specOverride;
     final id = _selectedId;
@@ -442,9 +488,8 @@ class LocalModelManager extends ChangeNotifier {
           );
         }
         if (response.statusCode == 206) {
-          final range = RegExp(
-            r'^bytes (\d+)-(\d+)/(\d+)$',
-          ).firstMatch(response.headers['content-range'] ?? '');
+          final range = RegExp(r'^bytes (\d+)-(\d+)/(\d+)$')
+              .firstMatch(response.headers['content-range'] ?? '');
           if (range == null ||
               int.parse(range[1]!) != offset ||
               int.parse(range[3]!) != spec.bytes) {

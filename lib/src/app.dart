@@ -1,5 +1,7 @@
 import 'data/persistence.dart';
+
 import 'package:flutter/material.dart';
+
 import 'data/book_store.dart';
 import 'data/pet_guide.dart';
 import 'data/pet_store.dart';
@@ -71,9 +73,14 @@ class SakuraApp extends StatelessWidget {
                           valueListenable: kAiChatActive,
                           builder: (context, chatting, _) => chatting
                               ? const SizedBox.shrink()
-                              : PetOverlay(
-                                  pet: petStore,
-                                  hostReady: kPetHostReady,
+                              : AnimatedBuilder(
+                                  animation: petStore,
+                                  builder: (_, _) => petStore.petHidden
+                                      ? const SizedBox.shrink()
+                                      : PetOverlay(
+                                          pet: petStore,
+                                          hostReady: kPetHostReady,
+                                        ),
                                 ),
                         );
                       },
@@ -89,11 +96,16 @@ class SakuraApp extends StatelessWidget {
                       onSeen: () => prefs.setGuideSeen(true),
                     ),
                     // Screen-lock easter eggs are no longer part of reading.
-                    ValueListenableBuilder<Set<String>>(
-                      valueListenable: persistenceFailures,
-                      builder: (context, failures, _) => failures.isEmpty
+                    AnimatedBuilder(
+                      animation: Listenable.merge([
+                        persistenceFailures,
+                        restoredDataAwaitingRestart,
+                      ]),
+                      builder: (context, _) =>
+                          persistenceFailures.value.isEmpty &&
+                              !restoredDataAwaitingRestart.value
                           ? const SizedBox.shrink()
-                          : const Positioned(
+                          : Positioned(
                               top: 0,
                               left: 0,
                               right: 0,
@@ -103,7 +115,9 @@ class SakuraApp extends StatelessWidget {
                                   child: Padding(
                                     padding: EdgeInsets.all(10),
                                     child: Text(
-                                      '部分数据尚未保存，请检查存储空间后重试。读取失败的原文件已保留。',
+                                      restoredDataAwaitingRestart.value
+                                          ? '备份已恢复，请关闭并重新打开应用后继续使用。'
+                                          : '部分数据尚未保存，请检查存储空间后重试。读取失败的原文件已保留。',
                                       style: TextStyle(
                                         color: Color(0xFF3E2723),
                                         fontSize: 13,

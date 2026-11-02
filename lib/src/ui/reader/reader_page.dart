@@ -1,5 +1,9 @@
 import 'epub_document_page.dart';
+
 import 'dart:async';
+
+import 'package:flutter/foundation.dart' show compute;
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -14,6 +18,9 @@ import '../../data/offline_downloader.dart';
 import '../../data/pet_store.dart';
 import '../../data/prefs.dart';
 import '../../data/stats_store.dart';
+import '../../data/tts_role.dart';
+import '../widgets/glass_bar.dart';
+import '../../data/xray.dart';
 import '../../platform/native_bridge.dart';
 import '../../platform/tts_service.dart';
 import '../../platform/url_launcher.dart';
@@ -67,6 +74,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   final Map<int, String> _rawTextCache = {};
   final Map<String, String> _processedCache = {};
   final Set<String> _preloading = {};
+
+  // ---- 人物（X-Ray）：从正文里识别出人名，支持正文高亮与一键跳转 ----
+  XrayIndex? _xray;
+  bool _xrayLoading = false;
+  String? _xrayError;
+  final ValueNotifier<int> _xrayRev = ValueNotifier<int>(0);
 
   // ---- 跨章连页（翻越章界时无缝衔接） ----
   List<_FlowPage> _flow = [];
@@ -162,6 +175,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _tts.onFinished = null;
       unawaited(_tts.stop());
     }
+    _xrayRev.dispose();
     PetStore.shared?.setReaderActive(false);
     WidgetsBinding.instance.removeObserver(this);
     _saveProgress();
@@ -331,6 +345,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _afterPageChanged();
         unawaited(_preloadChapter(_chapterIndex + 1));
         unawaited(_preloadChapter(_chapterIndex - 1));
+      }
+      // 后台把全书人名扫一遍（只做一次；结果用于正文高亮与「人物」面板）
+      if (_xray == null && !_xrayLoading && _xrayError == null) {
+        unawaited(_ensureXray());
       }
     } catch (e) {
       if (!mounted) return;
@@ -1114,6 +1132,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (mode == PageTurnMode.scroll) {
       reader = _ScrollReader(
         key: _scrollKey,
+        namePattern: widget.prefs.xrayHighlight ? _xray?.pattern : null,
+        nameColor: Theme.of(context).colorScheme.primary,
         chapters: _scrollChapters,
         style: _textStyle,
         marginH: _effectiveMarginH,
@@ -1166,6 +1186,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       // 阅读 3.0 一样覆盖到屏幕最左 / 最右边缘，两侧不留静止的空白缝。
       reader = _PagedReader(
         key: _pagerKey,
+        namePattern: widget.prefs.xrayHighlight ? _xray?.pattern : null,
+        nameColor: Theme.of(context).colorScheme.primary,
         pages: _flow,
         style: _textStyle,
         backdrop: bg.color,
@@ -1338,6 +1360,27 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
+  /// 顶栏 / 底栏容器：普通模式是纯色圆角，磨砂模式加一层实时模糊。
+  ///
+  /// 用户反馈「调来调去都没有磨砂」——以前只有半透明蒙层，没有真模糊。
+  /// 实时模糊每帧要采样一次背景，低端机会掉帧，所以做成设置里的开关。
+  Widget _glassBar({
+    required Widget child,
+    required Color tint,
+    required BorderRadius radius,
+    bool dark = false,
+    List<BoxShadow>? shadow,
+  }) {
+    return GlassBar(
+      frosted: widget.prefs.frostedGlass,
+      tint: tint,
+      radius: radius,
+      dark: dark,
+      shadow: shadow,
+      child: child,
+    );
+  }
+
   Widget _buildTopBar(ReaderBg bg) {
     final book = _book;
     final dark =
@@ -1350,20 +1393,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       top: _barsVisible ? 0 : -140,
       child: IgnorePointer(
         ignoring: !_barsVisible,
-        child: Container(
-          decoration: BoxDecoration(
-            color: bg.color,
-            borderRadius: const BorderRadius.vertical(
-              bottom: Radius.circular(18),
+        child: _glassBar(
+          tint: bg.color,
+          radius: const BorderRadius.vertical(bottom: Radius.circular(18)),
+          dark: dark,
+          shadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: dark ? .30 : .10),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: dark ? .30 : .10),
-                blurRadius: 12,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
+          ],
           child: SafeArea(
             bottom: false,
             child: Padding(
@@ -1431,6 +1471,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                             ),
                       ],
                     ),
+                  ),
+                  IconButton(
+                    onPressed: _showXraySheet,
+                    icon: Icon(
+                      Icons.groups_2_outlined,
+                      color: dark ? Colors.white : Colors.black87,
+                    ),
+                    tooltip: '人物',
                   ),
                   IconButton(
                     onPressed: _showChapterSheet,
@@ -1503,11 +1551,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       bottom: _barsVisible ? 0 : -230,
       child: IgnorePointer(
         ignoring: !_barsVisible,
-        child: Container(
-          decoration: const BoxDecoration(
-            color: Colors.black87,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
+        child: _glassBar(
+          tint: Colors.black87,
+          radius: const BorderRadius.vertical(top: Radius.circular(24)),
+          dark: true,
           child: SafeArea(
             top: false,
             child: Padding(
@@ -1657,6 +1704,189 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
+  // ---------- 人物（X-Ray） ----------
+
+  /// 认出本书里的人名（本地书只扫描一次，结果缓存到 [_xray]）。
+  ///
+  /// 只处理本地书：在线书逐章都要发请求，扫一遍太慢，也容易触发站点风控。
+  Future<void> _ensureXray() async {
+    if (_xray != null || _xrayLoading) return;
+    final book = _book;
+    final content = _content;
+    if (book == null || content == null) return;
+    if (book.format == BookFormat.online) {
+      if (!mounted) return;
+      setState(() => _xrayError = '在线书暂不支持人物识别');
+      _xrayRev.value++;
+      return;
+    }
+    setState(() {
+      _xrayLoading = true;
+      _xrayError = null;
+    });
+    try {
+      // 只读前 120 章 / 40 万字：够认出主要人物，又不会卡住打开阅读页
+      final maxChapters = book.chapterCount < 120 ? book.chapterCount : 120;
+      final texts = <String>[];
+      var total = 0;
+      for (var i = 0; i < maxChapters; i++) {
+        if (total >= 400000) break;
+        String raw;
+        try {
+          raw = _rawTextCache[i] ?? await content.chapterText(i);
+        } catch (_) {
+          continue;
+        }
+        final text = _processText(i, raw);
+        texts.add(text);
+        total += text.length;
+      }
+      final index = texts.isEmpty
+          ? const XrayIndex(<XrayEntity>[], null)
+          : await compute(buildXrayIndex, texts);
+      if (!mounted) return;
+      setState(() {
+        _xray = index;
+        _xrayLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _xrayLoading = false;
+        _xrayError = '人物识别失败：$e';
+      });
+    }
+    _xrayRev.value++;
+  }
+
+  void _showXraySheet() {
+    if (_xray == null && !_xrayLoading) unawaited(_ensureXray());
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetContext).height * .68,
+            child: AnimatedBuilder(
+              animation: Listenable.merge(<Listenable>[widget.prefs, _xrayRev]),
+              builder: (context, _) {
+                final entities = _xray?.ranked ?? const <XrayEntity>[];
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 14, 8, 6),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.groups_2_outlined,
+                            size: 20,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '人物',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onSurface,
+                            ),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            onPressed: () => Navigator.of(sheetContext).pop(),
+                            icon: const Icon(Icons.close_rounded, size: 20),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 14, 6),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _xrayLoading
+                                  ? '正在从正文里找人名…'
+                                  : (_xrayError ??
+                                        '在本书里认出 ${entities.length} 个人名'),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '正文高亮',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            height: 30,
+                            width: 44,
+                            child: FittedBox(
+                              fit: BoxFit.contain,
+                              child: Switch(
+                                value: widget.prefs.xrayHighlight,
+                                onChanged: (v) {
+                                  widget.prefs.setXrayHighlight(v);
+                                  setState(() {});
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: _XrayPanelList(
+                        entities: entities,
+                        loading: _xrayLoading,
+                        error: _xrayError,
+                        onSelect: (e) {
+                          Navigator.of(sheetContext).pop();
+                          _openXrayEntity(e);
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 人名详情：按章节列出这个人出现过的所有位置（类似 Kindle X-Ray 的聚合视图）。
+  void _openXrayEntity(XrayEntity e) {
+    final book = _book;
+    final content = _content;
+    if (book == null || content == null) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => _XrayEntitySheet(
+        entity: e,
+        all: _xray?.entities ?? const <XrayEntity>[],
+        book: book,
+        loadText: (chapter) async =>
+            _rawTextCache[chapter] ?? await content.chapterText(chapter),
+        prepare: _processText,
+        onJump: (chapter, offset) {
+          Navigator.of(sheetContext).pop();
+          unawaited(_goToChapter(chapter, offset));
+        },
+      ),
+    );
+  }
+
   // ---------- 朗读（TTS） ----------
 
   /// 从当前位置开始朗读本章。
@@ -1668,6 +1898,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     // 应用用户在设置里选定的朗读引擎（空 = 系统默认）。
     // 用户反馈：一加自带引擎不会被系统选为默认 → 必须先指定再初始化。
     await _tts.setPreferredEngine(widget.prefs.ttsEngine);
+    // 用户反馈：「不能自己选择男声和女声朗读」——把设置里选的音色带上。
+    if (widget.prefs.ttsVoice.isNotEmpty) {
+      await _tts.setPreferredVoice(widget.prefs.ttsVoice);
+    }
     if (!mounted) return;
     // 用「当前阅读位置」作为朗读起点
     final startOffset = _readingOffset;
@@ -1695,6 +1929,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       return;
     }
 
+    // 先按设置页选的语音包 / 说话人配置引擎（内置超文或下载的包）
+    await _tts.setVoicePack(
+      widget.prefs.ttsVoicePack,
+      widget.prefs.ttsVoiceSid,
+    );
+
     // 朗读进度回调：自动跟随 + 章节末尾续播
     _tts.onParagraph = _onTtsParagraph;
     _tts.onFinished = _onTtsChapterFinished;
@@ -1703,7 +1943,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _ttsParagraphs.map((p) => p.text).toList(),
       from: from,
       rate: widget.prefs.ttsRate,
-      pitch: widget.prefs.ttsPitch,
+      pitch: _ttsPitch(),
+      pitches: _ttsRolePitches(),
     );
   }
 
@@ -1716,6 +1957,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _scrollKey.currentState?.scrollToOffset(_chapterIndex, offset);
     } else {
       final page = _pageForOffset(_pages, offset);
+      // 只改 _pageIndex 不会动 PageView（它只在 initialPage 里读一次），
+      // 所以这里直接驱动翻页 + 同步页码状态。
+      _pagerKey.currentState?.jumpToIndex(_flowChapterStart + page);
       if (page != _pageIndex) {
         setState(() => _pageIndex = page);
       }
@@ -1752,7 +1996,32 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     await _tts.start(
       _ttsParagraphs.map((p) => p.text).toList(),
       rate: widget.prefs.ttsRate,
-      pitch: widget.prefs.ttsPitch,
+      pitch: _ttsPitch(),
+      pitches: _ttsRolePitches(),
+    );
+  }
+
+  /// 实际朗读用的基础音调（用户滑杆值）。
+  ///
+  /// 真正的男女声靠「语音包 / 说话人」实现（见设置页），这里只是微调。
+  double _ttsPitch() => widget.prefs.ttsPitch.clamp(0.5, 2.0);
+
+  /// AI 分角色朗读：按「对白 / 旁白 + 说话人」给每段算一个音高。
+  ///
+  /// 用户反馈「番茄那种自动分角色阅读支持吗」——这里用本地规则（引号、
+  /// 「人名：」前缀 + X-Ray 已认出的人名）区分角色，不联网、不花 token。
+  /// 内置离线语音不支持音调，所以那种情况下直接返回 null（不启用）。
+  List<double>? _ttsRolePitches() {
+    if (!widget.prefs.ttsRolePlay) return null;
+    if (_ttsParagraphs.isEmpty) return null;
+    final names = <String>[
+      for (final e in _xray?.entities ?? const <XrayEntity>[]) e.name,
+    ];
+    if (names.isEmpty) return null;
+    return TtsRolePlanner.planPitches(
+      _ttsParagraphs.map((p) => p.text).toList(),
+      names: names,
+      base: _ttsPitch(),
     );
   }
 
@@ -1765,7 +2034,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       } else {
         await _tts.resume(
           rate: widget.prefs.ttsRate,
-          pitch: widget.prefs.ttsPitch,
+          pitch: _ttsPitch(),
+          pitches: _ttsRolePitches(),
         );
       }
     }
@@ -1826,10 +2096,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ),
                     Expanded(
                       child: Slider(
-                        value: widget.prefs.ttsRate.clamp(0.5, 2.0),
+                        value: widget.prefs.ttsRate.clamp(0.5, 3.0),
                         min: 0.5,
-                        max: 2.0,
-                        divisions: 15,
+                        max: 3.0,
+                        divisions: 25,
                         label: '${widget.prefs.ttsRate.toStringAsFixed(1)}x',
                         onChanged: (v) async {
                           widget.prefs.setTtsRate(v);
@@ -1880,6 +2150,31 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const SizedBox(
+                      width: 52,
+                      child: Text('音色', style: TextStyle(fontSize: 12.5)),
+                    ),
+                    for (final v in const [
+                      ('女声', 1.15),
+                      ('原声', 1.0),
+                      ('男声', .85),
+                    ])
+                      ChoiceChip(
+                        label: Text(v.$1),
+                        visualDensity: VisualDensity.compact,
+                        selected: (widget.prefs.ttsPitch - v.$2).abs() < .03,
+                        onSelected: (_) {
+                          widget.prefs.setTtsPitch(v.$2);
+                          _tts.setPitch(v.$2);
+                        },
+                      ),
                   ],
                 ),
                 SwitchListTile(
@@ -2207,11 +2502,623 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
 // ==================== 翻页视图 ====================
 
+/// 某个人的「聚合查询」视图：按章节列出每一次出现，点一行跳到那一处。
+/// 人物面板列表。名字多时给一个筛选框，按本名或别名都能搜到。
+class _XrayPanelList extends StatefulWidget {
+  const _XrayPanelList({
+    required this.entities,
+    required this.loading,
+    required this.error,
+    required this.onSelect,
+  });
+
+  final List<XrayEntity> entities;
+  final bool loading;
+  final String? error;
+  final ValueChanged<XrayEntity> onSelect;
+
+  @override
+  State<_XrayPanelList> createState() => _XrayPanelListState();
+}
+
+class _XrayPanelListState extends State<_XrayPanelList> {
+  final TextEditingController _query = TextEditingController();
+  String _keyword = '';
+
+  @override
+  void dispose() {
+    _copiedTimer?.cancel();
+    _query.dispose();
+    super.dispose();
+  }
+
+  XraySortOrder _order = XraySortOrder.count;
+
+  /// 刚复制过人物表：按钮临时变成对勾，避免弹窗被底部面板挡住。
+  bool _copied = false;
+  Timer? _copiedTimer;
+
+  List<XrayEntity> get _filtered =>
+      rankXrayEntities(filterXrayEntities(widget.entities, _keyword), _order);
+
+  Future<void> _copyTable() async {
+    await Clipboard.setData(ClipboardData(text: formatXrayTable(_filtered)));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _copiedTimer?.cancel();
+    _copiedTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  Widget _sortChip(String label, XraySortOrder order) {
+    final scheme = Theme.of(context).colorScheme;
+    return ChoiceChip(
+      label: Text(label, style: const TextStyle(fontSize: 11.5)),
+      selected: _order == order,
+      visualDensity: VisualDensity.compact,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      selectedColor: scheme.primary.withValues(alpha: .18),
+      onSelected: (_) => setState(() => _order = order),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (widget.loading && widget.entities.isEmpty) {
+      return const Center(
+        child: SizedBox(
+          width: 26,
+          height: 26,
+          child: CircularProgressIndicator(strokeWidth: 2.4),
+        ),
+      );
+    }
+    if (widget.entities.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            widget.error ?? '还没有认出人名\n对话少或译名格式特殊的书，可能识别不出',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+          ),
+        ),
+      );
+    }
+
+    final list = _filtered;
+    return Column(
+      children: [
+        if (widget.entities.length > 6)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: TextField(
+              controller: _query,
+              onChanged: (v) => setState(() => _keyword = v),
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: '搜索人名 / 别名',
+                hintStyle: TextStyle(
+                  fontSize: 13,
+                  color: scheme.onSurfaceVariant,
+                ),
+                prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 36,
+                  minHeight: 36,
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                filled: true,
+                fillColor: scheme.surfaceContainerHighest.withValues(
+                  alpha: .35,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+        if (widget.entities.length > 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 8, 0),
+            child: Row(
+              children: [
+                _sortChip('按出场次数', XraySortOrder.count),
+                const SizedBox(width: 8),
+                _sortChip('按首次出场', XraySortOrder.firstAppear),
+                const Spacer(),
+                if (_copied)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Text(
+                      '人物表已复制',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                IconButton(
+                  icon: Icon(
+                    _copied
+                        ? Icons.check_circle_rounded
+                        : Icons.copy_all_rounded,
+                    size: 18,
+                    color: _copied
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  tooltip: '复制人物表',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _copyTable,
+                ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: list.isEmpty
+              ? Center(
+                  child: Text(
+                    '没有匹配的人名',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  itemCount: list.length,
+                  separatorBuilder: (_, _) =>
+                      const Divider(height: 1, indent: 68),
+                  itemBuilder: (context, i) {
+                    final e = list[i];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        radius: 17,
+                        backgroundColor: scheme.primary.withValues(alpha: .12),
+                        child: Text(
+                          e.name.substring(0, 1),
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.primary,
+                          ),
+                        ),
+                      ),
+                      title: Text(e.name, style: const TextStyle(fontSize: 15)),
+                      subtitle: Text(
+                        '出现 ${e.count} 处 · 跨 ${e.chapterSpread} 章'
+                        '${e.aliases.isEmpty ? '' : ' · 别名 ${e.aliases.join('、')}'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                      ),
+                      onTap: () => widget.onSelect(e),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _XrayEntitySheet extends StatefulWidget {
+  const _XrayEntitySheet({
+    required this.entity,
+    required this.all,
+    required this.book,
+    required this.loadText,
+    required this.prepare,
+    required this.onJump,
+  });
+
+  final XrayEntity entity;
+
+  /// 全书人物（用来算「常同场」的同伴）。
+  final List<XrayEntity> all;
+
+  final Book book;
+
+  /// 读取某章原始正文。
+  final Future<String> Function(int chapter) loadText;
+
+  /// 原始正文 → 与识别人名时完全一致的文本（清洗 + 排版规则）。
+  final String Function(int chapter, String raw) prepare;
+
+  final void Function(int chapter, int offset) onJump;
+
+  @override
+  State<_XrayEntitySheet> createState() => _XrayEntitySheetState();
+}
+
+class _XrayEntitySheetState extends State<_XrayEntitySheet> {
+  /// 每章切好的上下文片段（章节号 → 该章的片段列表）。
+  final Map<int, List<_XraySnippet>> _chapters = <int, List<_XraySnippet>>{};
+  bool _loading = true;
+
+  /// 当前看的人（点同伴头像可以在同一张面板里切过去）。
+  late XrayEntity _entity = widget.entity;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  void _switchTo(XrayEntity e) {
+    if (e.name == _entity.name) return;
+    setState(() {
+      _entity = e;
+      _chapters.clear();
+      _loading = true;
+    });
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final mentions = _entity.mentions;
+    // 同一章只读一次正文，避免 100+ 章节反复解码
+    final byChapter = <int, List<int>>{};
+    for (final m in mentions) {
+      byChapter.putIfAbsent(m.chapter, () => <int>[]).add(m.offset);
+    }
+    for (final entry in byChapter.entries) {
+      String text;
+      try {
+        text = widget.prepare(entry.key, await widget.loadText(entry.key));
+      } catch (_) {
+        continue;
+      }
+      // 以「段落」为单位聚合：同一段里出现 5 次也只列 1 条，
+      // 这样列表读起来才像 X-Ray，而不是一屏重复句子。
+      final paraStarts = <int>[0];
+      for (var i = 0; i < text.length; i++) {
+        if (text.codeUnitAt(i) == 10) paraStarts.add(i + 1);
+      }
+      final byPara = <int, List<int>>{};
+      for (final offset in entry.value) {
+        if (offset < 0 || offset > text.length) continue;
+        var index = 0;
+        while (index + 1 < paraStarts.length &&
+            paraStarts[index + 1] <= offset) {
+          index++;
+        }
+        byPara.putIfAbsent(index, () => <int>[]).add(offset);
+      }
+      final list = <_XraySnippet>[];
+      for (final para in byPara.entries) {
+        final start = paraStarts[para.key];
+        final stop = para.key + 1 < paraStarts.length
+            ? paraStarts[para.key + 1]
+            : text.length;
+        var snippet = text
+            .substring(start, stop)
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim();
+        if (snippet.length > 150) {
+          // 超长段落截取人名周围的一段
+          final offsets = para.value..sort();
+          final center = offsets.first - start;
+          var from = center - 40;
+          if (from < 0) from = 0;
+          var to = from + 150;
+          if (to > snippet.length) {
+            to = snippet.length;
+            from = to - 150 < 0 ? 0 : to - 150;
+          }
+          snippet =
+              (from > 0 ? '…' : '') +
+              snippet.substring(from, to) +
+              (to < snippet.length ? '…' : '');
+        }
+        list.add(
+          _XraySnippet(
+            chapter: entry.key,
+            offset: para.value.first,
+            text: snippet,
+          ),
+        );
+      }
+      if (list.isNotEmpty) _chapters[entry.key] = list;
+    }
+    if (!mounted) return;
+    setState(() => _loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final chapters = _chapters.keys.toList()..sort();
+    final total = _chapters.values.fold<int>(0, (sum, l) => sum + l.length);
+    final companions = companionsOf(_entity, widget.all);
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * .75,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 8, 10),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: scheme.primary.withValues(alpha: .12),
+                    child: Text(
+                      _entity.name.substring(0, 1),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _entity.name,
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        Text(
+                          '共 $total 处 · 分布在 ${chapters.length} 章'
+                          '${_entity.aliases.isEmpty ? '' : ' · 也称 ${_entity.aliases.join('、')}'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            if (!_loading && _entity.mentions.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    ActionChip(
+                      avatar: const Icon(Icons.first_page_rounded, size: 15),
+                      label: Text(
+                        '首次 · 第 ${_entity.firstChapter + 1} 章',
+                        style: const TextStyle(fontSize: 11.5),
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => widget.onJump(
+                        _entity.firstChapter,
+                        _entity.firstOffset,
+                      ),
+                    ),
+                    for (final c in companions)
+                      ActionChip(
+                        avatar: const Icon(Icons.people_alt_rounded, size: 15),
+                        label: Text(
+                          '常同场 · ${c.entity.name}',
+                          style: const TextStyle(fontSize: 11.5),
+                        ),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _switchTo(c.entity),
+                      ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: _loading
+                  ? const Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2.2),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: chapters.length,
+                      itemBuilder: (context, index) {
+                        final chapter = chapters[index];
+                        final snippets = _chapters[chapter]!;
+                        final title = chapter < widget.book.chapters.length
+                            ? widget.book.chapters[chapter].title
+                            : '第 ${chapter + 1} 章';
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+                              child: Text(
+                                title,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: scheme.primary,
+                                ),
+                              ),
+                            ),
+                            for (final s in snippets)
+                              InkWell(
+                                onTap: () => widget.onJump(s.chapter, s.offset),
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    20,
+                                    6,
+                                    20,
+                                    6,
+                                  ),
+                                  child: _XraySnippetText(
+                                    text: s.text,
+                                    names: _entity.allNames,
+                                    color: scheme.primary,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      height: 1.5,
+                                      color: scheme.onSurface.withValues(
+                                        alpha: .86,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 一条出现位置。
+class _XraySnippet {
+  const _XraySnippet({
+    required this.chapter,
+    required this.offset,
+    required this.text,
+  });
+
+  final int chapter;
+  final int offset;
+  final String text;
+}
+
+/// 片段里的名字加粗高亮。
+class _XraySnippetText extends StatelessWidget {
+  const _XraySnippetText({
+    required this.text,
+    required this.names,
+    required this.color,
+    required this.style,
+  });
+
+  final String text;
+
+  /// 本名 + 别名：任一种写法都算命中（长名优先，避免「西蒙」抢先吃掉「西蒙先生」）。
+  final List<String> names;
+  final Color color;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final ordered = names.toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    final spans = <TextSpan>[];
+    var from = 0;
+    while (from < text.length) {
+      var hitAt = -1;
+      var hitName = '';
+      for (final n in ordered) {
+        if (n.isEmpty) continue;
+        final at = text.indexOf(n, from);
+        if (at < 0) continue;
+        if (hitAt < 0 || at < hitAt) {
+          hitAt = at;
+          hitName = n;
+        }
+      }
+      if (hitAt < 0) {
+        spans.add(TextSpan(text: text.substring(from)));
+        break;
+      }
+      if (hitAt > from) {
+        spans.add(TextSpan(text: text.substring(from, hitAt)));
+      }
+      spans.add(
+        TextSpan(
+          text: hitName,
+          style: TextStyle(color: color, fontWeight: FontWeight.w700),
+        ),
+      );
+      from = hitAt + hitName.length;
+    }
+    return Text.rich(TextSpan(style: style, children: spans));
+  }
+}
+
+/// 正文里的「人名高亮」：把命中的名字换成主题色加粗，其余文字保持不变。
+///
+/// 用 [Text.rich] 而不是 `.replaceAll` 拼富文本，是因为一段里可能
+/// 出现十几次人名，逐个 TextSpan 拼接最省事，也不影响换行排版。
+class _NameRichText extends StatelessWidget {
+  const _NameRichText({
+    required this.text,
+    required this.style,
+    required this.color,
+    this.pattern,
+    this.scaler,
+  });
+
+  final String text;
+  final TextStyle style;
+  final Color color;
+  final RegExp? pattern;
+  final TextScaler? scaler;
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = pattern?.allMatches(text).toList();
+    if (matches == null || matches.isEmpty) {
+      return Text(text, style: style, textScaler: scaler);
+    }
+    final spans = <TextSpan>[];
+    var last = 0;
+    for (final m in matches) {
+      if (m.start > last) {
+        spans.add(TextSpan(text: text.substring(last, m.start)));
+      }
+      spans.add(
+        TextSpan(
+          text: m.group(0),
+          style: TextStyle(color: color, fontWeight: FontWeight.w600),
+        ),
+      );
+      last = m.end;
+    }
+    if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
+    return Text.rich(
+      TextSpan(style: style, children: spans),
+      textScaler: scaler,
+    );
+  }
+}
+
 class _PagedReader extends StatefulWidget {
   const _PagedReader({
     super.key,
     required this.pages,
     required this.style,
+    this.namePattern,
+    required this.nameColor,
     required this.backdrop,
     required this.marginH,
     required this.initialPage,
@@ -2227,6 +3134,12 @@ class _PagedReader extends StatefulWidget {
 
   final List<_FlowPage> pages;
   final TextStyle style;
+
+  /// 人名高亮正则（null = 不高亮）。
+  final RegExp? namePattern;
+
+  /// 人名高亮颜色。
+  final Color nameColor;
 
   /// 页面不透明底色（阅读背景色），保证覆盖 / 淡入动画不会透出下页文字。
   final Color backdrop;
@@ -2336,6 +3249,15 @@ class _PagedReaderState extends State<_PagedReader> {
     );
   }
 
+  /// 朗读自动跟随：无动画跳到指定页（页流索引）。
+  void jumpToIndex(int index) {
+    if (!_controller.hasClients) return;
+    final target = index.clamp(0, widget.pages.length - 1);
+    final current = (_controller.page ?? widget.initialPage.toDouble()).round();
+    if (target == current) return;
+    _controller.jumpToPage(target);
+  }
+
   void _onTapUp(TapUpDetails details, Size size) {
     final x = size.width <= 0 ? .5 : details.localPosition.dx / size.width;
     if (x < .3) {
@@ -2376,10 +3298,12 @@ class _PagedReaderState extends State<_PagedReader> {
                       widget.bottomReserve,
                     ),
                     child: SizedBox.expand(
-                      child: Text(
-                        pageText,
+                      child: _NameRichText(
+                        text: pageText,
                         style: widget.style,
-                        textScaler: TextScaler.noScaling,
+                        color: widget.nameColor,
+                        pattern: widget.namePattern,
+                        scaler: TextScaler.noScaling,
                       ),
                     ),
                   ),
@@ -2461,6 +3385,8 @@ class _ScrollReader extends StatefulWidget {
     super.key,
     required this.chapters,
     required this.style,
+    this.namePattern,
+    required this.nameColor,
     required this.marginH,
     required this.topReserve,
     required this.bottomReserve,
@@ -2481,6 +3407,12 @@ class _ScrollReader extends StatefulWidget {
   final List<_ScrollChapterText> chapters;
 
   final TextStyle style;
+
+  /// 人名高亮正则（null = 不高亮）。
+  final RegExp? namePattern;
+
+  /// 人名高亮颜色。
+  final Color nameColor;
   final double marginH;
   final double topReserve;
   final double bottomReserve;
@@ -2823,10 +3755,12 @@ class _ScrollReaderState extends State<_ScrollReader> {
             child: Padding(
               // 段间距可调（用户反馈：段与段之间的空隙太大/太小）
               padding: EdgeInsets.only(bottom: widget.paragraphGap),
-              child: Text(
-                paragraph,
+              child: _NameRichText(
+                text: paragraph,
                 style: widget.style,
-                textScaler: TextScaler.noScaling,
+                color: widget.nameColor,
+                pattern: widget.namePattern,
+                scaler: TextScaler.noScaling,
               ),
             ),
           );
@@ -2976,6 +3910,7 @@ class _ChapterListState extends State<_ChapterList> {
   static const double _sheetRatio = .62;
 
   final GlobalKey _currentKey = GlobalKey();
+  final TextEditingController _jumpCtrl = TextEditingController();
   ScrollController? _controller;
 
   @override
@@ -3000,42 +3935,110 @@ class _ChapterListState extends State<_ChapterList> {
   @override
   void dispose() {
     _controller?.dispose();
+    _jumpCtrl.dispose();
     super.dispose();
+  }
+
+  /// 目录跳转：输入章节号（1 起）直接滚过去。
+  void _jumpTo(String raw) {
+    final n = int.tryParse(raw.trim());
+    if (n == null || n < 1 || n > widget.book.chapterCount) return;
+    final ctrl = _controller;
+    if (ctrl == null) return;
+    var target = (n - 1) * _rowHeight.toDouble();
+    if (ctrl.hasClients && target > ctrl.position.maxScrollExtent) {
+      target = ctrl.position.maxScrollExtent;
+    }
+    ctrl.jumpTo(target);
+    FocusScope.of(context).unfocus();
+  }
+
+  Widget _jumpBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _jumpCtrl,
+              keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.go,
+              onSubmitted: _jumpTo,
+              style: const TextStyle(fontSize: 13),
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: '跳到第几章',
+                prefixIcon: Icon(Icons.numbers_rounded, size: 18),
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 10,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonal(
+            onPressed: () => _jumpTo(_jumpCtrl.text),
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+            ),
+            child: const Text('跳转', style: TextStyle(fontSize: 13)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final book = widget.book;
-    return ListView.builder(
+    final list = Scrollbar(
       controller: _controller,
-      itemExtent: _rowHeight,
-      itemCount: book.chapterCount,
-      itemBuilder: (context, index) {
-        final isCurrent = index == widget.currentIndex;
-        final chapter = book.chapters[index];
-        return ListTile(
-          key: isCurrent ? _currentKey : null,
-          dense: true,
-          visualDensity: VisualDensity.compact,
-          selected: isCurrent,
-          title: Text(
-            chapter.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 13.5,
-              fontWeight: isCurrent ? FontWeight.w900 : FontWeight.w500,
+      thumbVisibility: book.chapterCount > 30,
+      interactive: true,
+      thickness: 8,
+      radius: const Radius.circular(4),
+      child: ListView.builder(
+        controller: _controller,
+        itemExtent: _rowHeight,
+        itemCount: book.chapterCount,
+        itemBuilder: (context, index) {
+          final isCurrent = index == widget.currentIndex;
+          final chapter = book.chapters[index];
+          return ListTile(
+            key: isCurrent ? _currentKey : null,
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            selected: isCurrent,
+            title: Text(
+              chapter.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: isCurrent ? FontWeight.w900 : FontWeight.w500,
+              ),
             ),
-          ),
-          trailing: chapter.charCount > 0
-              ? Text(
-                  '${chapter.charCount} 字',
-                  style: const TextStyle(fontSize: 11),
-                )
-              : null,
-          onTap: () => widget.onTap(index),
-        );
-      },
+            trailing: chapter.charCount > 0
+                ? Text(
+                    '${chapter.charCount} 字',
+                    style: const TextStyle(fontSize: 11),
+                  )
+                : null,
+            onTap: () => widget.onTap(index),
+          );
+        },
+      ),
+    );
+    // 章节多的时候给一个「跳转」输入框（几千章的目录靠滑太痛苦）。
+    if (book.chapterCount < 60) return list;
+    return Column(
+      children: [
+        _jumpBar(),
+        Expanded(child: list),
+      ],
     );
   }
 }

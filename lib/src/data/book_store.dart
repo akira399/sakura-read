@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'persistence.dart';
 
 import 'package:flutter/foundation.dart';
@@ -26,7 +27,7 @@ class ImportResult {
 
 /// 书架数据：JSON 持久化 + 导入 + 阅读进度。
 class BookStore extends ChangeNotifier with ReliablePersistence {
-  BookStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
+  BookStore({this._dirsOverride});
 
   final AppDirs? _dirsOverride;
   final List<Book> _books = [];
@@ -169,6 +170,20 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     final trimmed = title.trim();
     if (trimmed.isEmpty || trimmed == b.title) return;
     b.title = trimmed;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 设置书籍分组（'' = 未分组）。
+  ///
+  /// 用户反馈：「书架里的书籍可以分组吗自定义分组」——分组只是书架上的
+  /// 归类标签，不动文件、不影响阅读进度。
+  void setGroup(String id, String group) {
+    final b = byId(id);
+    if (b == null) return;
+    final trimmed = group.trim();
+    if (b.group == trimmed) return;
+    b.group = trimmed;
     _saveSoon();
     notifyListeners();
   }

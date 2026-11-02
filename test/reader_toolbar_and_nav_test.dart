@@ -58,7 +58,9 @@ void main() {
       );
       // 跑过开屏动画
       await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 1600));
+      for (var i = 0; i < 100; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
 
       // 四个入口都在底栏
       expect(find.text('书架'), findsWidgets);

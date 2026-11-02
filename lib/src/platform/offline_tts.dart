@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
+import '../data/tts_voice_catalog.dart';
 import 'native_bridge.dart';
 
 /// 内置离线朗读引擎（sherpa-onnx + VITS「超文」中文模型）。
@@ -31,7 +32,7 @@ class OfflineTtsEngine {
   /// 设置页 / 阅读页里代表「内置离线语音」的引擎标识。
   static const String engineId = 'builtin:sakura';
 
-  /// 资源目录。
+  /// 资源目录（仅内置包「超文」用；其它语音包下载到 `files/tts/<id>/`）。
   static const String assetDir = 'assets/tts/chaowen';
 
   /// 需要释放到磁盘的文件（顺序无所谓）。
@@ -51,6 +52,10 @@ class OfflineTtsEngine {
   Completer<bool>? _preparing;
   String? _dir;
   int _seq = 0;
+
+  /// 当前生效的语音包目录与配置（切包 / 切音色时用）。
+  String? _activeDir;
+  TtsVoiceFiles? _activeFiles;
   final Map<int, Completer<Map<String, dynamic>>> _pending = {};
 
   /// 最近一次失败原因（设置页「测试朗读」用来给用户看）。
@@ -92,7 +97,8 @@ class OfflineTtsEngine {
     final completer = Completer<bool>();
     _preparing = completer;
     try {
-      final dir = await _ensureAssets();
+      // 选了下载的语音包就用它，否则释放 / 复用内置「超文」
+      final dir = _activeDir ?? await _ensureAssets();
       await _startIsolate(dir);
       completer.complete(true);
     } catch (e) {
@@ -152,15 +158,30 @@ class OfflineTtsEngine {
         pending?.complete(Map<String, dynamic>.from(message));
       }
     });
+    final files =
+        _activeFiles ??
+        const TtsVoiceFiles(
+          model: 'zh_CN-chaowen-medium.onnx',
+          lexicon: 'lexicon.txt',
+          tokens: 'tokens.txt',
+          ruleFsts: 'number.fst,date.fst,phone.fst',
+        );
+    final ruleFsts = files.ruleFsts
+        .split(',')
+        .where((n) => n.isNotEmpty)
+        .map((n) => '$dir/$n')
+        .join(',');
+    // 语音包切换 / 自定义模型出问题时，日志里能直接看到到底加载了哪个模型
+    debugPrint('[offline-tts] loading model: $dir/${files.model}');
     _isolate = await Isolate.spawn(
       _ttsIsolateMain,
       <Object>[
         rx.sendPort,
         <String, String>{
-          'model': '$dir/zh_CN-chaowen-medium.onnx',
-          'lexicon': '$dir/lexicon.txt',
-          'tokens': '$dir/tokens.txt',
-          'ruleFsts': '$dir/number.fst,$dir/date.fst,$dir/phone.fst',
+          'model': '$dir/${files.model}',
+          'lexicon': files.lexicon.isEmpty ? '' : '$dir/${files.lexicon}',
+          'tokens': '$dir/${files.tokens}',
+          'ruleFsts': ruleFsts,
         },
       ],
       debugName: 'sakura-offline-tts',
@@ -179,6 +200,36 @@ class OfflineTtsEngine {
     _starting = null;
   }
 
+  /// 回到内置「超文」语音包（用户删掉下载的包 / 切回内置时调用）。
+  Future<bool> resetToBundled() async {
+    if (_activeDir == null && _activeFiles == null) return prepare();
+    dispose();
+    return prepare();
+  }
+
+  /// 切换到某个语音包（目录 + 文件清单），必要时重启 isolate。
+  ///
+  /// 多说话人模型不需要重启，只要在 [synthesize] 时换 sid。
+  Future<bool> configureVoice({
+    required String dir,
+    required TtsVoiceFiles files,
+  }) async {
+    if (_tx != null && _activeDir == dir && _activeFiles != null) {
+      final same =
+          _activeFiles!.model == files.model &&
+          _activeFiles!.tokens == files.tokens &&
+          _activeFiles!.lexicon == files.lexicon &&
+          _activeFiles!.ruleFsts == files.ruleFsts;
+      if (same) return true;
+    }
+    dispose();
+    _dir = dir;
+    _activeDir = dir;
+    _activeFiles = files;
+    _starting = null;
+    return prepare();
+  }
+
   /// 合成一段文字到 [outPath]（WAV），返回是否成功。
   ///
   /// [speed] 与系统朗读的「语速」含义一致（1.0 = 正常）。
@@ -186,6 +237,7 @@ class OfflineTtsEngine {
     String text, {
     required String outPath,
     double speed = 1.0,
+    int sid = 0,
   }) async {
     if (text.trim().isEmpty) return false;
     if (!await prepare()) return false;
@@ -199,6 +251,7 @@ class OfflineTtsEngine {
       'text': text,
       'speed': speed,
       'path': outPath,
+      'sid': sid,
     });
     try {
       final result = await completer.future.timeout(
@@ -223,6 +276,9 @@ class OfflineTtsEngine {
 
   /// 释放 isolate（App 退出 / 换引擎时调用）。
   void dispose() {
+    _activeDir = null;
+    _activeFiles = null;
+    _dir = null;
     _pending.clear();
     _tx = null;
     _isolate?.kill(priority: Isolate.immediate);
@@ -275,7 +331,8 @@ Future<void> _ttsIsolateMain(List<Object> args) async {
     final speed = (message['speed'] as num?)?.toDouble() ?? 1.0;
     final path = message['path'] as String? ?? '';
     try {
-      final audio = tts.generate(text: text, sid: 0, speed: speed);
+      final sid = (message['sid'] as num?)?.toInt() ?? 0;
+      final audio = tts.generate(text: text, sid: sid, speed: speed);
       if (audio.samples.isEmpty || audio.sampleRate <= 0) {
         out.send(<String, Object>{
           'type': 'result',

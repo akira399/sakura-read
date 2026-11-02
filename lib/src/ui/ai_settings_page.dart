@@ -1,8 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../data/ai_service.dart';
 import '../data/local_llm.dart';
 import '../data/prefs.dart';
+import '../platform/native_bridge.dart';
 import 'widgets/cute.dart';
 
 /// AI 助手的运行方式与接口配置。
@@ -44,7 +48,11 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
   @override
   void initState() {
     super.initState();
-    localModels.selectedId = widget.prefs.aiLocalModelId;
+    // 目录里有多档模型，老设置里存的 id 可能已经不在目录里（或从没存过）：
+    // 这时候落到第一档（最轻的那档），否则单选列表会一个都不亮。
+    final saved = widget.prefs.aiLocalModelId;
+    final known = localModelCatalog.any((spec) => spec.id == saved);
+    localModels.selectedId = known ? saved : localModelCatalog.first.id;
   }
 
   @override
@@ -67,6 +75,11 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 卡片里换了模型：整页重建，让上面「运行方式」也显示新模型名。
+  void _onModelChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _test() async {
@@ -114,8 +127,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
       // 本地模式不校验接口；模型没下载也可以先保存，对话页会引导下载。
       widget.prefs.setAiUseLocalModel(true);
       widget.prefs.setAiLocalModelId(localModels.spec.id);
-      if (!await _flushSettings()) return;
-      if (!mounted) return;
+      if (!await _flushSettings() || !mounted) return;
       _toast('已切换为本地模型');
       Navigator.of(context).pop();
       return;
@@ -137,8 +149,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
       includeReading: _includeReading,
     );
     widget.prefs.setAiUseLocalModel(false);
-    if (!await _flushSettings()) return;
-    if (!mounted) return;
+    if (!await _flushSettings() || !mounted) return;
     _toast('已保存');
     Navigator.of(context).pop();
   }
@@ -164,7 +175,11 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
           _buildModeCard(context),
           const SizedBox(height: 14),
           if (_useLocal)
-            _LocalModelCard(prefs: widget.prefs, onToast: _toast)
+            _LocalModelCard(
+              prefs: widget.prefs,
+              onToast: _toast,
+              onSelectionChanged: _onModelChanged,
+            )
           else ...[
             SoftCard(
               child: Column(
@@ -381,7 +396,10 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             selected: _useLocal,
             icon: Icons.offline_bolt_outlined,
             title: '内置本地模型',
-            subtitle: '模型下载到手机后完全离线运行，不联网、不花钱',
+            subtitle: _useLocal
+                ? '${localModels.spec.name}（${localModels.spec.sizeLabel}）· '
+                      '完全离线，不联网、不花钱'
+                : '模型下载到手机后完全离线运行，不联网、不花钱',
             onTap: LocalModelManager.instance.supported
                 ? () => _setMode(true)
                 : null,
@@ -479,198 +497,401 @@ class _ModeTile extends StatelessWidget {
   }
 }
 
-/// 本地模型的下载 / 删除 / 状态卡片。
-class _LocalModelCard extends StatelessWidget {
-  const _LocalModelCard({required this.prefs, required this.onToast});
+/// 本地模型的「选一档 → 下载 → 删除」卡片。
+///
+/// 管理器（[LocalModelManager]）同一时间只跟踪「当前选中」那一档的进度，
+/// 所以「哪些档已经下载过」这里自己扫一遍 `<files>/models/`：
+/// 不然先下 1.5B、再切回 0.5B，列表会把后者显示成没下载。
+class _LocalModelCard extends StatefulWidget {
+  const _LocalModelCard({
+    required this.prefs,
+    required this.onToast,
+    required this.onSelectionChanged,
+  });
 
   final AppPrefs prefs;
   final void Function(String) onToast;
 
-  Future<void> _download(BuildContext context) async {
-    final manager = LocalModelManager.instance;
-    if (!manager.isDownloaded) {
-      onToast(
-        '开始下载 ${manager.spec.name}（${manager.spec.sizeLabel}），'
-        '请保持网络畅通',
-      );
-      await manager.download();
-      if (manager.phase == LocalModelPhase.error) {
-        onToast(manager.error ?? '下载失败');
-      } else {
-        onToast(manager.isDownloaded ? '模型下载完成' : '下载已暂停，进度已保留');
+  /// 选中项变了通知上层重建（上面「运行方式」要跟着显示模型名）。
+  final VoidCallback onSelectionChanged;
+
+  @override
+  State<_LocalModelCard> createState() => _LocalModelCardState();
+}
+
+class _LocalModelCardState extends State<_LocalModelCard> {
+  /// 按钮统一压扁一点，一行里塞得下状态文字 + 操作。
+  static const ButtonStyle _compactButton = ButtonStyle(
+    visualDensity: VisualDensity.compact,
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    minimumSize: WidgetStatePropertyAll(Size(0, 34)),
+    padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12)),
+    textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12.5)),
+  );
+
+  LocalModelManager get _manager => localModels;
+
+  /// 文件真实落地的模型 id（大小对得上才算）。
+  final Set<String> _downloaded = <String>{};
+  bool _scanning = false;
+
+  /// 正在删除某一档：管理器只会删「当前选中」，这里临时借一下选中项；
+  /// 借的过程不重建，免得单选按钮来回跳。
+  String? _busyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _manager.addListener(_handleManager);
+    // 管理器启动时核对的是目录第一档，这里对齐到真正选中的那一档。
+    if (!_manager.isDownloading && _manager.phase != LocalModelPhase.loading) {
+      unawaited(_manager.refresh());
+    }
+    unawaited(_scan());
+  }
+
+  @override
+  void dispose() {
+    _manager.removeListener(_handleManager);
+    super.dispose();
+  }
+
+  void _handleManager() {
+    if (!mounted || _busyId != null) return;
+    setState(() {});
+    // 下载 / 删除落盘后重扫一次，「已下载」标记跟着文件走。
+    if (_manager.phase == LocalModelPhase.downloaded ||
+        _manager.phase == LocalModelPhase.idle) {
+      unawaited(_scan());
+    }
+  }
+
+  Future<void> _scan() async {
+    if (_scanning) return;
+    _scanning = true;
+    try {
+      final dirs = await NativeBridge.appDirs();
+      final found = <String>{};
+      for (final spec in localModelCatalog) {
+        final path =
+            '${dirs.files}${Platform.pathSeparator}models'
+            '${Platform.pathSeparator}${spec.fileName}';
+        try {
+          final file = File(path);
+          // 只认完整的文件：半截下载（还有 .part）不算「已下载」。
+          if (await file.exists() && await file.length() == spec.bytes) {
+            found.add(spec.id);
+          }
+        } catch (_) {
+          // 单个文件读不到别影响其它档。
+        }
       }
+      if (!mounted) return;
+      setState(() {
+        _downloaded
+          ..clear()
+          ..addAll(found);
+      });
+    } finally {
+      _scanning = false;
+    }
+  }
+
+  LocalModelSpec? _specById(String? id) {
+    if (id == null) return null;
+    for (final spec in localModelCatalog) {
+      if (spec.id == id) return spec;
+    }
+    return null;
+  }
+
+  Future<void> _select(LocalModelSpec spec) async {
+    if (_busyId != null) return;
+    if (_manager.isDownloading) {
+      widget.onToast('等这次下载完再换模型，不然文件会乱');
       return;
     }
-    if (manager.isReady) return;
-    onToast('正在把模型加载到内存…');
-    final ok = await manager.ensureLoaded();
-    onToast(ok ? '模型已就绪' : (manager.error ?? '加载失败'));
+    if (_manager.spec.id == spec.id) return;
+    _manager.selectedId = spec.id;
+    widget.prefs.setAiLocalModelId(spec.id);
+    widget.onSelectionChanged();
+    await _manager.refresh();
+    if (!mounted) return;
+    widget.onToast('已切到 ${spec.name}，下次提问生效');
+  }
+
+  Future<void> _download(LocalModelSpec spec) async {
+    if (_busyId != null || _manager.isDownloading) return;
+    if (_manager.spec.id != spec.id) {
+      // 下载器只下「当前选中」那一档，所以先选中再下。
+      _manager.selectedId = spec.id;
+      widget.prefs.setAiLocalModelId(spec.id);
+      widget.onSelectionChanged();
+      await _manager.refresh();
+    }
+    widget.onToast('开始下载 ${spec.name}（${spec.sizeLabel}），请保持网络畅通');
+    await _manager.download();
+    await _scan();
+    if (!mounted) return;
+    if (_manager.phase == LocalModelPhase.error) {
+      widget.onToast(_manager.error ?? '下载失败');
+      return;
+    }
+    widget.onToast(
+      _manager.isDownloaded ? '${spec.name} 下载完成，下次提问会自动加载' : '下载已暂停，进度已保留',
+    );
+  }
+
+  Future<void> _delete(LocalModelSpec spec) async {
+    if (_busyId != null || _manager.isDownloading) return;
+    final previous = _manager.spec;
+    setState(() => _busyId = spec.id);
+    try {
+      // 管理器只会删「当前选中」那一档：临时选中，删完再切回去。
+      if (previous.id != spec.id) {
+        _manager.selectedId = spec.id;
+        await _manager.refresh();
+      }
+      await _manager.deleteModel();
+      if (previous.id != spec.id) {
+        _manager.selectedId = previous.id;
+        await _manager.refresh();
+      }
+      await _scan();
+    } finally {
+      if (mounted) {
+        setState(() => _busyId = null);
+        widget.onSelectionChanged();
+      }
+    }
+    if (!mounted) return;
+    widget.onToast('已删掉 ${spec.name}，腾出 ${spec.sizeLabel} 空间');
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final manager = LocalModelManager.instance;
-    return AnimatedBuilder(
-      animation: manager,
-      builder: (context, _) {
-        final spec = manager.spec;
-        final downloaded = manager.isDownloaded;
-        final percent = (manager.progress * 100)
-            .clamp(0, 100)
-            .toStringAsFixed(0);
-        final receivedMb = (manager.receivedBytes / (1024 * 1024))
-            .toStringAsFixed(1);
-        final totalMb = (manager.totalBytes / (1024 * 1024)).toStringAsFixed(0);
-
-        String status;
-        Color statusColor = scheme.onSurfaceVariant;
-        switch (manager.phase) {
-          case LocalModelPhase.downloading:
-            status = '正在下载 $percent% · $receivedMb/$totalMb MB';
-            statusColor = scheme.primary;
-          case LocalModelPhase.downloaded:
-            status = '已下载（${spec.sizeLabel}），可以开始对话';
-            statusColor = scheme.primary;
-          case LocalModelPhase.loading:
-            status = '正在加载到内存…首次约 10~30 秒';
-            statusColor = scheme.primary;
-          case LocalModelPhase.ready:
-            status = '已就绪，可以离线对话';
-            statusColor = scheme.primary;
-          case LocalModelPhase.error:
-            status = manager.error ?? '出错了';
-            statusColor = scheme.error;
-          case LocalModelPhase.idle:
-            status = '还没下载（${spec.sizeLabel}），下载一次长期可用';
-        }
-
-        return SoftCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SectionTitle(icon: Icons.smart_toy_outlined, title: '本地模型'),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      spec.name,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  _Tag(text: spec.params),
-                  const SizedBox(width: 6),
-                  _Tag(text: spec.license),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                spec.summary,
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.5,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 10),
-              if (manager.phase == LocalModelPhase.downloading) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: LinearProgressIndicator(
-                    value: manager.progress == 0 ? null : manager.progress,
-                    minHeight: 7,
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-              Row(
-                children: [
-                  Icon(
-                    downloaded
-                        ? Icons.check_circle_outline_rounded
-                        : Icons.download_outlined,
-                    size: 15,
-                    color: statusColor,
-                  ),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      status,
-                      style: TextStyle(fontSize: 12, color: statusColor),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  if (!downloaded)
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: manager.isDownloading
-                            ? manager.pauseDownload
-                            : () => _download(context),
-                        icon: const Icon(Icons.download_rounded, size: 18),
-                        label: Text(
-                          manager.isDownloading ? '暂停下载' : '下载 / 继续下载',
-                        ),
-                      ),
-                    )
-                  else ...[
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: manager.isDownloading
-                            ? null
-                            : () async {
-                                await manager.deleteModel();
-                                onToast('模型文件已删除');
-                              },
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          size: 18,
-                        ),
-                        label: const Text('删除模型'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed:
-                            manager.isReady ||
-                                manager.phase == LocalModelPhase.loading
-                            ? manager.pauseDownload
-                            : () => _download(context),
-                        icon: const Icon(Icons.memory_rounded, size: 18),
-                        label: Text(
-                          manager.isReady
-                              ? '已就绪'
-                              : (manager.phase == LocalModelPhase.loading
-                                    ? '加载中…'
-                                    : '提前加载'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '模型由 MediaPipe LLM Inference（Apache-2.0）在端侧运行；'
-                '文件保存在应用私有目录，卸载 App 会一并清除。',
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.45,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ],
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle(icon: Icons.smart_toy_outlined, title: '模型选择'),
+          const SizedBox(height: 8),
+          Text(
+            '模型不打进安装包（最小的也有 500 MB）：先选一档，再点「下载」存到手机上，'
+            '下完就能离线聊，换模型不用重装 App。',
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.5,
+              color: scheme.onSurfaceVariant,
+            ),
           ),
-        );
-      },
+          const SizedBox(height: 10),
+          RadioGroup<String>(
+            groupValue: _manager.spec.id,
+            onChanged: (id) {
+              final spec = _specById(id);
+              if (spec != null) unawaited(_select(spec));
+            },
+            child: Column(
+              children: [
+                for (final spec in localModelCatalog) _tile(context, spec),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '正在回答时换模型不影响这一条，下次提问才会用新模型。'
+            '模型由 MediaPipe LLM Inference（Apache-2.0）在端侧运行，'
+            '文件放在应用私有目录，卸载 App 会一起清掉。',
+            style: TextStyle(
+              fontSize: 10.5,
+              height: 1.5,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tile(BuildContext context, LocalModelSpec spec) {
+    final scheme = Theme.of(context).colorScheme;
+    final manager = _manager;
+    final selected = manager.spec.id == spec.id;
+    final downloading = selected && manager.isDownloading;
+    final busy = _busyId != null;
+    final downloaded =
+        _downloaded.contains(spec.id) || (selected && manager.isDownloaded);
+
+    final String status;
+    final Color statusColor;
+    if (downloading) {
+      final percent = (manager.progress * 100).clamp(0, 100).toStringAsFixed(0);
+      final received = (manager.receivedBytes / (1024 * 1024)).toStringAsFixed(
+        0,
+      );
+      final total = (manager.totalBytes / (1024 * 1024)).toStringAsFixed(0);
+      status = '正在下载 $percent% · $received/$total MB';
+      statusColor = scheme.primary;
+    } else if (selected && manager.phase == LocalModelPhase.loading) {
+      status = '正在加载到内存…首次要 10~30 秒';
+      statusColor = scheme.primary;
+    } else if (selected && manager.phase == LocalModelPhase.ready) {
+      status = '已就绪，可以离线对话';
+      statusColor = scheme.primary;
+    } else if (selected && manager.phase == LocalModelPhase.error) {
+      status = manager.error ?? '出错了';
+      statusColor = scheme.error;
+    } else if (downloaded) {
+      status = '已下载，下次提问时自动加载';
+      statusColor = scheme.primary;
+    } else {
+      status = '还没下载';
+      statusColor = scheme.onSurfaceVariant;
+    }
+
+    final Widget action;
+    if (downloading) {
+      action = FilledButton.tonalIcon(
+        onPressed: null,
+        icon: const SizedBox(
+          width: 13,
+          height: 13,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        label: const Text('暂停'),
+        style: _compactButton,
+      );
+    } else if (downloaded) {
+      action = OutlinedButton.icon(
+        onPressed: busy || manager.isDownloading
+            ? null
+            : () => unawaited(_delete(spec)),
+        icon: const Icon(Icons.delete_outline_rounded, size: 16),
+        label: const Text('删除'),
+        style: _compactButton,
+      );
+    } else {
+      action = FilledButton.icon(
+        onPressed: busy || manager.isDownloading
+            ? null
+            : () => unawaited(_download(spec)),
+        icon: const Icon(Icons.download_rounded, size: 16),
+        label: const Text('下载 / 继续'),
+        style: _compactButton,
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: selected
+            ? scheme.primaryContainer.withValues(alpha: .42)
+            : scheme.surfaceContainerHighest.withValues(alpha: .28),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: selected ? scheme.primary : Colors.transparent,
+          width: 1.4,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: busy || manager.isDownloading
+              ? null
+              : () => unawaited(_select(spec)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(6, 8, 10, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Radio<String>(
+                    value: spec.id,
+                    enabled: !busy && !manager.isDownloading,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        spec.name,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 5,
+                        children: [
+                          _Tag(text: spec.params),
+                          _Tag(text: spec.sizeLabel),
+                          _Tag(text: spec.license),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        spec.summary,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          height: 1.45,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      if (downloading) ...[
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: LinearProgressIndicator(
+                            value: manager.progress == 0
+                                ? null
+                                : manager.progress,
+                            minHeight: 6,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 7),
+                      Row(
+                        children: [
+                          Icon(
+                            downloaded
+                                ? Icons.check_circle_rounded
+                                : Icons.cloud_download_outlined,
+                            size: 14,
+                            color: statusColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              status,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: statusColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          action,
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -9,9 +9,8 @@ import 'package:flutter/services.dart';
 Future<bool> launchUrlString(String url) async {
   if (!Platform.isAndroid) return false;
   try {
-    final ok = await const MethodChannel(
-      'sakuramanga/native',
-    ).invokeMethod<bool>('openUrl', url);
+    final ok = await const MethodChannel('sakuramanga/native')
+        .invokeMethod<bool>('openUrl', url);
     return ok ?? false;
   } catch (_) {
     return false;

@@ -375,9 +375,8 @@ class _SpotlightRingState extends State<_SpotlightRing>
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(
-                0xFFFF7EB6,
-              ).withValues(alpha: .25 + _c.value * .25),
+              color: const Color(0xFFFF7EB6)
+                  .withValues(alpha: .25 + _c.value * .25),
               blurRadius: 16,
             ),
           ],

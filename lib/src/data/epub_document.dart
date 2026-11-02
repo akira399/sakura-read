@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:archive/archive.dart';
 import 'package:html/parser.dart' as html;
 
@@ -39,6 +40,15 @@ String prepareEpubHtml(
     node.attributes.removeWhere(
       (key, _) => key.toString().toLowerCase().startsWith('on'),
     );
+  }
+  for (final svg in doc.querySelectorAll('svg')) {
+    if (!svg.attributes.containsKey('viewBox')) {
+      final width = double.tryParse(svg.attributes['width'] ?? '');
+      final height = double.tryParse(svg.attributes['height'] ?? '');
+      if (width != null && height != null && width > 0 && height > 0) {
+        svg.attributes['viewBox'] = '0 0 $width $height';
+      }
+    }
   }
   doc.head?.append(
     html.parseFragment(

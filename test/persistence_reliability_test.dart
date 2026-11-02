@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sakura_read/src/data/book_store.dart';
 import 'package:sakura_read/src/data/models.dart';
@@ -106,7 +107,7 @@ void main() {
       credentials: credentials,
     );
     await prefs.load();
-    expect(credentials.value, 'legacy-test-key');
+    expect(jsonDecode(credentials.value!)['aiApiKey'], 'legacy-test-key');
     expect(
       jsonDecode(await file.readAsString()).containsKey('aiApiKey'),
       isFalse,
@@ -119,7 +120,7 @@ void main() {
       includeReading: false,
     );
     await prefs.flush();
-    expect(credentials.value, '');
+    expect(jsonDecode(credentials.value!)['aiApiKey'], '');
     final reloaded = AppPrefs(
       dirsOverride: AppDirs(files: dir.path, cache: dir.path),
       credentials: credentials,
@@ -144,7 +145,7 @@ void main() {
     );
     credentials.failWrite = false;
     await prefs.flush();
-    expect(credentials.value, 'legacy-test-key');
+    expect(jsonDecode(credentials.value!)['aiApiKey'], 'legacy-test-key');
     expect(
       jsonDecode(await file.readAsString()).containsKey('aiApiKey'),
       isFalse,

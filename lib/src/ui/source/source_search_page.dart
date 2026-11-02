@@ -128,8 +128,8 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
               Slider(
                 value: widget.prefs.searchConcurrency.toDouble(),
                 min: 1,
-                max: 16,
-                divisions: 15,
+                max: 32,
+                divisions: 31,
                 onChanged: (v) => update(
                   () => widget.prefs.setSearchOptions(
                     v.round(),

@@ -19,6 +19,11 @@ class PerfProbe {
   static final List<FrameTiming> _window = <FrameTiming>[];
   static Duration _windowStart = Duration.zero;
 
+  /// 冷启动前若干帧逐帧打点：开屏这类首屏动画的卡顿要靠这一小段数据定位。
+  static const int _traceFrameLimit = 200;
+  static int _traced = 0;
+  static int? _lastVsyncUs;
+
   /// 在 runApp 之前调用；未启用时什么都不做。
   static void start() {
     if (!enabled) return;
@@ -29,6 +34,20 @@ class PerfProbe {
 
   static void _onTimings(List<FrameTiming> timings) {
     if (timings.isEmpty) return;
+    if (_traced < _traceFrameLimit) {
+      for (final t in timings) {
+        final vs = t.timestampInMicroseconds(ui.FramePhase.vsyncStart);
+        final gap = _lastVsyncUs == null ? 0 : (vs - _lastVsyncUs!) ~/ 1000;
+        _lastVsyncUs = vs;
+        final b = t.buildDuration.inMilliseconds;
+        final r = t.rasterDuration.inMilliseconds;
+        // ignore: avoid_print
+        print(
+          'PERF f=${_traced++} gap=${gap}ms build=${b}ms raster=${r}ms '
+          'total=${t.totalSpan.inMilliseconds}ms',
+        );
+      }
+    }
     final first = timings.first.timestampInMicroseconds(
       ui.FramePhase.vsyncStart,
     );

@@ -24,13 +24,27 @@ class BookCover extends StatelessWidget {
     final path = book.coverPath;
     Widget content;
     if (!book.generatedCover && path != null && File(path).existsSync()) {
-      content = Image.file(
-        File(path),
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        gaplessPlayback: true,
-        errorBuilder: (_, _, _) => GeneratedCover(book: book),
+      // 按实际显示尺寸解码：封面原图动辄 1000+ px，整张解码会把首屏
+      // （书架冷启动）的 GPU 上传和内存吃掉一大截。这里按布局宽度 × DPR
+      // 限制解码尺寸，最多 1080px，显示效果不变但代价小很多。
+      content = LayoutBuilder(
+        builder: (context, constraints) {
+          final dpr = MediaQuery.devicePixelRatioOf(context);
+          final logical =
+              constraints.maxWidth.isFinite && constraints.maxWidth > 0
+              ? constraints.maxWidth
+              : 320.0;
+          final cacheWidth = (logical * dpr).clamp(120.0, 1080.0).round();
+          return Image.file(
+            File(path),
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            cacheWidth: cacheWidth,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => GeneratedCover(book: book),
+          );
+        },
       );
     } else {
       content = GeneratedCover(book: book);

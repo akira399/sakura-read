@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'native_bridge.dart';
+import '../data/tts_voice_catalog.dart';
+import '../data/tts_voice_store.dart';
 import 'offline_tts.dart';
 
 /// 系统朗读（TTS）服务：封装原生 TextToSpeech。
@@ -45,6 +47,16 @@ class TtsService extends ChangeNotifier {
   /// 是否正在用内置离线语音（系统引擎全都用不了时的兜底）。
   bool _usingOffline = false;
 
+  /// 当前选中的语音包 id 与说话人（多说话人模型用）。
+  String _voicePack = ttsVoiceCatalog.first.id;
+  int _voiceSid = 0;
+
+  /// 当前语音包 id。
+  String get voicePack => _voicePack;
+
+  /// 当前说话人编号。
+  int get voiceSid => _voiceSid;
+
   /// 内置离线语音的合成目录（WAV 落地位置）。
   String? _offlineDir;
 
@@ -53,6 +65,18 @@ class TtsService extends ChangeNotifier {
 
   /// 合成请求序号：只播放「最新一次」合成结果，避免暂停后残留的音频抢播。
   int _speakSeq = 0;
+
+  /// 每个段落的音高（AI 分角色朗读用；null = 全部用 [_pitch]）。
+  ///
+  /// 用户反馈「番茄那种自动分角色阅读功能支持吗」——本地按对白 / 旁白
+  /// 识别，给每个角色一个稳定的音高，逐段下发，不需要联网。
+  List<double>? _pitchMap;
+
+  /// 当前基础音高（分角色时作为基准值）。
+  double _pitch = 1.0;
+
+  /// 用户选定的音色名（空 = 引擎默认）。
+  String? _voice;
 
   /// 播完一段后的回调（用于翻页 / 滚动跟随）。
   void Function(int index)? onParagraph;
@@ -140,9 +164,52 @@ class TtsService extends ChangeNotifier {
     return false;
   }
 
+  /// 切换内置离线语音的语音包 / 说话人。
+  ///
+  /// 单说话人包只换模型；多说话人包（如 aishell3 的 174 人）不重启引擎，
+  /// 只换 synthesize 的 sid。
+  Future<bool> setVoicePack(String packId, int sid) async {
+    _voicePack = packId;
+    _voiceSid = sid;
+    if (!_usingOffline) {
+      // 还没起引擎，等真正朗读时按新配置加载
+      return true;
+    }
+    return _applyVoicePack();
+  }
+
+  /// 把当前语音包配置应用到引擎。
+  Future<bool> _applyVoicePack() async {
+    final pack = ttsVoicePackById(_voicePack);
+    final engine = OfflineTtsEngine.instance;
+    if (pack == null || pack.bundled) {
+      return engine.resetToBundled();
+    }
+    try {
+      final dir = await TtsVoiceStore.instance.packDir(pack.id);
+      final files = resolveTtsVoiceFiles(dir);
+      if (files == null) {
+        _lastError = '语音包「${pack.name}」文件不完整，请重新下载';
+        notifyListeners();
+        return await engine.resetToBundled();
+      }
+      final ok = await engine.configureVoice(dir: dir, files: files);
+      if (!ok) {
+        _lastError = engine.lastError ?? '语音包加载失败，已回到内置音色';
+        notifyListeners();
+        return await engine.resetToBundled();
+      }
+      return true;
+    } catch (e) {
+      _lastError = '语音包加载失败：$e';
+      notifyListeners();
+      return await engine.resetToBundled();
+    }
+  }
+
   /// 启动内置离线语音（失败返回 false）。
   Future<bool> _ensureOffline() async {
-    final ok = await OfflineTtsEngine.instance.prepare();
+    final ok = await _applyVoicePack();
     if (ok) {
       _ready = true;
       _usingOffline = true;
@@ -201,8 +268,11 @@ class TtsService extends ChangeNotifier {
     int from = 0,
     double rate = 1.0,
     double pitch = 1.0,
+    List<double>? pitches,
   }) async {
     if (!await ensureReady()) return;
+    _pitchMap = pitches;
+    await _applyVoice();
     _paragraphs = paragraphs.where((p) => p.trim().isNotEmpty).toList();
     if (_paragraphs.isEmpty) return;
     _index = from.clamp(0, _paragraphs.length - 1);
@@ -216,9 +286,15 @@ class TtsService extends ChangeNotifier {
   }
 
   /// 继续朗读（暂停后恢复 / 从头开始）。
-  Future<void> resume({double rate = 1.0, double pitch = 1.0}) async {
+  Future<void> resume({
+    double rate = 1.0,
+    double pitch = 1.0,
+    List<double>? pitches,
+  }) async {
     if (_paragraphs.isEmpty) return;
     if (!await ensureReady()) return;
+    if (pitches != null) _pitchMap = pitches;
+    await _applyVoice();
     _paused = false;
     _speaking = true;
     await _setRate(rate);
@@ -278,6 +354,38 @@ class TtsService extends ChangeNotifier {
 
   Future<void> setPitch(double pitch) => _setPitch(pitch);
 
+  /// 设备当前引擎支持的音色名列表（只含中文音色；空 = 引擎不提供）。
+  Future<List<String>> voices() async {
+    if (_usingOffline) return const [];
+    try {
+      final list = await _channel.invokeListMethod<String>('ttsVoices');
+      return list ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 指定音色（空 = 引擎默认音色）。
+  ///
+  /// 用户反馈「不能自己选择男声和女声」——音色名持久化在设置里，
+  /// 每次开始朗读前自动套用（换引擎时由原生返回 false，静默忽略）。
+  Future<bool> setPreferredVoice(String voice) async {
+    _voice = voice.isEmpty ? null : voice;
+    return _applyVoice();
+  }
+
+  Future<bool> _applyVoice() async {
+    if (_usingOffline) return false;
+    try {
+      final ok = await _channel.invokeMethod<bool>('ttsSetVoice', {
+        'name': _voice,
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _setRate(double rate) async {
     // 内置离线语音在合成时按 _rate 调速，无需下发原生（系统引擎才会用到）
     _rate = rate;
@@ -287,8 +395,10 @@ class TtsService extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> _setPitch(double pitch) async {
-    if (_usingOffline) return; // 内置 VITS 模型不支持音调调节
+  Future<void> _setPitch(double pitch, {bool remember = true}) async {
+    if (remember) _pitch = pitch;
+    // 内置离线语音靠原生 MediaPlayer 的变速不变调模拟音调（男声 / 女声），
+    // 所以这里不跳过，仍然下发；系统引擎走同一通道的 setPitch。
     try {
       await _channel.invokeMethod('ttsSetPitch', {'pitch': pitch});
     } catch (_) {}
@@ -297,6 +407,10 @@ class TtsService extends ChangeNotifier {
   Future<void> _speakCurrent({bool flush = true}) async {
     final i = _index;
     if (i < 0 || i >= _paragraphs.length) return;
+    // 分角色朗读：每段用自己的音高；没分配就回落用户设定的基础音高。
+    final map = _pitchMap;
+    final wanted = (map != null && i < map.length) ? map[i] : _pitch;
+    await _setPitch(wanted, remember: false);
     if (_usingOffline) {
       await _speakOffline(_paragraphs[i], i);
       return;
@@ -324,6 +438,7 @@ class TtsService extends ChangeNotifier {
       clean,
       outPath: '$dir/p$index.wav',
       speed: _rate,
+      sid: _voiceSid,
     );
     // 合成期间用户可能已经暂停 / 跳段 / 点了下一段：只播最新那次
     if (seq != _speakSeq || !_speaking || _index != index) return;

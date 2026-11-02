@@ -137,8 +137,7 @@ class SourceHttpClient {
       attempt++;
       try {
         final h = <String, String>{
-          'User-Agent':
-              'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36',
           ...?headers,
         };
         var currentUri = uri;

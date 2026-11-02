@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+
 import '../../data/epub_document.dart';
 import '../../data/models.dart';
 import '../../data/book_store.dart';
@@ -156,7 +158,10 @@ class _EpubDocumentPageState extends State<EpubDocumentPage> {
       setState(() => _controller = controller);
       await _open(_chapter);
     } catch (error) {
-      assert(() { debugPrint('EPUB original layout: ' + error.toString()); return true; }());
+      assert(() {
+        debugPrint('EPUB original layout: $error');
+        return true;
+      }());
       if (mounted) setState(() => _error = '原书排版加载失败，可返回使用文字排版阅读');
     }
   }

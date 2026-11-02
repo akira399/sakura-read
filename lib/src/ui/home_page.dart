@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import '../source/subscription_link.dart';
 import '../source/http_client.dart';
+
 import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
@@ -145,18 +147,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           final report = widget.sourceStore.importFromText(response.body);
           await widget.sourceStore.flush();
           if (mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text(report.summary)));
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text(report.summary)));
           }
         } finally {
           client.close();
         }
       } catch (_) {
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('订阅导入失败，请检查地址与网络')));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('订阅导入失败，请检查地址与网络')));
         }
       }
       return;

@@ -148,9 +148,8 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
       final info = await _service.fetchInfo(cand.source, cand.url);
       if (info.chapters.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('该来源目录为空，无法切换')));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('该来源目录为空，无法切换')));
         }
         return;
       }
@@ -167,9 +166,8 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('换源失败：$e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('换源失败：$e')));
       }
     } finally {
       if (mounted) setState(() => _busyIndex = null);

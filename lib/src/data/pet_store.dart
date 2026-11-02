@@ -7,6 +7,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'persistence.dart';
 
 import 'package:flutter/foundation.dart';
@@ -131,7 +132,7 @@ class PetActionResult {
 
 /// 桌宠数据仓库（进程内共享实例 + JSON 持久化）。
 class PetStore extends ChangeNotifier with ReliablePersistence {
-  PetStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
+  PetStore({this._dirsOverride});
 
   static PetStore? shared;
 
@@ -162,8 +163,17 @@ class PetStore extends ChangeNotifier with ReliablePersistence {
   bool _readerActive = false;
 
   /// 阅读时是否显示桌宠（用户可在阅读设置 / 软件设置里开启）。
-  bool enabled = true;
+  bool get enabled => !petHidden;
+  set enabled(bool value) {
+    petHidden = !value;
+  }
+
   bool showPetInReader = false;
+
+  /// 是否隐藏屏幕上的桌宠（用户反馈：「宠物设置可以关闭」）。
+  ///
+  /// 只是不显示，亲密度、投喂记录、点心背包都保留，随时可以再打开。
+  bool petHidden = false;
 
   // ---- 只读视图 ----
   int get affinity => _affinity;
@@ -238,8 +248,9 @@ class PetStore extends ChangeNotifier with ReliablePersistence {
           _unseenGains = (data['unseenGains'] as num?)?.toInt() ?? 0;
           petX = ((data['petX'] as num?)?.toDouble() ?? 0.86).clamp(0.0, 1.0);
           petY = ((data['petY'] as num?)?.toDouble() ?? 0.62).clamp(0.0, 1.0);
-          enabled = data['enabled'] as bool? ?? true;
           showPetInReader = data['showPetInReader'] as bool? ?? false;
+          petHidden =
+              data['petHidden'] as bool? ?? !(data['enabled'] as bool? ?? true);
           final inv = data['inventory'];
           if (inv is Map) {
             inv.forEach((k, v) {
@@ -300,6 +311,7 @@ class PetStore extends ChangeNotifier with ReliablePersistence {
         'petY': petY,
         'enabled': enabled,
         'showPetInReader': showPetInReader,
+        'petHidden': petHidden,
       }),
     );
   }
@@ -440,12 +452,16 @@ class PetStore extends ChangeNotifier with ReliablePersistence {
     notifyListeners();
   }
 
-  /// 设置「阅读时是否显示桌宠」。
-  void setEnabled(bool value) {
-    enabled = value;
+  /// 显示 / 隐藏屏幕上的桌宠。
+  void setPetHidden(bool value) {
+    if (petHidden == value) return;
+    petHidden = value;
     _saveSoon();
     notifyListeners();
   }
+
+  /// 设置「阅读时是否显示桌宠」。
+  void setEnabled(bool value) => setPetHidden(!value);
 
   void setShowPetInReader(bool value) {
     if (showPetInReader == value) return;

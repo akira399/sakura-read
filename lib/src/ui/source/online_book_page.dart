@@ -177,15 +177,13 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
       if (!mounted) return;
       setState(() {});
       if (!silent) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('已加入书架，可以随时接着看啦 🎀')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('已加入书架，可以随时接着看啦 🎀')));
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('保存失败，请检查存储空间后重试')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('保存失败，请检查存储空间后重试')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -222,9 +220,8 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
       );
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('保存失败，请检查存储空间后重试')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('保存失败，请检查存储空间后重试')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -233,9 +230,8 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
 
   Future<void> _openReader(int chapterIndex) async {
     if (_chapters.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('目录为空，无法阅读（可能是源规则失效）')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('目录为空，无法阅读（可能是源规则失效）')));
       return;
     }
     final shelf = _shelfBook;
@@ -320,9 +316,8 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
               Icon(
                 Icons.cloud_off_rounded,
                 size: 46,
-                color: Theme.of(
-                  context,
-                ).colorScheme.onSurfaceVariant.withValues(alpha: .7),
+                color: Theme.of(context).colorScheme.onSurfaceVariant
+                    .withValues(alpha: .7),
               ),
               const SizedBox(height: 12),
               Text(

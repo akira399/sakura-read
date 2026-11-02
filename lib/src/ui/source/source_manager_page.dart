@@ -357,9 +357,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   OutlinedButton.icon(
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: s.bookSourceUrl));
-                      ScaffoldMessenger.of(
-                        ctx,
-                      ).showSnackBar(const SnackBar(content: Text('地址已复制')));
+                      ScaffoldMessenger.of(ctx)
+                          .showSnackBar(const SnackBar(content: Text('地址已复制')));
                     },
                     icon: const Icon(Icons.copy_rounded, size: 18),
                     label: const Text('复制地址'),
@@ -521,9 +520,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   void _report(BuildContext context, SourceImportReport r) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(r.summary)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(r.summary)));
   }
 
   Future<void> _importFromPaste(BuildContext context) async {

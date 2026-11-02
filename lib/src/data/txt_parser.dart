@@ -96,9 +96,8 @@ class TxtParser {
         markers.add(_Marker(title: _normalizeTitle(trimmed), start: lineStart));
       }
 
-      final numeric = RegExp(
-        r'^(\d{1,6})[、．.，,][ \t　]*(\S.{0,46})$',
-      ).firstMatch(trimmed);
+      final numeric = RegExp(r'^(\d{1,6})[、．.，,][ \t　]*(\S.{0,46})$')
+          .firstMatch(trimmed);
       if (numeric != null && !trimmed.endsWith('。') && trimmed.length <= 50) {
         numbered.add((
           int.parse(numeric.group(1)!),

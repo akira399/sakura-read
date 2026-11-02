@@ -1,8 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 final persistenceFailures = ValueNotifier<Set<String>>({});
+final restoredDataAwaitingRestart = ValueNotifier<bool>(false);
+List<Future<void> Function()> persistenceFlushers = [];
+final restoredFilePaths = <String>{};
+Future<void> flushPersistentStores() =>
+    Future.wait(persistenceFlushers.map((flush) => flush()));
 
 /// Per-store ordered writes. A failed write does not poison later retries.
 mixin ReliablePersistence {
@@ -34,6 +40,8 @@ mixin ReliablePersistence {
     Future<void> Function()? beforeWrite,
   }) {
     final operation = _pendingWrite.then((_) async {
+      // Restore writes a new on-disk state. Stale in-memory objects must not overwrite it before restart.
+      if (restoredFilePaths.contains(file.path)) return;
       try {
         if (_loadFailed) {
           throw StateError(

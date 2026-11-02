@@ -76,9 +76,8 @@ class _EggView extends StatelessWidget {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(
-                              0xFFFF2B45,
-                            ).withValues(alpha: .18),
+                            color: const Color(0xFFFF2B45)
+                                .withValues(alpha: .18),
                             blurRadius: 22,
                           ),
                         ],

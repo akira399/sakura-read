@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'persistence.dart';
 
 import 'package:flutter/foundation.dart';
@@ -63,7 +64,7 @@ class Bookmark {
 
 /// 书签仓库（进程内共享实例 + JSON 持久化）。
 class BookmarkStore extends ChangeNotifier with ReliablePersistence {
-  BookmarkStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
+  BookmarkStore({this._dirsOverride});
 
   static BookmarkStore? shared;
 
@@ -196,7 +197,7 @@ class BookmarkStore extends ChangeNotifier with ReliablePersistence {
 
 /// 阅读统计：总时长 / 每日时长 / 读完书数。
 class StatsStore extends ChangeNotifier with ReliablePersistence {
-  StatsStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
+  StatsStore({this._dirsOverride});
 
   static StatsStore? shared;
 

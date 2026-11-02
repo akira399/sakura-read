@@ -118,12 +118,16 @@ class SourceExploreResult {
 ///
 /// 多源搜索聚合器。
 class OnlineRepo {
+  /// 默认并发数（由「设置 → 书源 → 搜索并发」实时改写）。
+  static int defaultConcurrency = 8;
+
   OnlineRepo({
     required this.store,
     SourceHttpClient? client,
-    this.concurrency = 8,
+    int? concurrency,
     this.perSourceTimeout = const Duration(seconds: 15),
-  }) : _client = client ?? SourceHttpClient();
+  }) : concurrency = concurrency ?? defaultConcurrency,
+       _client = client ?? SourceHttpClient();
 
   bool _cancelled = false;
   void cancel() {
