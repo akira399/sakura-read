@@ -259,6 +259,15 @@ class _SettingsPageState extends State<SettingsPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SectionTitle(icon: Icons.pets_rounded, title: '看板娘'),
+          AnimatedBuilder(
+            animation: pet,
+            builder: (_, _) => SwitchListTile(
+              title: const Text('显示桌宠'),
+              subtitle: const Text('可完全关闭；不会锁屏或强制互动'),
+              value: pet.enabled,
+              onChanged: pet.setEnabled,
+            ),
+          ),
           const SizedBox(height: 6),
           AnimatedBuilder(
             animation: pet,

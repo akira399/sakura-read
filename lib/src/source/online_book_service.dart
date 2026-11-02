@@ -10,6 +10,7 @@
 //
 // 本文件不依赖 UI；WebView 引擎仅在「取正文」时被调用。
 import 'dart:convert';
+import 'package:html/parser.dart' as html_parser;
 
 import '../data/models.dart';
 import 'analyze_rule.dart';
@@ -48,6 +49,8 @@ class OnlineBookService {
 
   final SourceHttpClient _client;
 
+  void dispose() => _client.close();
+
   static const Duration _httpTimeout = Duration(seconds: 20);
 
   // ---------- 详情 / 目录 ----------
@@ -55,7 +58,7 @@ class OnlineBookService {
   /// 抓取详情页并解析（含目录；目录为空且有 tocUrl 规则时单独请求）。
   Future<OnlineBookInfo> fetchInfo(BookSource source, String bookUrl) async {
     final html = await _getHtml(source, bookUrl);
-    final engine = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
+    final engine = AnalyzeRule(html, baseUrl: bookUrl);
     final info = source.bookInfoRule;
 
     String? g(String? rule) {
@@ -88,7 +91,9 @@ class OnlineBookService {
     return OnlineBookInfo(
       name: g(info?.name),
       author: g(info?.author),
-      intro: g(info?.intro),
+      intro: g(info?.intro) == null
+          ? null
+          : html_parser.parseFragment(g(info?.intro)!).text,
       coverUrl: g(info?.coverUrl),
       kind: g(info?.kind),
       lastChapter: g(info?.lastChapter),

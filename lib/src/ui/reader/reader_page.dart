@@ -1,3 +1,4 @@
+import 'epub_document_page.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -180,6 +181,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _lastActiveAt = DateTime.now();
     } else if (state == AppLifecycleState.paused) {
       _settleReading();
+      _saveProgress();
       _readingActive = false;
     }
   }
@@ -992,6 +994,19 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               },
             ),
           ),
+          if (widget.prefs.customBackgroundPath.isNotEmpty)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: .12,
+                  child: Image.file(
+                    File(widget.prefs.customBackgroundPath),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            ),
           _buildTopBar(bg),
           _buildBottomBar(),
           // 朗读控制条（朗读时悬浮在底部，位于底栏之上）
@@ -1425,6 +1440,28 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ),
                     tooltip: '目录',
                   ),
+                  if (book?.format == BookFormat.epub)
+                    IconButton(
+                      tooltip: '原书排版（插图与注释）',
+                      icon: const Icon(Icons.auto_stories_outlined),
+                      onPressed: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => EpubDocumentPage(
+                              book: book!,
+                              store: widget.store,
+                              prefs: widget.prefs,
+                              chapter: _chapterIndex,
+                            ),
+                          ),
+                        );
+                        if (mounted) {
+                          _chapterIndex = book!.safeChapterIndex;
+                          _targetOffset = 0;
+                          _loadChapter();
+                        }
+                      },
+                    ),
                   // 离线缓存（在线书）：把整本提前下好
                   if (book?.format == BookFormat.online)
                     IconButton(

@@ -7,6 +7,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'persistence.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -129,7 +130,7 @@ class PetActionResult {
 }
 
 /// 桌宠数据仓库（进程内共享实例 + JSON 持久化）。
-class PetStore extends ChangeNotifier {
+class PetStore extends ChangeNotifier with ReliablePersistence {
   PetStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
 
   static PetStore? shared;
@@ -161,6 +162,7 @@ class PetStore extends ChangeNotifier {
   bool _readerActive = false;
 
   /// 阅读时是否显示桌宠（用户可在阅读设置 / 软件设置里开启）。
+  bool enabled = true;
   bool showPetInReader = false;
 
   // ---- 只读视图 ----
@@ -221,7 +223,7 @@ class PetStore extends ChangeNotifier {
     _file = File('${dirs.files}/pet.json');
     try {
       if (await _file!.exists()) {
-        final data = jsonDecode(await _file!.readAsString());
+        final data = await readJson(_file!);
         if (data is Map) {
           _affinity = (data['affinity'] as num?)?.toInt() ?? 0;
           _readSeconds = (data['readSeconds'] as num?)?.toInt() ?? 0;
@@ -236,6 +238,7 @@ class PetStore extends ChangeNotifier {
           _unseenGains = (data['unseenGains'] as num?)?.toInt() ?? 0;
           petX = ((data['petX'] as num?)?.toDouble() ?? 0.86).clamp(0.0, 1.0);
           petY = ((data['petY'] as num?)?.toDouble() ?? 0.62).clamp(0.0, 1.0);
+          enabled = data['enabled'] as bool? ?? true;
           showPetInReader = data['showPetInReader'] as bool? ?? false;
           final inv = data['inventory'];
           if (inv is Map) {
@@ -260,43 +263,45 @@ class PetStore extends ChangeNotifier {
   void _saveSoon() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 500), () {
-      unawaited(_save());
+      unawaited(_save().catchError((Object _) {}));
     });
   }
 
   /// 仅供测试：立即落盘（跳过防抖，消除时序脆弱）。
   @visibleForTesting
-  Future<void> debugFlush() => _save();
+  Future<void> debugFlush() => flush();
 
-  Future<void> _save() async {
+  Future<void> flush() {
+    _saveTimer?.cancel();
+    return _save();
+  }
+
+  Future<void> _save() {
     final file = _file;
-    if (file == null) return;
-    try {
-      await file.parent.create(recursive: true);
-      await file.writeAsString(
-        jsonEncode({
-          'version': 1,
-          'affinity': _affinity,
-          'inventory': _inventory,
-          'rewarded': _rewarded,
-          'readSeconds': _readSeconds,
-          'clickDay': _clickDay,
-          'clickToday': _clickToday,
-          'patDay': _patDay,
-          'patToday': _patToday,
-          'giftDay': _giftDay,
-          'interactions': _interactions,
-          'feeds': _feeds,
-          'totalFoodEarned': _totalFoodEarned,
-          'unseenGains': _unseenGains,
-          'petX': petX,
-          'petY': petY,
-          'showPetInReader': showPetInReader,
-        }),
-      );
-    } catch (_) {
-      // 忽略保存失败
-    }
+    if (file == null) return Future.value();
+    return writeJson(
+      file,
+      jsonEncode({
+        'version': 1,
+        'affinity': _affinity,
+        'inventory': _inventory,
+        'rewarded': _rewarded,
+        'readSeconds': _readSeconds,
+        'clickDay': _clickDay,
+        'clickToday': _clickToday,
+        'patDay': _patDay,
+        'patToday': _patToday,
+        'giftDay': _giftDay,
+        'interactions': _interactions,
+        'feeds': _feeds,
+        'totalFoodEarned': _totalFoodEarned,
+        'unseenGains': _unseenGains,
+        'petX': petX,
+        'petY': petY,
+        'enabled': enabled,
+        'showPetInReader': showPetInReader,
+      }),
+    );
   }
 
   // ---------- 互动 / 投喂 ----------
@@ -436,6 +441,12 @@ class PetStore extends ChangeNotifier {
   }
 
   /// 设置「阅读时是否显示桌宠」。
+  void setEnabled(bool value) {
+    enabled = value;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void setShowPetInReader(bool value) {
     if (showPetInReader == value) return;
     showPetInReader = value;
@@ -468,6 +479,7 @@ class PetStore extends ChangeNotifier {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    unawaited(flush().catchError((Object _) {}));
     super.dispose();
   }
 }

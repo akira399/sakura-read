@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'persistence.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../platform/native_bridge.dart';
 import 'shelf_sort.dart';
+import '../platform/credential_store.dart';
 
 /// 翻页方式。
 enum PageTurnMode { slide, cover, fade, scroll }
@@ -38,8 +41,13 @@ const List<(String, String)> kFontOptions = [
 ];
 
 /// 应用与阅读设置（本地 JSON 持久化）。
-class AppPrefs extends ChangeNotifier {
-  AppPrefs({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
+class AppPrefs extends ChangeNotifier with ReliablePersistence {
+  AppPrefs({AppDirs? dirsOverride, CredentialStore? credentials})
+    : _dirsOverride = dirsOverride,
+      _credentials = credentials ?? CredentialStore();
+
+  final CredentialStore _credentials;
+  bool _credentialsReady = false;
 
   final AppDirs? _dirsOverride;
   File? _file;
@@ -119,6 +127,62 @@ class AppPrefs extends ChangeNotifier {
 
   // ---- AI 助手（小樱） ----
   /// 兼容 OpenAI Chat Completions 的接口地址（如 https://api.openai.com/v1）。
+  int searchConcurrency = 8;
+  int searchTimeout = 15;
+  String customFontPath = '';
+  String customBackgroundPath = '';
+  String get customFontFamily =>
+      'UserFont-${File(customFontPath).uri.pathSegments.last}';
+
+  Future<void> importReaderAsset(String path, {required bool font}) async {
+    final source = File(path);
+    if (await source.length() > 20 * 1024 * 1024) {
+      throw StateError('文件不能超过 20 MB');
+    }
+    final dirs = _dirsOverride ?? await NativeBridge.appDirs();
+    final target = File(
+      '${dirs.files}/reader-assets/${DateTime.now().microsecondsSinceEpoch}.${font ? 'ttf' : 'img'}',
+    );
+    await target.parent.create(recursive: true);
+    await source.copy(target.path);
+    if (font) {
+      final old = customFontPath;
+      customFontPath = target.path;
+      try {
+        await _loadUserFont();
+      } catch (_) {
+        customFontPath = old;
+        rethrow;
+      }
+      fontFamily = customFontFamily;
+    } else {
+      customBackgroundPath = target.path;
+    }
+    await flush();
+    notifyListeners();
+  }
+
+  Future<void> _loadUserFont() async {
+    if (customFontPath.isEmpty) return;
+    final bytes = await File(customFontPath).readAsBytes();
+    await (FontLoader(
+      customFontFamily,
+    )..addFont(Future.value(ByteData.sublistView(bytes)))).load();
+  }
+
+  void clearReaderBackground() {
+    customBackgroundPath = '';
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setSearchOptions(int count, int seconds) {
+    searchConcurrency = count.clamp(1, 16);
+    searchTimeout = seconds.clamp(5, 30);
+    _saveSoon();
+    notifyListeners();
+  }
+
   String aiBaseUrl = '';
 
   /// API Key（只保存在本机设置文件里）。
@@ -183,7 +247,7 @@ class AppPrefs extends ChangeNotifier {
     _file = File('${dirs.files}/settings.json');
     try {
       if (await _file!.exists()) {
-        final data = jsonDecode(await _file!.readAsString());
+        final data = await readJson(_file!);
         if (data is Map) {
           themeMode = _themeModeFrom(data['themeMode'] as String?);
           accentIndex = (data['accentIndex'] as num?)?.toInt() ?? 0;
@@ -251,6 +315,12 @@ class AppPrefs extends ChangeNotifier {
           highRefreshRate = data['highRefreshRate'] as bool? ?? true;
           skipUpdateVersion = data['skipUpdateVersion'] as String? ?? '';
           // v9：AI 助手接口配置
+          searchConcurrency =
+              ((data['searchConcurrency'] as num?)?.toInt() ?? 8).clamp(1, 16);
+          searchTimeout = ((data['searchTimeout'] as num?)?.toInt() ?? 15)
+              .clamp(5, 30);
+          customFontPath = data['customFontPath'] as String? ?? '';
+          customBackgroundPath = data['customBackgroundPath'] as String? ?? '';
           aiBaseUrl = data['aiBaseUrl'] as String? ?? '';
           aiApiKey = data['aiApiKey'] as String? ?? '';
           aiModel = data['aiModel'] as String? ?? '';
@@ -263,7 +333,33 @@ class AppPrefs extends ChangeNotifier {
     } catch (_) {
       // 读取失败时使用默认设置
     }
+    try {
+      final stored = await _credentials.read();
+      _credentialsReady = true;
+      if (stored != null) {
+        aiApiKey = stored;
+      } else if (aiApiKey.isNotEmpty) {
+        await _credentials.write(aiApiKey);
+      }
+      // Secure write must succeed before removing a legacy plaintext key.
+      if (await _file!.exists()) await flush();
+    } catch (error) {
+      lastPersistenceError = error;
+      persistenceFailures.value = {...persistenceFailures.value, _file!.path};
+    }
+    try {
+      await _loadUserFont();
+    } catch (_) {
+      fontFamily = 'LXGWWenKai';
+    }
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    unawaited(flush().catchError((Object _) {}));
+    super.dispose();
   }
 
   ThemeMode _themeModeFrom(String? value) => switch (value) {
@@ -555,6 +651,7 @@ class AppPrefs extends ChangeNotifier {
   }) {
     aiBaseUrl = baseUrl.trim();
     aiApiKey = apiKey.trim();
+    _credentialsReady = true;
     aiModel = model.trim();
     aiIncludeReading = includeReading;
     _saveSoon();
@@ -590,60 +687,71 @@ class AppPrefs extends ChangeNotifier {
   void _saveSoon() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 300), () {
-      unawaited(_save());
+      unawaited(_save().catchError((Object _) {}));
     });
   }
 
-  Future<void> _save() async {
+  Future<void> flush() {
+    _saveTimer?.cancel();
+    return _save();
+  }
+
+  Future<void> _save() {
     final file = _file;
-    if (file == null) return;
-    try {
-      await file.parent.create(recursive: true);
-      await file.writeAsString(
-        jsonEncode({
-          'v': 2,
-          'themeMode': themeModeName,
-          'accentIndex': accentIndex,
-          'fontSize': fontSize,
-          'lineHeight': lineHeight,
-          'letterSpacing': letterSpacing,
-          'readerMarginH': readerMarginH,
-          'paragraphSpacing': paragraphSpacing,
-          'readerPaddingTop': readerPaddingTop,
-          'readerPaddingBottom': readerPaddingBottom,
-          'readerHeaderVisible': readerHeaderVisible,
-          'readerFooterVisible': readerFooterVisible,
-          'fontFamily': fontFamily,
-          'readerBgIndex': readerBgIndex,
-          'lightBgIndex': lightBgIndex,
-          'pageMode': pageMode.name,
-          'keepScreenOn': keepScreenOn,
-          'volumeKeyPaging': volumeKeyPaging,
-          'paragraphIndent': paragraphIndent,
-          'shelfSort': shelfSort.name,
-          'shelfAscending': shelfAscending,
-          'shelfView': shelfView.name,
-          'ttsRate': ttsRate,
-          'ttsPitch': ttsPitch,
-          'ttsAutoFollow': ttsAutoFollow,
-          'ttsAutoNextChapter': ttsAutoNextChapter,
-          'ttsEngine': ttsEngine,
-          'guideSeen': guideSeen,
-          'agreementAccepted': agreementAccepted,
-          'autoCheckUpdate': autoCheckUpdate,
-          'showPerformanceOverlay': showPerformanceOverlay,
-          'highRefreshRate': highRefreshRate,
-          'skipUpdateVersion': skipUpdateVersion,
-          'aiBaseUrl': aiBaseUrl,
-          'aiApiKey': aiApiKey,
-          'aiModel': aiModel,
-          'aiIncludeReading': aiIncludeReading,
-          'aiUseLocalModel': aiUseLocalModel,
-          'aiLocalModelId': aiLocalModelId,
-        }),
-      );
-    } catch (_) {
-      // 忽略保存失败
-    }
+    if (file == null) return Future.value();
+    final key = aiApiKey;
+    return writeJson(
+      file,
+      jsonEncode({
+        'v': 2,
+        'themeMode': themeModeName,
+        'accentIndex': accentIndex,
+        'fontSize': fontSize,
+        'lineHeight': lineHeight,
+        'letterSpacing': letterSpacing,
+        'readerMarginH': readerMarginH,
+        'paragraphSpacing': paragraphSpacing,
+        'readerPaddingTop': readerPaddingTop,
+        'readerPaddingBottom': readerPaddingBottom,
+        'readerHeaderVisible': readerHeaderVisible,
+        'readerFooterVisible': readerFooterVisible,
+        'fontFamily': fontFamily,
+        'readerBgIndex': readerBgIndex,
+        'lightBgIndex': lightBgIndex,
+        'pageMode': pageMode.name,
+        'keepScreenOn': keepScreenOn,
+        'volumeKeyPaging': volumeKeyPaging,
+        'paragraphIndent': paragraphIndent,
+        'shelfSort': shelfSort.name,
+        'shelfAscending': shelfAscending,
+        'shelfView': shelfView.name,
+        'ttsRate': ttsRate,
+        'ttsPitch': ttsPitch,
+        'ttsAutoFollow': ttsAutoFollow,
+        'ttsAutoNextChapter': ttsAutoNextChapter,
+        'ttsEngine': ttsEngine,
+        'guideSeen': guideSeen,
+        'agreementAccepted': agreementAccepted,
+        'autoCheckUpdate': autoCheckUpdate,
+        'showPerformanceOverlay': showPerformanceOverlay,
+        'highRefreshRate': highRefreshRate,
+        'skipUpdateVersion': skipUpdateVersion,
+        'customFontPath': customFontPath,
+        'customBackgroundPath': customBackgroundPath,
+        'searchConcurrency': searchConcurrency,
+        'searchTimeout': searchTimeout,
+        'aiBaseUrl': aiBaseUrl,
+        'aiModel': aiModel,
+        'aiIncludeReading': aiIncludeReading,
+        'aiUseLocalModel': aiUseLocalModel,
+        'aiLocalModelId': aiLocalModelId,
+      }),
+      beforeWrite: () async {
+        if (!_credentialsReady) {
+          throw StateError("Secure credentials could not be loaded");
+        }
+        await _credentials.write(key);
+      },
+    );
   }
 }

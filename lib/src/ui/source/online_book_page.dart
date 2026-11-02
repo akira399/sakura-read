@@ -1,3 +1,4 @@
+import 'dart:async';
 // 在线书籍详情页：详情信息 + 多源切换 + 目录 + 加入书架 / 换源 / 开始阅读。
 //
 // 同一本书可能来自多个书源（搜索页已按书合并）；页内提供来源切换，
@@ -46,6 +47,7 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
 
   final OnlineBookService _service = OnlineBookService();
 
+  int _loadSeq = 0;
   int _sel = 0;
   bool _loading = true;
   String? _error;
@@ -74,7 +76,14 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     if (_bookUrl.isEmpty) {
       setState(() {
         _loading = false;
@@ -87,15 +96,17 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
       _error = null;
     });
     try {
-      final info = await _service.fetchInfo(_variant.source, _bookUrl);
-      if (!mounted) return;
+      final info = await _service
+          .fetchInfo(_variant.source, _bookUrl)
+          .timeout(const Duration(seconds: 30));
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _info = info;
         _chapters = info.chapters;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _loading = false;
         _error = '$e';
@@ -133,11 +144,8 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
     setState(() => _busy = true);
     try {
       final id = Book.newId();
-      String? coverPath;
       final coverUrl = _info?.coverUrl ?? _variant.book.coverUrl;
-      if (coverUrl != null && coverUrl.isNotEmpty) {
-        coverPath = await _downloadCover(coverUrl, id);
-      }
+
       final book = Book(
         id: id,
         title: (_info?.name ?? _variant.book.name ?? '未命名').trim(),
@@ -145,18 +153,39 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
         format: BookFormat.online,
         path: _bookUrl,
         sourceUrl: _variant.source.bookSourceUrl,
-        coverPath: coverPath,
-        generatedCover: coverPath == null,
+        generatedCover: true,
         intro: (_info?.intro ?? _variant.book.intro ?? '').trim(),
         chapters: _chapters,
       );
       widget.bookStore.addOnline(book);
+      await widget.bookStore.flush();
+      if (coverUrl != null && coverUrl.isNotEmpty) {
+        unawaited(
+          () async {
+            final path = await _downloadCover(coverUrl, id);
+            if (path == null || widget.bookStore.byId(id)?.coverPath != null) {
+              return;
+            }
+            book
+              ..coverPath = path
+              ..generatedCover = false;
+            await widget.bookStore.flush();
+            if (mounted) setState(() {});
+          }().catchError((Object _) {}),
+        );
+      }
       if (!mounted) return;
       setState(() {});
       if (!silent) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('已加入书架，可以随时接着看啦 🎀')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('保存失败，请检查存储空间后重试')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -185,11 +214,18 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
         author: _info?.author ?? _variant.book.author,
         intro: _info?.intro ?? _variant.book.intro,
       );
+      await widget.bookStore.flush();
       if (!mounted) return;
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('已切换书源：${_variant.source.bookSourceName}')),
       );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('保存失败，请检查存储空间后重试')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

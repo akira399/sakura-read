@@ -79,6 +79,7 @@ class TxtParser {
   static List<ChapterRefLike> splitChapters(String text) {
     final markers = <_Marker>[];
 
+    final numbered = <(int, _Marker)>[];
     var lineStart = 0;
     while (lineStart <= text.length) {
       var lineEnd = text.indexOf('\n', lineStart);
@@ -95,10 +96,32 @@ class TxtParser {
         markers.add(_Marker(title: _normalizeTitle(trimmed), start: lineStart));
       }
 
+      final numeric = RegExp(
+        r'^(\d{1,6})[、．.，,][ \t　]*(\S.{0,46})$',
+      ).firstMatch(trimmed);
+      if (numeric != null && !trimmed.endsWith('。') && trimmed.length <= 50) {
+        numbered.add((
+          int.parse(numeric.group(1)!),
+          _Marker(title: trimmed, start: lineStart),
+        ));
+      }
       if (lineEnd >= text.length) break;
       lineStart = lineEnd + 1;
     }
 
+    if (markers.length < 2 && numbered.length >= 2) {
+      final sequential = numbered
+          .asMap()
+          .entries
+          .skip(1)
+          .where((e) => e.value.$1 == numbered[e.key - 1].$1 + 1)
+          .length;
+      if (sequential >= (numbered.length - 1) * .8) {
+        markers
+          ..clear()
+          ..addAll(numbered.map((e) => e.$2));
+      }
+    }
     if (markers.length < 2) {
       // 没识别出章节：整篇一章
       return [ChapterRefLike(title: '全文', start: 0, end: text.length)];

@@ -73,6 +73,7 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
 
   @override
   void dispose() {
+    _repo?.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -97,7 +98,12 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
       _results.clear();
     });
 
-    final repo = _repo ??= OnlineRepo(store: widget.store);
+    _repo?.dispose();
+    final repo = _repo = OnlineRepo(
+      store: widget.store,
+      concurrency: widget.prefs.searchConcurrency,
+      perSourceTimeout: Duration(seconds: widget.prefs.searchTimeout),
+    );
     await repo.searchAll(
       key,
       onSourceDone: (r) {
@@ -107,6 +113,54 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
     );
     if (!mounted || seq != _searchSeq) return;
     setState(() => _searching = false);
+  }
+
+  Future<void> _searchOptions() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('搜索设置'),
+        content: StatefulBuilder(
+          builder: (ctx, update) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('并发书源数：${widget.prefs.searchConcurrency}'),
+              Slider(
+                value: widget.prefs.searchConcurrency.toDouble(),
+                min: 1,
+                max: 16,
+                divisions: 15,
+                onChanged: (v) => update(
+                  () => widget.prefs.setSearchOptions(
+                    v.round(),
+                    widget.prefs.searchTimeout,
+                  ),
+                ),
+              ),
+              Text('单源限时：${widget.prefs.searchTimeout} 秒'),
+              Slider(
+                value: widget.prefs.searchTimeout.toDouble(),
+                min: 5,
+                max: 30,
+                divisions: 5,
+                onChanged: (v) => update(
+                  () => widget.prefs.setSearchOptions(
+                    widget.prefs.searchConcurrency,
+                    v.round(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('完成'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 跨源合并：同名 + 同作者视为同一本书（保持书源顺序与首次出现顺序）。
@@ -168,6 +222,22 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: '搜索设置',
+            icon: const Icon(Icons.tune),
+            onPressed: _searching ? null : _searchOptions,
+          ),
+          if (_searching)
+            IconButton(
+              tooltip: '停止搜索',
+              icon: const Icon(Icons.stop_circle_outlined),
+              onPressed: () {
+                _searchSeq++;
+                _repo?.dispose();
+                _repo = null;
+                setState(() => _searching = false);
+              },
+            ),
           IconButton(
             tooltip: '搜索',
             onPressed: _searching ? null : _start,
@@ -257,6 +327,22 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
                 ),
               ),
               actions: [
+                IconButton(
+                  tooltip: '搜索设置',
+                  icon: const Icon(Icons.tune),
+                  onPressed: _searching ? null : _searchOptions,
+                ),
+                if (_searching)
+                  IconButton(
+                    tooltip: '停止搜索',
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    onPressed: () {
+                      _searchSeq++;
+                      _repo?.dispose();
+                      _repo = null;
+                      setState(() => _searching = false);
+                    },
+                  ),
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
                   child: const Text('知道了'),

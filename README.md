@@ -105,7 +105,7 @@
 
 ## 🔨 自己编译
 
-需要 Flutter stable（Dart 3）、Android SDK、JDK 17。
+需要 Flutter 3.47+（Dart 3.13+）、Android SDK、JDK 17；CI 固定使用 Flutter 3.47.9。
 
 ```bash
 flutter pub get

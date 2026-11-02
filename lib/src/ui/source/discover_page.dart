@@ -61,6 +61,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
   /// 当前选中的分类。
   ExploreCategory? _category;
 
+  int _loadSeq = 0;
   bool _loading = false;
   String? _error;
   List<_MergedBook> _books = const [];
@@ -79,6 +80,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
 
   @override
   void dispose() {
+    _repo.dispose();
     widget.sourceStore.removeListener(_onStoreChanged);
     super.dispose();
   }
@@ -147,6 +149,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     final source = _source;
     final category = _category;
     if (source == null || category == null) return;
@@ -155,7 +158,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
       _error = null;
     });
     final result = await _repo.exploreSource(source, category);
-    if (!mounted) return;
+    if (!mounted || seq != _loadSeq) return;
     final merged = _merge([result]);
     setState(() {
       _loading = false;
@@ -191,6 +194,11 @@ class _DiscoverPageState extends State<DiscoverPage> {
         title: const Text('发现'),
         actions: [
           IconButton(
+            tooltip: '查找书源',
+            icon: const Icon(Icons.search),
+            onPressed: _findSource,
+          ),
+          IconButton(
             onPressed: () => _reloadSources(),
             icon: const Icon(Icons.refresh_rounded),
             tooltip: '重新检测书源',
@@ -206,6 +214,49 @@ class _DiscoverPageState extends State<DiscoverPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _findSource() async {
+    var filter = '';
+    final selected = await showModalBottomSheet<BookSource>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, update) => SizedBox(
+          height: MediaQuery.sizeOf(ctx).height * .75,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(labelText: '按书源名称、分组或网址查找'),
+                  onChanged: (v) => update(() => filter = v.toLowerCase()),
+                ),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final s in _sources.where(
+                        (s) =>
+                            '${s.bookSourceName} ${s.bookSourceGroup} ${s.bookSourceUrl}'
+                                .toLowerCase()
+                                .contains(filter),
+                      ))
+                        ListTile(
+                          title: Text(s.bookSourceName),
+                          subtitle: Text(s.bookSourceUrl),
+                          onTap: () => Navigator.pop(ctx, s),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (selected != null && mounted) _selectSource(selected);
   }
 
   /// 空状态：没有任何书源支持发现页。
@@ -227,6 +278,11 @@ class _DiscoverPageState extends State<DiscoverPage> {
             '\n'
             '可在「设置 → 书源管理」导入带此类规则的书源',
         actions: [
+          IconButton(
+            tooltip: '查找书源',
+            icon: const Icon(Icons.search),
+            onPressed: _findSource,
+          ),
           FilledButton.icon(
             onPressed: () => _reloadSources(),
             icon: const Icon(Icons.refresh_rounded),
@@ -333,6 +389,11 @@ class _DiscoverPageState extends State<DiscoverPage> {
         title: '没有拿到书单',
         subtitle: error,
         actions: [
+          IconButton(
+            tooltip: '查找书源',
+            icon: const Icon(Icons.search),
+            onPressed: _findSource,
+          ),
           OutlinedButton.icon(
             onPressed: _load,
             icon: const Icon(Icons.refresh_rounded),

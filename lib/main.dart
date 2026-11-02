@@ -1,3 +1,4 @@
+import 'src/ui/persistence_host.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -34,12 +35,22 @@ Future<void> main() async {
   await petStore.load();
   PetStore.shared = petStore;
   runApp(
-    SakuraApp(
-      prefs: prefs,
-      store: store,
-      sourceStore: sourceStore,
-      statsStore: statsStore,
-      petStore: petStore,
+    PersistenceHost(
+      flushers: [
+        prefs.flush,
+        store.flush,
+        sourceStore.flush,
+        bookmarkStore.flush,
+        statsStore.flush,
+        petStore.flush,
+      ],
+      child: SakuraApp(
+        prefs: prefs,
+        store: store,
+        sourceStore: sourceStore,
+        statsStore: statsStore,
+        petStore: petStore,
+      ),
     ),
   );
 }

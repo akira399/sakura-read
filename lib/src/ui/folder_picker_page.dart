@@ -7,11 +7,14 @@ import '../data/natural_sort.dart';
 import '../platform/native_bridge.dart';
 import 'widgets/cute.dart';
 
-enum PickerMode { files, folder, sourceFiles }
+enum PickerMode { files, folder, sourceFiles, fonts, images, bookshelfFiles }
 
 /// 各模式允许展示的文件扩展名（小写、不带点）；
 /// `folder` 模式不展示文件，返回空集合。
 Set<String> pickerExtensionsFor(PickerMode mode) => switch (mode) {
+  PickerMode.fonts => const {'ttf', 'otf'},
+  PickerMode.images => const {'png', 'jpg', 'jpeg', 'webp'},
+  PickerMode.bookshelfFiles => const {'json', 'zip'},
   PickerMode.files => kNovelExtensions,
   PickerMode.sourceFiles => kSourceFileExtensions,
   PickerMode.folder => const <String>{},
@@ -133,6 +136,9 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
           title: Text(
             widget.title ??
                 switch (widget.mode) {
+                  PickerMode.fonts => '选择字体',
+                  PickerMode.images => '选择图片',
+                  PickerMode.bookshelfFiles => '选择书架备份',
                   PickerMode.files => '选择小说文件',
                   PickerMode.sourceFiles => '选择书源文件',
                   PickerMode.folder => '选择文件夹',
@@ -308,6 +314,11 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
 
     if (rows.isEmpty) {
       final (icon, title, subtitle) = switch (widget.mode) {
+        PickerMode.fonts || PickerMode.images || PickerMode.bookshelfFiles => (
+          Icons.folder_open,
+          '未找到支持的文件',
+          '可进入子文件夹继续查找',
+        ),
         PickerMode.files => (
           Icons.menu_book_outlined,
           '这个文件夹里没有小说',

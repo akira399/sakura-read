@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 
@@ -247,9 +248,11 @@ class LocalModelManager extends ChangeNotifier {
     AppDirs? dirs,
     http.Client? client,
     bool? supportedOverride,
+    LocalModelSpec? specOverride,
   }) : _dirsOverride = dirs,
        _client = client ?? http.Client(),
-       _supportedOverride = supportedOverride {
+       _supportedOverride = supportedOverride,
+       _specOverride = specOverride {
     if (supported) unawaited(refresh());
   }
 
@@ -259,6 +262,7 @@ class LocalModelManager extends ChangeNotifier {
   /// 输入预算（token）：总上限 1280，给回答留出空间。
   static const int promptBudget = 800;
 
+  final LocalModelSpec? _specOverride;
   final AppDirs? _dirsOverride;
   final http.Client _client;
   final bool? _supportedOverride;
@@ -276,6 +280,7 @@ class LocalModelManager extends ChangeNotifier {
 
   /// 当前选中的模型（目前目录里只有一个）。
   LocalModelSpec get spec {
+    if (_specOverride != null) return _specOverride;
     final id = _selectedId;
     for (final item in localModelCatalog) {
       if (item.id == id) return item;
@@ -332,7 +337,7 @@ class LocalModelManager extends ChangeNotifier {
     try {
       final path = await modelPath();
       final file = File(path);
-      final exists = await file.exists() && await file.length() > 0;
+      final exists = await file.exists() && await file.length() == spec.bytes;
       final info = await LocalLlmEngine.info();
       final loaded = info?['loaded'] == true;
       final loadedPath = info?['path'] as String?;
@@ -361,12 +366,27 @@ class LocalModelManager extends ChangeNotifier {
 
   /// 下载模型（按镜像顺序重试，先写 `.part` 再改名）。
   Future<void> download() {
-    return _downloading ??= _download().whenComplete(() {
-      _downloading = null;
-    });
+    return _downloading ??= _download()
+        .catchError((Object error) {
+          _phase = LocalModelPhase.error;
+          _error = '模型下载失败：${_shortError(error)}';
+          _notify(force: true);
+        })
+        .whenComplete(() {
+          _downloading = null;
+        });
+  }
+
+  bool _cancelDownload = false;
+  Completer<void>? _downloadAbort;
+  void pauseDownload() {
+    _cancelDownload = true;
+    if (_downloadAbort?.isCompleted == false) _downloadAbort!.complete();
   }
 
   Future<void> _download() async {
+    _cancelDownload = false;
+    _downloadAbort = Completer<void>();
     _error = null;
     _phase = LocalModelPhase.downloading;
     _received = 0;
@@ -381,22 +401,85 @@ class LocalModelManager extends ChangeNotifier {
     Object? lastError;
     for (final url in spec.mirrors) {
       try {
-        final request = http.Request('GET', Uri.parse(url));
+        var offset = await tmp.exists() ? await tmp.length() : 0;
+        if (offset > spec.bytes) {
+          await tmp.delete();
+          offset = 0;
+        }
+        if (offset == spec.bytes) {
+          await tmp.rename(path);
+          _phase = LocalModelPhase.downloaded;
+          _received = offset;
+          _notify(force: true);
+          return;
+        }
+        final metadata = File('$path.part.meta');
+        Map<String, dynamic> previous = {};
+        try {
+          previous =
+              jsonDecode(await metadata.readAsString()) as Map<String, dynamic>;
+        } catch (_) {}
+        final validator = previous['validator'] as String? ?? '';
+        if (offset > 0 && (previous['url'] != url || validator.isEmpty)) {
+          offset = 0;
+        }
+        final request = http.AbortableRequest(
+          'GET',
+          Uri.parse(url),
+          abortTrigger: _downloadAbort!.future,
+        );
+        if (offset > 0) {
+          request.headers['Range'] = 'bytes=$offset-';
+          request.headers['If-Range'] = validator;
+        }
         final response = await _client
             .send(request)
             .timeout(const Duration(seconds: 45));
-        if (response.statusCode != 200) {
+        if (response.statusCode != 200 && response.statusCode != 206) {
           throw HttpException(
             'HTTP ${response.statusCode}',
             uri: Uri.parse(url),
           );
         }
-        final sink = tmp.openWrite();
-        var received = 0;
+        if (response.statusCode == 206) {
+          final range = RegExp(
+            r'^bytes (\d+)-(\d+)/(\d+)$',
+          ).firstMatch(response.headers['content-range'] ?? '');
+          if (range == null ||
+              int.parse(range[1]!) != offset ||
+              int.parse(range[3]!) != spec.bytes) {
+            throw const HttpException('续传范围不匹配，已保留下载进度');
+          }
+        } else {
+          offset = 0;
+        }
+        await metadata.writeAsString(
+          jsonEncode({
+            'url': url,
+            'validator':
+                response.headers['etag'] ??
+                response.headers['last-modified'] ??
+                '',
+          }),
+          flush: true,
+        );
+        final sink = tmp.openWrite(
+          mode: offset > 0 ? FileMode.append : FileMode.write,
+        );
+        var received = offset;
         try {
           await for (final chunk in response.stream.timeout(
             const Duration(seconds: 90),
           )) {
+            if (_cancelDownload || _disposed) {
+              await sink.flush();
+              _phase = LocalModelPhase.idle;
+              _notify(force: true);
+              return;
+            }
+            if (received + chunk.length > spec.bytes) {
+              throw const HttpException('模型响应大小异常');
+            }
             sink.add(chunk);
             received += chunk.length;
             _received = received;
@@ -419,10 +502,13 @@ class LocalModelManager extends ChangeNotifier {
         _notify(force: true);
         return;
       } catch (e) {
+        if (_cancelDownload) {
+          _phase = LocalModelPhase.idle;
+          _notify(force: true);
+          return;
+        }
         lastError = e;
-        try {
-          if (await tmp.exists()) await tmp.delete();
-        } catch (_) {}
+        // Keep partial bytes across retries and app restarts.
       }
     }
     _phase = LocalModelPhase.error;
@@ -476,6 +562,8 @@ class LocalModelManager extends ChangeNotifier {
     try {
       final file = File(await modelPath());
       if (await file.exists()) await file.delete();
+      final metadata = File('${file.path}.part.meta');
+      if (await metadata.exists()) await metadata.delete();
       final part = File('${file.path}.part');
       if (await part.exists()) await part.delete();
     } catch (_) {}
@@ -511,6 +599,7 @@ class LocalModelManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    pauseDownload();
     _disposed = true;
     super.dispose();
   }

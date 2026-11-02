@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../data/pet_mood.dart';
 import '../../data/pet_store.dart';
@@ -389,10 +388,7 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   /// 进入生气状态：换生气差分 + 台词；可能触发彩蛋。
   void _enterAngry(PetReaction r) {
-    if (r.egg) {
-      _triggerEgg();
-      return;
-    }
+    // An interaction never takes over or locks the reading screen.
     setState(() => _faceIndex = _faceOf(_angryFace));
     _showLine(r.line ?? '哼！');
     _angryTimer?.cancel();
@@ -406,12 +402,6 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
   }
 
   /// 触发彩蛋：全黑锁定界面。
-  void _triggerEgg() {
-    setState(() => _faceIndex = _faceOf(_rageFace));
-    _showLine(petEggLine);
-    kPetEggActive.value = true;
-    HapticFeedback.heavyImpact();
-  }
 
   /// 拖动结束：随机台词 + 可能的生气。
   void _onDragEnd() {
@@ -573,7 +563,7 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
           return ValueListenableBuilder<bool>(
             valueListenable: widget.hostReady ?? _alwaysReady,
             builder: (context, ready, _) {
-              if (!ready) return const SizedBox.shrink();
+              if (!ready || !widget.pet.enabled) return const SizedBox.shrink();
               // 阅读器内：默认隐藏；用户开启「阅读时显示桌宠」才显示
               if (widget.pet.readerActive && !widget.pet.showPetInReader) {
                 return const SizedBox.shrink();

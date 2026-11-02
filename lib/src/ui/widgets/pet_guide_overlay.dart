@@ -19,6 +19,7 @@ class PetGuideHost extends StatefulWidget {
     required this.seen,
     required this.onSeen,
     this.enabled = true,
+    this.autoStart = true,
   });
 
   final PetStore pet;
@@ -34,6 +35,7 @@ class PetGuideHost extends StatefulWidget {
 
   /// 是否允许开始引导（首次启动需先同意使用条款）。
   final bool enabled;
+  final bool autoStart;
 
   @override
   State<PetGuideHost> createState() => _PetGuideHostState();
@@ -72,7 +74,7 @@ class _PetGuideHostState extends State<PetGuideHost> {
   }
 
   void _maybeStart() {
-    if (_started || !mounted) return;
+    if (_started || !mounted || !widget.autoStart) return;
     if (!widget.enabled) return; // 未同意首启条款：先不打扰
     if (!widget.hostReady.value) return;
     if (widget.seen && !_forceShow) return;

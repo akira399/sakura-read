@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import '../data/persistence.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -40,7 +41,7 @@ class SourceImportReport {
 }
 
 /// 书源仓库（可监听，UI 依赖它刷新）。
-class SourceStore extends ChangeNotifier {
+class SourceStore extends ChangeNotifier with ReliablePersistence {
   SourceStore({AppDirs? dirsOverride, List<BookSource>? initial})
     : _dirsOverride = dirsOverride {
     if (initial != null) _sources.addAll(initial);
@@ -78,7 +79,7 @@ class SourceStore extends ChangeNotifier {
     _file = File('${_dirs!.files}/book_sources.json');
     try {
       if (await _file!.exists()) {
-        final data = jsonDecode(await _file!.readAsString());
+        final data = await readJson(_file!);
         if (data is Map && data['sources'] is List) {
           for (final item in data['sources'] as List) {
             try {
@@ -220,7 +221,10 @@ class SourceStore extends ChangeNotifier {
   }
 
   /// 立即落盘（测试与退出前调用；平时是防抖保存）。
-  Future<void> flush() => _save();
+  Future<void> flush() {
+    _saveTimer?.cancel();
+    return _save();
+  }
 
   /// 导入 / 更新内置书源（App 启动时调用）。
   ///
@@ -272,6 +276,7 @@ class SourceStore extends ChangeNotifier {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    unawaited(flush().catchError((Object _) {}));
     super.dispose();
   }
 
@@ -280,25 +285,19 @@ class SourceStore extends ChangeNotifier {
   void _saveSoon() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 400), () {
-      unawaited(_save());
+      unawaited(_save().catchError((Object _) {}));
     });
   }
 
-  Future<void> _save() async {
+  Future<void> _save() {
     final file = _file;
-    if (file == null) return;
-    try {
-      await file.parent.create(recursive: true);
-      final tmp = File('${file.path}.tmp');
-      await tmp.writeAsString(
-        jsonEncode({
-          'version': 1,
-          'sources': _sources.map((s) => s.toJson()).toList(),
-        }),
-      );
-      await tmp.rename(file.path);
-    } catch (_) {
-      // 忽略保存失败
-    }
+    if (file == null) return Future.value();
+    return writeJson(
+      file,
+      jsonEncode({
+        'version': 1,
+        'sources': _sources.map((s) => s.toJson()).toList(),
+      }),
+    );
   }
 }

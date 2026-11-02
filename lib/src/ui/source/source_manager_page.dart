@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../source/http_client.dart';
+import 'source_health_page.dart';
+import '../../source/subscription_link.dart';
 import '../../source/models.dart';
 import '../../source/source_export.dart';
 import '../../source/source_store.dart';
@@ -82,6 +84,13 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     return AppBar(
       title: const Text('书源管理'),
       actions: [
+        IconButton(
+          tooltip: '书源体检',
+          icon: const Icon(Icons.health_and_safety_outlined),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => SourceHealthPage(store: store)),
+          ),
+        ),
         IconButton(
           tooltip: '批量管理',
           onPressed: () => setState(() {
@@ -609,7 +618,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     messenger.showSnackBar(const SnackBar(content: Text('正在获取订阅…')));
     try {
       final resp = await SourceHttpClient().get(
-        url,
+        subscriptionUrl(url),
         timeout: const Duration(seconds: 20),
         retries: 1,
       );

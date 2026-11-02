@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../source/subscription_link.dart';
+import '../source/http_client.dart';
 import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
@@ -115,6 +117,50 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 分派被打开的文件：txt / epub → 导入书架并打开；json → 导入书源。
   Future<void> _handleOpenedFile(String path) async {
     if (!mounted) return;
+    if (path.startsWith('legado:')) {
+      try {
+        final url = subscriptionUrl(path);
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('导入书源订阅'),
+            content: Text('是否获取并导入以下订阅？\n$url'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('导入'),
+              ),
+            ],
+          ),
+        );
+        if (ok != true) return;
+        final client = SourceHttpClient();
+        try {
+          final response = await client.get(url, retries: 0);
+          if (!response.ok) throw StateError('请求失败');
+          final report = widget.sourceStore.importFromText(response.body);
+          await widget.sourceStore.flush();
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(report.summary)));
+          }
+        } finally {
+          client.close();
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('订阅导入失败，请检查地址与网络')));
+        }
+      }
+      return;
+    }
     final ext = path.contains('.')
         ? path.substring(path.lastIndexOf('.') + 1).toLowerCase()
         : '';

@@ -1,3 +1,6 @@
+import 'library_search_page.dart';
+import '../data/legacy_shelf.dart';
+import 'dart:math';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -602,12 +605,50 @@ class _ShelfPageState extends State<ShelfPage> {
               },
             ),
             ListTile(
+              leading: const _SheetIcon(Icons.find_in_page_outlined),
+              title: const Text('搜索书籍正文'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => LibrarySearchPage(
+                      store: widget.store,
+                      prefs: widget.prefs,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const _SheetIcon(Icons.shuffle),
+              title: const Text('随便读一本'),
+              subtitle: const Text('从现有书架随机选择，不生成虚构推荐'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                final books = widget.store.books
+                    .where((b) => !b.finished)
+                    .toList();
+                if (books.isNotEmpty) {
+                  _openDetail(books[Random().nextInt(books.length)]);
+                }
+              },
+            ),
+            ListTile(
               leading: const _SheetIcon(Icons.upload_file_rounded),
               title: const Text('选择文件'),
               subtitle: const Text('支持 .txt / .epub，可多选'),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _pickFiles();
+              },
+            ),
+            ListTile(
+              leading: const _SheetIcon(Icons.move_to_inbox_outlined),
+              title: const Text('导入阅读书架备份'),
+              subtitle: const Text('bookshelf.json / 备份 ZIP；先导入对应书源'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _importLegacy();
               },
             ),
             ListTile(
@@ -633,6 +674,92 @@ class _ShelfPageState extends State<ShelfPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _importLegacy() async {
+    final paths = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(
+        builder: (_) => const FolderPickerPage(
+          mode: PickerMode.bookshelfFiles,
+          title: '选择阅读书架备份',
+        ),
+      ),
+    );
+    if (paths == null || paths.isEmpty || !mounted) return;
+    try {
+      final entries = parseLegacyShelf(await File(paths.first).readAsBytes());
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('导入 ${entries.length} 本书？'),
+          content: const Text(
+            '在线书需已导入对应书源，逐本重新获取目录并保留章节进度。重复书籍跳过；本地书需先复制原文件，备份不包含正文。章内位置归零以避免错位。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('导入'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      final progress = ValueNotifier<String>('开始导入…');
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: ValueListenableBuilder<String>(
+              valueListenable: progress,
+              builder: (_, text, _) => Text(text),
+            ),
+          ),
+        ),
+      );
+      late (int, List<String>) result;
+      try {
+        result = await importLegacyShelf(
+          entries,
+          widget.store,
+          widget.sourceStore,
+          onProgress: (n, total) => progress.value = '导入 $n / $total',
+        );
+      } finally {
+        if (mounted) Navigator.of(context).pop();
+        progress.dispose();
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('已导入 ${result.$1} 本'),
+          content: SingleChildScrollView(
+            child: SelectableText(
+              result.$2.isEmpty ? '导入完成；重复条目已跳过' : result.$2.join('\n'),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('完成'),
+            ),
+          ],
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('备份导入失败，请选择有效的阅读备份文件')));
+      }
+    }
   }
 
   Future<void> _pickFiles() async {

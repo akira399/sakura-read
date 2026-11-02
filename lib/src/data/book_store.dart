@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'persistence.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -24,7 +25,7 @@ class ImportResult {
 }
 
 /// 书架数据：JSON 持久化 + 导入 + 阅读进度。
-class BookStore extends ChangeNotifier {
+class BookStore extends ChangeNotifier with ReliablePersistence {
   BookStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
 
   final AppDirs? _dirsOverride;
@@ -49,7 +50,7 @@ class BookStore extends ChangeNotifier {
     _file = File('${_dirs!.files}/library.json');
     try {
       if (await _file!.exists()) {
-        final data = jsonDecode(await _file!.readAsString());
+        final data = await readJson(_file!);
         if (data is Map && data['books'] is List) {
           for (final item in data['books'] as List) {
             if (item is Map) {
@@ -417,26 +418,32 @@ class BookStore extends ChangeNotifier {
   void _saveSoon() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 400), () {
-      unawaited(_save());
+      unawaited(_save().catchError((Object _) {}));
     });
   }
 
-  Future<void> _save() async {
+  Future<void> flush() {
+    _saveTimer?.cancel();
+    return _save();
+  }
+
+  Future<void> _save() {
     final file = _file;
-    if (file == null) return;
-    try {
-      await file.parent.create(recursive: true);
-      final tmp = File('${file.path}.tmp');
-      await tmp.writeAsString(
-        jsonEncode({
-          'version': 1,
-          'books': _books.map((b) => b.toJson()).toList(),
-        }),
-      );
-      await tmp.rename(file.path);
-    } catch (_) {
-      // 忽略保存失败
-    }
+    if (file == null) return Future.value();
+    return writeJson(
+      file,
+      jsonEncode({
+        'version': 1,
+        'books': _books.map((b) => b.toJson()).toList(),
+      }),
+    );
+  }
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    unawaited(flush().catchError((Object _) {}));
+    super.dispose();
   }
 }
 

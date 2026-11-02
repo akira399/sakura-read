@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:label="樱读"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:largeHeap="true"
@@ -42,6 +44,12 @@
             </intent-filter>
             <!-- 文件关联 ①：content:// + 常见 MIME 类型
                  （现代 Android 文件管理器的分享/打开方式主要走这条链路） -->
+            <intent-filter android:label="导入樱读书源">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="legado" android:host="import"/>
+            </intent-filter>
             <intent-filter android:label="用樱读打开">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -54,6 +62,12 @@
             </intent-filter>
             <!-- 文件关联 ②：file:// + 扩展名
                  （老式文件管理器 / 无 MIME 来源，按路径匹配 .txt/.epub/.json） -->
+            <intent-filter android:label="导入樱读书源">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="legado" android:host="import"/>
+            </intent-filter>
             <intent-filter android:label="用樱读打开">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -88,6 +102,7 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

@@ -1,3 +1,7 @@
+import 'library_search_page.dart';
+import '../source/source_store.dart';
+import 'source/source_health_page.dart';
+import '../data/library_search.dart';
 import 'package:flutter/material.dart';
 
 import '../data/ai_service.dart';
@@ -52,6 +56,8 @@ class _BubbleData {
 
 class _AiChatPageState extends State<AiChatPage> {
   static const _quickAsks = [
+    '/搜索 关键词',
+    '/书源体检',
     '我最近读到哪了？',
     '根据我的口味推荐一本书',
     '总结一下我的阅读习惯',
@@ -128,6 +134,50 @@ class _AiChatPageState extends State<AiChatPage> {
     if (_sending) return;
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty) return;
+    if (text == '/书源体检' && SourceStore.shared != null) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SourceHealthPage(store: SourceStore.shared!),
+        ),
+      );
+      return;
+    }
+    if (text.startsWith('/搜索 ')) {
+      final query = text.substring(4).trim();
+      setState(() {
+        _sending = true;
+        _bubbles.add(_BubbleData.user(text));
+        _input.clear();
+      });
+      try {
+        final hits = await LibrarySearch().search(widget.store, query);
+        if (mounted) {
+          setState(
+            () => _bubbles.add(
+              _BubbleData.assistant(
+                hits.isEmpty
+                    ? '未找到原文。仅检索本地书籍和已缓存的在线章节。'
+                    : hits
+                          .take(6)
+                          .map(
+                            (hit) =>
+                                '《${hit.book.title}》· ${hit.book.chapters[hit.chapter].title}\n${hit.excerpt}',
+                          )
+                          .join('\n\n'),
+              ),
+            ),
+          );
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() => _bubbles.add(_BubbleData.error('正文检索失败，请检查本地文件')));
+        }
+      } finally {
+        if (mounted) setState(() => _sending = false);
+      }
+      _scrollToBottom();
+      return;
+    }
     if (!_useLocal && !widget.prefs.aiHttpConfigured) {
       _openSettings();
       return;
@@ -330,6 +380,18 @@ class _AiChatPageState extends State<AiChatPage> {
               ],
             ),
             actions: [
+              IconButton(
+                tooltip: '检索书籍正文',
+                icon: const Icon(Icons.find_in_page_outlined),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => LibrarySearchPage(
+                      store: widget.store,
+                      prefs: widget.prefs,
+                    ),
+                  ),
+                ),
+              ),
               IconButton(
                 onPressed: _openSettings,
                 icon: const Icon(Icons.settings_outlined),

@@ -1,3 +1,4 @@
+import 'data/persistence.dart';
 import 'package:flutter/material.dart';
 import 'data/book_store.dart';
 import 'data/pet_guide.dart';
@@ -11,7 +12,6 @@ import 'ui/agreement_gate.dart';
 import 'ui/ai_chat_page.dart' show kAiChatActive;
 import 'ui/home_page.dart';
 import 'ui/splash_gate.dart';
-import 'ui/widgets/pet_egg.dart';
 import 'ui/widgets/pet_guide_overlay.dart';
 import 'ui/widgets/pet_overlay.dart';
 
@@ -57,7 +57,7 @@ class SakuraApp extends StatelessWidget {
               valueListenable: kPetEggActive,
               builder: (context, eggOn, _) => PopScope(
                 // 彩蛋激活时禁止返回 / 手势退出 → 真正的"锁定"
-                canPop: !eggOn,
+                canPop: true,
                 child: Stack(
                   children: [
                     child ?? const SizedBox.shrink(),
@@ -85,9 +85,35 @@ class SakuraApp extends StatelessWidget {
                       hostReady: kPetHostReady,
                       seen: prefs.guideSeen,
                       enabled: prefs.agreementAccepted,
+                      autoStart: false,
                       onSeen: () => prefs.setGuideSeen(true),
                     ),
-                    PetEggOverlay(active: kPetEggActive),
+                    // Screen-lock easter eggs are no longer part of reading.
+                    ValueListenableBuilder<Set<String>>(
+                      valueListenable: persistenceFailures,
+                      builder: (context, failures, _) => failures.isEmpty
+                          ? const SizedBox.shrink()
+                          : const Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              child: SafeArea(
+                                child: Material(
+                                  color: Color(0xFFFFE0B2),
+                                  child: Padding(
+                                    padding: EdgeInsets.all(10),
+                                    child: Text(
+                                      '部分数据尚未保存，请检查存储空间后重试。读取失败的原文件已保留。',
+                                      style: TextStyle(
+                                        color: Color(0xFF3E2723),
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                    ),
                   ],
                 ),
               ),

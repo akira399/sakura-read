@@ -6,7 +6,7 @@
 
 | 项目 | 版本 |
 |------|------|
-| Flutter | stable（Dart 3.9+） |
+| Flutter | 3.47.9（最低 Flutter 3.47 / Dart 3.13） |
 | Android SDK | compileSdk 36 / minSdk 24 |
 | Java | 17（Flutter 默认） |
 
@@ -20,6 +20,14 @@ flutter build apk --release --target-platform android-arm64   # 打包（见下�
 > 日常出包统一用 `--target-platform android-arm64`。
 
 ## 代码结构
+
+### 保存与凭据约定
+
+- 持久化 Store 使用 `ReliablePersistence` 串行提交 JSON 快照，先刷盘临时文件再替换原文件；需要确认落盘时调用 `flush()` 并处理异常。
+- `lastPersistenceError` 和全局保存提示用于暴露保存失败；读取损坏 JSON 后禁止自动覆盖原文件。修复原文件后应重新加载再保存。
+- Android API Key 通过独立 MethodChannel 使用 Android Keystore AES-GCM 加密，密文保存在 `noBackupFilesDir`。旧 `settings.json` 明文只在安全写入成功后移除，失败时保留原文件供重试。
+- Android 备份排除设置文件，避免旧明文凭据被备份；桌面预览的凭据仅驻留内存，未实现桌面端持久化安全存储。
+- 凭据存储失败不回退到明文，也不把凭据或原生异常详情写入日志。
 
 ```
 lib/

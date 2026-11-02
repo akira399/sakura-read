@@ -66,6 +66,25 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val credentials = SecureCredentials(this)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "sakuraread/credentials")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "read" && call.method != "write") {
+                    result.notImplemented()
+                } else {
+                    Thread {
+                        try {
+                            val value = synchronized(credentials) {
+                                if (call.method == "read") credentials.read()
+                                else { credentials.write(call.arguments as String); null }
+                            }
+                            runOnUiThread { result.success(value) }
+                        } catch (_: Exception) {
+                            runOnUiThread { result.error("credential_storage", "安全存储不可用，请重试", null) }
+                        }
+                    }.start()
+                }
+            }
         ttsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         // 内置本地小模型（离线 AI）通道，与 TTS 一样挂在这个 Activity 上
         localLlm = LocalLlmEngine(this, flutterEngine.dartExecutor.binaryMessenger)
@@ -613,6 +632,7 @@ class MainActivity : FlutterActivity() {
     private fun resolveOpenIntent(intent: Intent?): String? {
         if (intent == null || intent.action != Intent.ACTION_VIEW) return null
         val data = intent.data ?: return null
+        if (data.scheme == "legado" && data.host == "import") return data.toString()
         return try {
             val path = when (data.scheme) {
                 "file" -> data.path

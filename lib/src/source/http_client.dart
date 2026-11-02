@@ -129,7 +129,7 @@ class SourceHttpClient {
     int retries = 2,
   }) async {
     final uri = Uri.tryParse(url);
-    if (uri == null || !uri.hasScheme) {
+    if (uri == null || !_isHttpUri(uri)) {
       throw SourceHttpException('无效的地址：$url');
     }
     var attempt = 0;
@@ -166,14 +166,38 @@ class SourceHttpClient {
               resp.statusCode == 303 ||
               resp.statusCode == 307 ||
               resp.statusCode == 308;
-          if (isRedirect && loc != null && loc.isNotEmpty && redirects < 4) {
+          if (isRedirect && loc != null && loc.isNotEmpty) {
+            if (redirects >= 4) {
+              throw SourceHttpException('重定向次数过多');
+            }
             redirects++;
             final next = currentUri.resolve(loc.trim());
-            // 换域名/换协议时不要带上原有的 Host / Referer
-            hh.remove('Host');
+            if (!_isHttpUri(next)) {
+              throw SourceHttpException('无效的重定向地址：$next');
+            }
+            // 必须修改下一跳复用的 h；修改 hh 会在下一轮被丢弃。
+            final crossOrigin = currentUri.origin != next.origin;
+            h.removeWhere((key, _) {
+              final name = key.toLowerCase();
+              return name == 'host' ||
+                  (crossOrigin &&
+                      const {
+                        'authorization',
+                        'proxy-authorization',
+                        'cookie',
+                        'referer',
+                      }.contains(name));
+            });
             if (resp.statusCode == 303) {
-              currentMethod = 'GET';
+              if (currentMethod.toUpperCase() != 'HEAD') currentMethod = 'GET';
               currentBody = null;
+              h.removeWhere(
+                (key, _) => const {
+                  'content-type',
+                  'content-length',
+                  'transfer-encoding',
+                }.contains(key.toLowerCase()),
+              );
             }
             currentUri = next;
             continue;
@@ -217,6 +241,9 @@ class SourceHttpClient {
       }
     }
   }
+
+  static bool _isHttpUri(Uri uri) =>
+      (uri.scheme == 'http' || uri.scheme == 'https') && uri.host.isNotEmpty;
 
   /// 把底层 socket 报错翻译成用户看得懂的提示。
   static String _friendlyClientMessage(http.ClientException e) {
@@ -337,7 +364,7 @@ String _decodeWith(Uint8List bytes, String? cs) {
 // ---------- 极简 Cookie 暂存 ----------
 
 class _CookieJar {
-  final Map<String, Map<String, String>> _byHost = {};
+  final Map<String, Map<String, ({String value, bool secure})>> _byHost = {};
 
   void absorb(Uri uri, Map<String, String> headers) {
     final setCookie = headers['set-cookie'] ?? headers['Set-Cookie'];
@@ -355,7 +382,13 @@ class _CookieJar {
       if (value.isEmpty) {
         jar.remove(name);
       } else {
-        jar[name] = value;
+        jar[name] = (
+          value: value,
+          secure: raw
+              .split(';')
+              .skip(1)
+              .any((attribute) => attribute.trim().toLowerCase() == 'secure'),
+        );
       }
     }
   }
@@ -363,6 +396,10 @@ class _CookieJar {
   String? headerFor(Uri uri) {
     final jar = _byHost[uri.host];
     if (jar == null || jar.isEmpty) return null;
-    return jar.entries.map((e) => '${e.key}=${e.value}').join('; ');
+    final cookies = jar.entries
+        .where((e) => !e.value.secure || uri.scheme == 'https')
+        .map((e) => '${e.key}=${e.value.value}')
+        .join('; ');
+    return cookies.isEmpty ? null : cookies;
   }
 }

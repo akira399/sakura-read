@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import '../data/prefs.dart';
 import '../source/source_store.dart';
 import '../theme/app_theme.dart';
 import 'reader/reader_page.dart';
+import 'folder_picker_page.dart';
 import 'source/source_switch_sheet.dart';
 import 'widgets/book_cover.dart';
 import 'widgets/cute.dart';
@@ -106,6 +108,35 @@ class _BookDetailPageState extends State<BookDetailPage> {
     );
   }
 
+  Future<void> _changeCover() async {
+    final picked = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(
+        builder: (_) =>
+            const FolderPickerPage(mode: PickerMode.images, title: '选择新封面'),
+      ),
+    );
+    if (picked == null || picked.isEmpty || _book == null) return;
+    try {
+      final src = File(picked.first);
+      if (await src.length() > 20 * 1024 * 1024) throw StateError('too large');
+      await store.coverDir.create(recursive: true);
+      final target =
+          '${store.coverDir.path}/${_book!.id}-${DateTime.now().microsecondsSinceEpoch}.img';
+      await src.copy(target);
+      _book!
+        ..coverPath = target
+        ..generatedCover = false;
+      await store.flush();
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('封面导入失败')));
+      }
+    }
+  }
+
   /// 清空本书缓存。
   Future<void> _clearCache() async {
     await store.clearBookCache(widget.bookId);
@@ -130,6 +161,12 @@ class _BookDetailPageState extends State<BookDetailPage> {
         }
         final isOnline = book.format == BookFormat.online;
         return Scaffold(
+          floatingActionButton: FloatingActionButton.small(
+            heroTag: 'edit-cover-${book.id}',
+            tooltip: '更换封面',
+            onPressed: _changeCover,
+            child: const Icon(Icons.image_outlined),
+          ),
           body: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(

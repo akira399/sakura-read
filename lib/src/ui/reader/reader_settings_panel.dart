@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/pet_store.dart';
 import '../../data/prefs.dart';
+import '../folder_picker_page.dart';
 
 /// 阅读设置面板（阅读器底部弹层 / 设置页共用）。
 ///
@@ -250,6 +251,34 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           ],
         ),
         const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => _importAsset(true),
+              icon: const Icon(Icons.font_download_outlined),
+              label: const Text('导入字体'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => _importAsset(false),
+              icon: const Icon(Icons.wallpaper),
+              label: const Text('导入背景'),
+            ),
+            if (widget.prefs.customBackgroundPath.isNotEmpty)
+              TextButton(
+                onPressed: widget.prefs.clearReaderBackground,
+                child: const Text('清除背景'),
+              ),
+            if (widget.prefs.customFontPath.isNotEmpty)
+              ChoiceChip(
+                label: const Text('自定义字体'),
+                selected:
+                    widget.prefs.fontFamily == widget.prefs.customFontFamily,
+                onSelected: (_) =>
+                    widget.prefs.setFontFamily(widget.prefs.customFontFamily),
+              ),
+          ],
+        ),
         const _Label('字体'),
         const SizedBox(height: 6),
         Wrap(
@@ -272,6 +301,27 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
         ),
       ],
     );
+  }
+
+  Future<void> _importAsset(bool font) async {
+    final picked = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(
+        builder: (_) => FolderPickerPage(
+          mode: font ? PickerMode.fonts : PickerMode.images,
+          title: font ? '选择 TTF / OTF 字体' : '选择阅读背景',
+        ),
+      ),
+    );
+    if (picked == null || picked.isEmpty) return;
+    try {
+      await widget.prefs.importReaderAsset(picked.first, font: font);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('导入失败，请选择有效文件（最大 20 MB）')));
+      }
+    }
   }
 
   /// 更多：翻页动画 / 屏幕常亮 / 桌宠开关。

@@ -91,6 +91,7 @@ class EpubBookContent implements BookContent {
     final fresh = await compute(_extractEpubChapterIsolate, {
       'path': book.path,
       'href': href,
+      'cacheDir': store.chapterCacheDir(book.id).path,
     });
     if (fresh.isNotEmpty) {
       try {
@@ -112,7 +113,9 @@ class EpubBookContent implements BookContent {
 /// 章节链接、正文解析依赖书源规则（[BookSource]）：
 /// 通过 [Book.sourceUrl]（书源地址）在 [SourceStore.shared] 中查找。
 class OnlineBookContent implements BookContent {
-  OnlineBookContent(this.book, this.store);
+  OnlineBookContent(this.book, this.store, {this.requireCacheWrite = false});
+
+  final bool requireCacheWrite;
 
   final Book book;
   final BookStore store;
@@ -166,26 +169,37 @@ class OnlineBookContent implements BookContent {
     }
     try {
       await file.parent.create(recursive: true);
-      await file.writeAsString(text, flush: false);
-    } catch (_) {}
+      await file.writeAsString(text, flush: requireCacheWrite);
+    } catch (_) {
+      if (requireCacheWrite) rethrow;
+    }
     return text;
   }
 
   @override
   Future<void> dispose() async {
     _memo.clear();
+    _service.dispose();
   }
 }
 
 /// 按书籍格式创建内容读取器。
-BookContent createBookContent(Book book, BookStore store) {
+BookContent createBookContent(
+  Book book,
+  BookStore store, {
+  bool requireCacheWrite = false,
+}) {
   switch (book.format) {
     case BookFormat.txt:
       return TxtBookContent(book);
     case BookFormat.epub:
       return EpubBookContent(book, store);
     case BookFormat.online:
-      return OnlineBookContent(book, store);
+      return OnlineBookContent(
+        book,
+        store,
+        requireCacheWrite: requireCacheWrite,
+      );
   }
 }
 
@@ -202,5 +216,12 @@ String _decodeTxtIsolate(Uint8List bytes) {
 String _extractEpubChapterIsolate(Map<String, dynamic> args) {
   final path = args['path'] as String;
   final href = args['href'] as String;
-  return EpubParser.extractChapterTextFromFile(path, href) ?? '';
+  final parsed = EpubParser.parse(File(path).readAsBytesSync());
+  final chapter = parsed.chapters.where((c) => c.href == href).firstOrNull;
+  if (chapter == null) return '';
+  final dir = Directory('${args['cacheDir']}/img')..createSync(recursive: true);
+  for (final image in chapter.images) {
+    File('${dir.path}/${image.name}').writeAsBytesSync(image.bytes);
+  }
+  return chapter.text;
 }

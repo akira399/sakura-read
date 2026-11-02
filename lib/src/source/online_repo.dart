@@ -125,6 +125,16 @@ class OnlineRepo {
     this.perSourceTimeout = const Duration(seconds: 15),
   }) : _client = client ?? SourceHttpClient();
 
+  bool _cancelled = false;
+  void cancel() {
+    _cancelled = true;
+  }
+
+  void dispose() {
+    _cancelled = true;
+    _client.close();
+  }
+
   final SourceStore store;
   final SourceHttpClient _client;
 
@@ -147,6 +157,7 @@ class OnlineRepo {
     int page = 1,
     void Function(SourceSearchResult r)? onSourceDone,
   }) async {
+    _cancelled = false;
     final sources = store.enabled;
     final results = <SourceSearchResult>[];
     if (sources.isEmpty) return results;
@@ -155,9 +166,15 @@ class OnlineRepo {
     final total = sources.length;
     Future<void> worker() async {
       while (true) {
+        if (_cancelled) return;
         final i = next++;
         if (i >= total) return;
-        final r = await searchOne(sources[i], key, page: page);
+        final r = await searchOne(sources[i], key, page: page).timeout(
+          perSourceTimeout,
+          onTimeout: () =>
+              SourceSearchResult(source: sources[i], error: '该源超时，可单独重试'),
+        );
+        if (_cancelled) return;
         results.add(r);
         onSourceDone?.call(r);
       }
@@ -218,6 +235,7 @@ class OnlineRepo {
           body: body,
           charset: charset,
           timeout: perSourceTimeout,
+          retries: 0,
         );
       } else {
         resp = await _client.get(
@@ -225,6 +243,7 @@ class OnlineRepo {
           headers: headers,
           charset: charset,
           timeout: perSourceTimeout,
+          retries: 0,
         );
       }
       if (!resp.ok) {
@@ -599,6 +618,7 @@ class OnlineRepo {
     var next = 0;
     Future<void> worker() async {
       while (true) {
+        if (_cancelled) return;
         final i = next++;
         if (i >= tasks.length) return;
         final (source, category) = tasks[i];

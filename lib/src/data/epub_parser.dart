@@ -374,16 +374,19 @@ class EpubParser {
         buf.write('［插图］');
         return;
       }
-      final src = (node.attributes['src'] ?? '').trim();
+      final src =
+          (node.attributes['src'] ??
+                  node.attributes['href'] ??
+                  node.attributes['xlink:href'] ??
+                  node.attributes['data-src'] ??
+                  '')
+              .trim();
       if (src.isEmpty) {
         buf.write('［插图］');
         return;
       }
       // 解析为 zip 内路径（相对章节文件所在目录）
-      final path = _resolvePath(
-        chapterDir,
-        Uri.decodeComponent(src.split('#').first),
-      );
+      final path = _resolvePath(chapterDir, src.split('#').first);
       final entry = _findEntry(archive, path);
       if (entry == null || !entry.isFile) {
         buf.write('［插图］');
@@ -396,6 +399,12 @@ class EpubParser {
       }
       // 去掉重名（不同目录下同名文件）避免互相覆盖
       var name = _baseName(path);
+      if (archive.files
+              .where((f) => f.isFile && _baseName(f.name) == name)
+              .length >
+          1) {
+        name = '${archive.files.indexOf(entry)}_$name';
+      }
       if (!usedNames.add(name)) {
         name = '${usedNames.length}_$name';
         usedNames.add(name);
@@ -417,7 +426,7 @@ class EpubParser {
           buf.write('\n');
           return;
         }
-        if (name == 'img') {
+        if (name == 'img' || name == 'image') {
           emitImage(node);
           return;
         }
@@ -554,7 +563,7 @@ class EpubParser {
     for (final f in archive.files) {
       if (f.name.toLowerCase() == lower) return f;
     }
-    final decoded = Uri.decodeComponent(target);
+    final decoded = _decodePath(target);
     if (decoded != target) {
       for (final f in archive.files) {
         if (f.name == decoded) return f;
@@ -586,6 +595,16 @@ class EpubParser {
     }
   }
 
+  static String _decodePath(String path) {
+    try {
+      return Uri.decodeComponent(
+        path.replaceAll(RegExp(r'%(?![0-9a-fA-F]{2})'), '%25'),
+      );
+    } catch (_) {
+      return path;
+    }
+  }
+
   static String _dirName(String path) {
     final i = path.lastIndexOf('/');
     return i < 0 ? '' : path.substring(0, i);
@@ -599,7 +618,7 @@ class EpubParser {
 
   /// 解析相对路径并做 ../ 归一化。
   static String _resolvePath(String baseDir, String href) {
-    var h = Uri.decodeComponent(href);
+    var h = _decodePath(href.split('#').first);
     final fragment = h.indexOf('#');
     if (fragment != -1) h = h.substring(0, fragment);
     if (h.startsWith('/')) return h.substring(1);

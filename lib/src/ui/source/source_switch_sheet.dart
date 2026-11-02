@@ -73,6 +73,7 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
     _search();
   }
 
+  OnlineRepo? _repo;
   Future<void> _search() async {
     try {
       final enabled = widget.sourceStore.enabled;
@@ -83,7 +84,7 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
         });
         return;
       }
-      final repo = OnlineRepo(store: widget.sourceStore);
+      final repo = _repo = OnlineRepo(store: widget.sourceStore);
       final results = await repo.searchAll(widget.book.title);
       if (!mounted) return;
 
@@ -130,6 +131,13 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
         _error = '$e';
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _repo?.dispose();
+    _service.dispose();
+    super.dispose();
   }
 
   Future<void> _pick(int index) async {

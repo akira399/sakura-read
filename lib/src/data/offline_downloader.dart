@@ -43,14 +43,28 @@ class OfflineDownloadProgress {
   /// 是否被用户取消。
   final bool cancelled;
 
-  double get fraction => total <= 0 ? 0 : (done / total).clamp(0.0, 1.0);
+  double get fraction => total <= 0
+      ? (finished ? 1 : 0)
+      : ((done + failed) / total).clamp(0.0, 1.0);
 }
 
 /// 离线缓存下载器。
 ///
 /// 一次只允许一个任务（同一实例内）；UI 持有一个实例即可。
 class OfflineDownloader {
-  OfflineDownloader({this.concurrency = 4});
+  OfflineDownloader({
+    this.concurrency = 4,
+    BookContent Function(Book, BookStore)? contentFactory,
+  }) : _contentFactory =
+           contentFactory ??
+           ((book, store) =>
+               createBookContent(book, store, requireCacheWrite: true)) {
+    if (concurrency < 1) {
+      throw RangeError.range(concurrency, 1, null, 'concurrency');
+    }
+  }
+
+  final BookContent Function(Book, BookStore) _contentFactory;
 
   /// 并发抓取数（站点限流友好）。
   final int concurrency;
@@ -81,8 +95,8 @@ class OfflineDownloader {
     }
     final total = book.chapters.length;
     final start = from.clamp(0, total);
-    final end = (to ?? total - 1).clamp(0, total - 1);
-    final indices = [for (var i = start; i <= end; i++) i];
+    final end = total == 0 ? -1 : (to ?? total - 1).clamp(-1, total - 1);
+    final count = end < start ? 0 : end - start + 1;
 
     _running = true;
     _cancelled = false;
@@ -91,33 +105,36 @@ class OfflineDownloader {
     var failed = 0;
     var current = start;
 
-    // 内容读取器负责真正的抓取 + 落盘（复用在线正文逻辑，含严格抽取）
-    final content = createBookContent(book, store);
+    BookContent? content;
+    var finished = false;
 
-    void report() => onProgress?.call(
-      OfflineDownloadProgress(
-        done: done,
-        total: indices.length,
-        failed: failed,
-        currentChapter: current,
-        finished: done >= indices.length,
-        cancelled: _cancelled,
-      ),
+    OfflineDownloadProgress snapshot() => OfflineDownloadProgress(
+      done: done,
+      total: count,
+      failed: failed,
+      currentChapter: current,
+      finished: finished,
+      cancelled: _cancelled,
     );
 
-    report();
+    void report() => onProgress?.call(snapshot());
 
     try {
+      report();
+      if (count > 0 && !_cancelled) {
+        content = _contentFactory(book, store);
+      }
       // 简单的工作池：固定 concurrency 个 worker 抢同一个队列。
-      final queue = List<int>.from(indices);
+      // 使用游标，避免 removeAt(0) 每章搬移剩余队列造成 O(n²) 开销。
+      var next = start;
       Future<void> worker() async {
         while (true) {
           if (_cancelled) return;
-          if (queue.isEmpty) return;
-          final index = queue.removeAt(0);
+          if (next > end) return;
+          final index = next++;
           current = index;
           try {
-            final text = await content.chapterText(index);
+            final text = await content!.chapterText(index);
             if (text.trim().isEmpty) {
               failed++;
             } else {
@@ -131,21 +148,20 @@ class OfflineDownloader {
       }
 
       final workers = <Future<void>>[
-        for (var i = 0; i < concurrency && i < indices.length; i++) worker(),
+        for (var i = 0; i < concurrency && i < count; i++) worker(),
       ];
       await Future.wait(workers);
     } finally {
-      await content.dispose();
-      _running = false;
+      try {
+        await content?.dispose();
+      } finally {
+        _running = false;
+      }
     }
 
-    return OfflineDownloadProgress(
-      done: done,
-      total: indices.length,
-      failed: failed,
-      currentChapter: current,
-      finished: true,
-      cancelled: _cancelled,
-    );
+    finished = true;
+    final result = snapshot();
+    onProgress?.call(result);
+    return result;
   }
 }

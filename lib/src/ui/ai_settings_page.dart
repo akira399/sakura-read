@@ -109,11 +109,13 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     _toast(local ? '已切换为本地模型（离线运行）' : '已切换为在线接口');
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (_useLocal) {
       // 本地模式不校验接口；模型没下载也可以先保存，对话页会引导下载。
       widget.prefs.setAiUseLocalModel(true);
       widget.prefs.setAiLocalModelId(localModels.spec.id);
+      if (!await _flushSettings()) return;
+      if (!mounted) return;
       _toast('已切换为本地模型');
       Navigator.of(context).pop();
       return;
@@ -135,8 +137,20 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
       includeReading: _includeReading,
     );
     widget.prefs.setAiUseLocalModel(false);
+    if (!await _flushSettings()) return;
+    if (!mounted) return;
     _toast('已保存');
     Navigator.of(context).pop();
+  }
+
+  Future<bool> _flushSettings() async {
+    try {
+      await widget.prefs.flush();
+      return true;
+    } catch (_) {
+      if (mounted) _toast('保存失败，请重试；设置尚未安全保存');
+      return false;
+    }
   }
 
   @override
@@ -483,7 +497,7 @@ class _LocalModelCard extends StatelessWidget {
       if (manager.phase == LocalModelPhase.error) {
         onToast(manager.error ?? '下载失败');
       } else {
-        onToast('模型下载完成');
+        onToast(manager.isDownloaded ? '模型下载完成' : '下载已暂停，进度已保留');
       }
       return;
     }
@@ -598,10 +612,12 @@ class _LocalModelCard extends StatelessWidget {
                     Expanded(
                       child: FilledButton.icon(
                         onPressed: manager.isDownloading
-                            ? null
+                            ? manager.pauseDownload
                             : () => _download(context),
                         icon: const Icon(Icons.download_rounded, size: 18),
-                        label: Text(manager.isDownloading ? '下载中…' : '下载模型'),
+                        label: Text(
+                          manager.isDownloading ? '暂停下载' : '下载 / 继续下载',
+                        ),
                       ),
                     )
                   else ...[
@@ -626,7 +642,7 @@ class _LocalModelCard extends StatelessWidget {
                         onPressed:
                             manager.isReady ||
                                 manager.phase == LocalModelPhase.loading
-                            ? null
+                            ? manager.pauseDownload
                             : () => _download(context),
                         icon: const Icon(Icons.memory_rounded, size: 18),
                         label: Text(
