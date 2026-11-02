@@ -43,7 +43,10 @@ void main() {
         petStore: petStore,
       ),
     );
-    await tester.pump(const Duration(milliseconds: 300));
+    // 开屏期间不构建下层页面（首屏更快），所以这里按真实帧推进到开屏结束。
+    for (var i = 0; i < 100; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
 
     expect(find.text('书架'), findsWidgets);
     expect(find.text('樱读'), findsWidgets);

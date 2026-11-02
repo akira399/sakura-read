@@ -58,7 +58,9 @@ void main() {
     );
     // 开屏动画（约 1.5s）+ 权限检查：跑过这些帧后引导宿主才「就绪」。
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.pump(const Duration(milliseconds: 1600));
+    for (var i = 0; i < 100; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
 
     // 全新状态：条款页在，引导还没开始。
     expect(find.text('欢迎来到樱读'), findsOneWidget);
@@ -124,7 +126,9 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.pump(const Duration(milliseconds: 1600));
+    for (var i = 0; i < 100; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
 
     // 条款页在（未同意过）；引导没被旧标记之外的任何原因误触发。
     expect(find.text('同意并继续'), findsOneWidget);

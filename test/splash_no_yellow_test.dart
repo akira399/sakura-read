@@ -34,6 +34,8 @@ void main() {
     );
 
     // 结束动画，避免帧回调遗留。
-    await tester.pump(const Duration(milliseconds: 1600));
+    for (var i = 0; i < 100; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
   });
 }
