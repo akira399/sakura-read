@@ -136,3 +136,9 @@ flutter test                   # 全部通过
 
 请附上：版本号（设置页可见）、复现步骤、期望与实际表现；
 涉及 UI 的尽量带截图。桌宠彩蛋是**真锁定**（只能重启 App），截图时请注意。
+
+### Windows 上构建 Android
+
+仅需 Android 构建时，可在当前 PowerShell 进程设置 `$env:FLUTTER_WINDOWS='false'`，随后执行 `flutter pub get --enforce-lockfile`，成功后再构建 APK。这会避开 Windows 桌面插件符号链接要求，并完整生成 Android 插件注册。不要在插件准备失败后单凭 `--no-pub` 的构建成功判断 WebView 等原生插件已可用。
+
+WebDAV 密码与 API Key 使用同一 Keystore 加密载荷；本地与云备份均不导出这两类凭据。恢复后需要重启应用，重启前暂停旧内存状态对已恢复文件的自动保存。
