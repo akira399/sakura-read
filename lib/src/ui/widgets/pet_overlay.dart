@@ -967,6 +967,28 @@ class _PetPanelPageState extends State<_PetPanelPage> {
                 ],
               ),
               const SizedBox(height: 16),
+              // 显示 / 隐藏（用户反馈：「宠物设置可以关闭」）
+              Container(
+                decoration: BoxDecoration(
+                  color: scheme.surface,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: SwitchListTile(
+                  value: !pet.petHidden,
+                  onChanged: (v) => pet.setPetHidden(!v),
+                  secondary: Icon(
+                    pet.petHidden
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                  ),
+                  title: const Text('在屏幕上显示桌宠'),
+                  subtitle: const Text(
+                    '关掉后小樱不出现在桌面上，亲密度和点心都还留着，随时能再打开',
+                    style: TextStyle(fontSize: 11.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               // 食物背包
               Container(
                 padding: const EdgeInsets.all(16),

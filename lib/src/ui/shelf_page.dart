@@ -17,6 +17,7 @@ import 'ai_chat_page.dart';
 import 'book_detail_page.dart';
 import 'folder_picker_page.dart';
 import 'reader/reader_page.dart';
+import 'shelf_manage_page.dart';
 import 'source/source_search_page.dart';
 import 'widgets/book_cover.dart';
 import 'widgets/cute.dart';
@@ -47,6 +48,9 @@ class ShelfPage extends StatefulWidget {
 class _ShelfPageState extends State<ShelfPage> {
   /// 底栏（NavigationBar 80 + 间距）占的高度：加号按钮要让出这一段。
   static const double _navBarClearance = 96;
+
+  /// 当前分组筛选：null = 全部，'' = 未分组，其余为分组名。
+  String? _groupFilter;
 
   /// 空书架的看板娘台词。
   static const _emptyShelfLines = [
@@ -99,8 +103,11 @@ class _ShelfPageState extends State<ShelfPage> {
     return AnimatedBuilder(
       animation: Listenable.merge([widget.store, widget.prefs]),
       builder: (context, _) {
-        final books = widget.store.books.toList();
-        _sortBooks(books);
+        final allBooks = widget.store.books.toList();
+        _sortBooks(allBooks);
+        final books = _groupFilter == null
+            ? allBooks
+            : allBooks.where((b) => b.group == _groupFilter).toList();
         return Scaffold(
           // 底栏用 extendBody 盖在正文上，Scaffold 感知不到它的高度：
           // 默认 endFloat 会把「＋」摆进底栏区域，正好压住最右侧的「设置」，
@@ -122,6 +129,7 @@ class _ShelfPageState extends State<ShelfPage> {
           body: CustomScrollView(
             slivers: [
               _buildHeader(context, books.length),
+              _buildGroupBar(allBooks),
               if (books.isEmpty)
                 SliverFillRemaining(
                   hasScrollBody: false,
@@ -347,6 +355,65 @@ class _ShelfPageState extends State<ShelfPage> {
     );
   }
 
+  /// 分组筛选条：只有存在自定义分组时才出现，避免空书架时多一行噪音。
+  Widget _buildGroupBar(List<Book> allBooks) {
+    final groups = <String>{
+      for (final b in allBooks)
+        if (b.group.isNotEmpty) b.group,
+    }.toList()..sort();
+    if (groups.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+    final scheme = Theme.of(context).colorScheme;
+    Widget chip(String label, String? value) {
+      final on = _groupFilter == value;
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: ChoiceChip(
+          label: Text(label, style: const TextStyle(fontSize: 12)),
+          selected: on,
+          visualDensity: VisualDensity.compact,
+          onSelected: (_) => setState(() => _groupFilter = on ? null : value),
+        ),
+      );
+    }
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 2),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              chip('全部', null),
+              chip('未分组', ''),
+              for (final g in groups) chip(g, g),
+              IconButton(
+                tooltip: '批量管理 / 分组',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  Icons.checklist_rounded,
+                  size: 20,
+                  color: scheme.onSurfaceVariant,
+                ),
+                onPressed: _openManage,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openManage() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ShelfManagePage(store: widget.store, prefs: widget.prefs),
+      ),
+    );
+  }
+
   Widget _buildEmpty(BuildContext context) {
     return SakuraPetals(
       count: 16,
@@ -442,6 +509,18 @@ class _ShelfPageState extends State<ShelfPage> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(sheetContext);
+                    _openManage();
+                  },
+                  icon: const Icon(Icons.checklist_rounded, size: 18),
+                  label: const Text('批量管理 · 多选删除 / 分组'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(42),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 _arrangeLabel('排序方式'),
@@ -862,6 +941,14 @@ class _ShelfPageState extends State<ShelfPage> {
                 },
               ),
               ListTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(book.group.isEmpty ? '设置分组' : '分组：${book.group}'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _setBookGroup(book);
+                },
+              ),
+              ListTile(
                 leading: Icon(
                   book.finished
                       ? Icons.restart_alt_rounded
@@ -897,6 +984,61 @@ class _ShelfPageState extends State<ShelfPage> {
         ),
       ),
     );
+  }
+
+  /// 单本书设置分组：可输入新分组名，也可点已有分组快速归入。
+  Future<void> _setBookGroup(Book book) async {
+    final groups = <String>{
+      for (final b in widget.store.books)
+        if (b.group.isNotEmpty) b.group,
+    }.toList()..sort();
+    final controller = TextEditingController(text: book.group);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text(
+          '设置分组',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(hintText: '输入分组名（留空 = 未分组）'),
+            ),
+            if (groups.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final g in groups)
+                    ActionChip(
+                      label: Text(g, style: const TextStyle(fontSize: 12)),
+                      onPressed: () => Navigator.pop(dialogContext, g),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (result != null) widget.store.setGroup(book.id, result);
   }
 
   Future<void> _renameBook(Book book) async {

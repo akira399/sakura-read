@@ -116,6 +116,20 @@ class _BookDetailPageState extends State<BookDetailPage> {
     ).showSnackBar(const SnackBar(content: Text('已清除本书缓存')));
   }
 
+  /// 目录区锚点：「查看目录」快捷入口直接滚到这里。
+  final GlobalKey _chaptersKey = GlobalKey();
+
+  void _jumpToChapters() {
+    final ctx = _chaptersKey.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+      alignment: 0,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -141,6 +155,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   child: _Actions(
                     book: book,
                     onContinue: () => _openReader(context, book),
+                    onOpenChapters: _jumpToChapters,
                     onSwitchSource: isOnline
                         ? () => _switchSource(context, book)
                         : null,
@@ -176,6 +191,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
                   child: Row(
+                    key: _chaptersKey,
                     children: [
                       Icon(
                         Icons.format_list_numbered_rounded,
@@ -399,12 +415,14 @@ class _Actions extends StatelessWidget {
   const _Actions({
     required this.book,
     required this.onContinue,
+    required this.onOpenChapters,
     this.onSwitchSource,
     this.onDownload,
   });
 
   final Book book;
   final VoidCallback onContinue;
+  final VoidCallback onOpenChapters;
   final VoidCallback? onSwitchSource;
 
   /// 「缓存整本」入口（仅在线书提供）。
@@ -413,9 +431,60 @@ class _Actions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final started = book.lastReadAt > 0 && !book.finished;
-    return Row(
+    final scheme = Theme.of(context).colorScheme;
+    // 用户反馈（截图借鉴「阅读」详情页）：四个圆角图标入口 + 底部主按钮，
+    // 比原来「一排按钮 + 进度胶囊」更好扫读。
+    Widget tile(IconData icon, String label, VoidCallback? onTap) {
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              children: [
+                Icon(
+                  icon,
+                  size: 22,
+                  color: onTap == null
+                      ? scheme.onSurfaceVariant.withValues(alpha: .4)
+                      : scheme.primary,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: onTap == null
+                        ? scheme.onSurfaceVariant.withValues(alpha: .5)
+                        : scheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
       children: [
-        Expanded(
+        SoftCard(
+          radius: 18,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          color: scheme.surface,
+          child: Row(
+            children: [
+              tile(Icons.menu_book_rounded, '目录', onOpenChapters),
+              tile(Icons.swap_horiz_rounded, '换源', onSwitchSource),
+              tile(Icons.cloud_download_rounded, '缓存', onDownload),
+              tile(Icons.insights_rounded, '进度 ${book.progressLabel}', null),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
           child: FilledButton.icon(
             onPressed: onContinue,
             icon: const Icon(Icons.auto_stories_rounded, size: 20),
@@ -428,47 +497,6 @@ class _Actions extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-          ),
-        ),
-        // 用户反馈「不支持离线缓存」：提供「缓存整本」入口（在线书）
-        if (onDownload != null) ...[
-          const SizedBox(width: 4),
-          IconButton(
-            onPressed: onDownload,
-            tooltip: '缓存整本（离线可读）',
-            icon: Icon(
-              Icons.download_rounded,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-        ],
-        if (onSwitchSource != null) ...[
-          const SizedBox(width: 4),
-          IconButton(
-            onPressed: onSwitchSource,
-            tooltip: '换源',
-            icon: Icon(
-              Icons.swap_horiz_rounded,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-        ],
-        const SizedBox(width: 10),
-        SoftCard(
-          radius: 24,
-          padding: const EdgeInsets.all(10),
-          color: Theme.of(context).colorScheme.surface,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '进度 ${book.progressLabel}',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
           ),
         ),
       ],

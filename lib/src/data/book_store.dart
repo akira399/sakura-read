@@ -172,6 +172,20 @@ class BookStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 设置书籍分组（'' = 未分组）。
+  ///
+  /// 用户反馈：「书架里的书籍可以分组吗自定义分组」——分组只是书架上的
+  /// 归类标签，不动文件、不影响阅读进度。
+  void setGroup(String id, String group) {
+    final b = byId(id);
+    if (b == null) return;
+    final trimmed = group.trim();
+    if (b.group == trimmed) return;
+    b.group = trimmed;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void touch(String id) {
     final b = byId(id);
     if (b == null) return;

@@ -71,9 +71,14 @@ class SakuraApp extends StatelessWidget {
                           valueListenable: kAiChatActive,
                           builder: (context, chatting, _) => chatting
                               ? const SizedBox.shrink()
-                              : PetOverlay(
-                                  pet: petStore,
-                                  hostReady: kPetHostReady,
+                              : AnimatedBuilder(
+                                  animation: petStore,
+                                  builder: (_, _) => petStore.petHidden
+                                      ? const SizedBox.shrink()
+                                      : PetOverlay(
+                                          pet: petStore,
+                                          hostReady: kPetHostReady,
+                                        ),
                                 ),
                         );
                       },

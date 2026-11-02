@@ -188,8 +188,40 @@ class MainActivity : FlutterActivity() {
                 }
                 "ttsSetPitch" -> {
                     val pitch = call.argument<Double>("pitch") ?: 1.0
+                    offlinePitch = pitch.toFloat().coerceIn(0.5f, 2.0f)
                     tts?.setPitch(pitch.toFloat())
                     result.success(null)
+                }
+                // 音色列表 / 切换音色。
+                // 用户反馈「不能自己选择男声和女声」：系统引擎其实都带了
+                // voices 列表（含男声、女声），只是以前没有入口暴露出来。
+                "ttsVoices" -> {
+                    val out = ArrayList<String>()
+                    try {
+                        val voices = tts?.voices
+                        if (voices != null) {
+                            for (voice in voices) {
+                                val name = voice.name ?: continue
+                                if (name.isEmpty()) continue
+                                val lang = try {
+                                    voice.locale?.toLanguageTag() ?: ""
+                                } catch (_: Throwable) {
+                                    ""
+                                }
+                                // 只列中文音色：外语音色几十种，混进来反而难选
+                                if (lang.isEmpty() || lang.startsWith("zh")) {
+                                    out.add(name)
+                                }
+                            }
+                        }
+                    } catch (_: Throwable) {
+                        // 个别引擎的 getVoices 会抛异常：当作没有音色列表
+                    }
+                    result.success(out)
+                }
+                "ttsSetVoice" -> {
+                    val name = call.argument<String>("name")
+                    result.success(setTtsVoice(name))
                 }
                 "ttsIsSpeaking" -> result.success(tts?.isSpeaking == true)
                 "ttsShutdown" -> {
@@ -345,6 +377,33 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
+     * 切换音色（null / 空 = 恢复中文默认音色）。
+     *
+     * 用户反馈「不能自己选择男声和女声」——voices 列表里的 name 是稳定 id，
+     * Dart 侧持久化后每次朗读前套用一次即可。
+     */
+    private fun setTtsVoice(name: String?): Boolean {
+        val engineObj = tts ?: return false
+        return try {
+            if (name.isNullOrEmpty()) {
+                applyChineseLocale(engineObj)
+                true
+            } else {
+                val voices = engineObj.voices
+                val target = voices?.firstOrNull { it.name.equals(name, true) }
+                if (target == null) {
+                    false
+                } else {
+                    engineObj.voice = target
+                    true
+                }
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
      * 初始化 TTS。
      *  - engine 为 null / 空：交给系统选默认引擎；
      *  - 中文失败时自动回退到 Locale.CHINA / CHINESE；
@@ -465,6 +524,13 @@ class MainActivity : FlutterActivity() {
     private var offlinePlayer: android.media.MediaPlayer? = null
 
     /**
+     * 内置语音的音调。超文 VITS 只有一个说话人，靠 MediaPlayer 的变速不变调
+     * （PlaybackParams.pitch）模拟男声 / 女声，这样设置页的「音色」对内置
+     * 引擎也有效，而不是只有装了系统引擎才生效。
+     */
+    private var offlinePitch: Float = 1.0f
+
+    /**
      * 播放一段合成好的音频，并像系统 TTS 一样回传 start / done / error 事件。
      *
      * 为什么用 MediaPlayer 而不是 Dart 侧的音频库：项目本来就有原生通道，
@@ -488,6 +554,7 @@ class MainActivity : FlutterActivity() {
                 true
             }
             player.prepare()
+            applyOfflinePitch(player)
             player.start()
             offlinePlayer = player
             notifyTts("start", utteranceId)
@@ -496,6 +563,19 @@ class MainActivity : FlutterActivity() {
             notifyTts("error", utteranceId)
             stopOfflinePlayer()
             false
+        }
+    }
+
+    /** 把当前音调应用到播放器；老系统或异常时静默跳过。 */
+    private fun applyOfflinePitch(player: android.media.MediaPlayer) {
+        val pitch = offlinePitch
+        if (pitch <= 0f || kotlin.math.abs(pitch - 1.0f) < 0.01f) return
+        try {
+            val params = android.media.PlaybackParams()
+            params.pitch = pitch
+            params.speed = 1.0f
+            player.playbackParams = params
+        } catch (_: Exception) {
         }
     }
 

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../platform/native_bridge.dart';
+import '../source/online_repo.dart';
 import 'shelf_sort.dart';
 
 /// 翻页方式。
@@ -67,6 +68,24 @@ class AppPrefs extends ChangeNotifier {
   /// 放开到 1.0，并把段间距做成可调（0 = 完全紧贴）。
   double paragraphSpacing = 12;
 
+  /// 书源搜索并发数（1~999）。
+  ///
+  /// 用户反馈：「书源搜索能不能设置线程，搜索太难了」——多书源搜索时同时
+  /// 请求的书源个数，调大能更快出结果，但弱网/低端机上容易被限流。
+  int searchConcurrency = 8;
+
+  /// 「人物」X-Ray：正文里的人名是否高亮。
+  ///
+  /// 只在阅读器内生效；识别结果为空时自然不高亮。默认开启，
+  /// 不喜欢的用户在「人物」面板里一键关掉。
+  bool xrayHighlight = true;
+
+  /// 顶部 / 底部工具条是否用「磨砂玻璃」（实时模糊）观感。
+  ///
+  /// 用户反馈：「调来调去都没有磨砂」——以前只有半透明蒙层，没有真模糊。
+  /// 实时模糊要每帧采样一次背景，低端机会掉帧，所以做成开关（默认关）。
+  bool frostedGlass = false;
+
   /// 正文区距屏幕顶部的留白（上边距）。
   ///
   /// 用户反馈：希望能自己定「正文离顶部多远」（原先是写死的 30）。
@@ -99,7 +118,7 @@ class AppPrefs extends ChangeNotifier {
   bool volumeKeyPaging = true;
 
   // ---- 朗读（TTS） ----
-  /// 语速（0.5~2.0）。
+  /// 语速（0.5~3.0）。用户反馈：「倍速能加到 3 倍吗」。
   double ttsRate = 1.0;
 
   /// 音调（0.5~2.0）。
@@ -116,6 +135,38 @@ class AppPrefs extends ChangeNotifier {
   /// 用户反馈：一加等机型自带引擎不会被系统选为默认 → 朗读不可用。
   /// 允许手动指定，并持久化。
   String ttsEngine = '';
+
+  /// 系统 TTS 的音色名（空 = 引擎默认音色）。
+  ///
+  /// 用户反馈：「不能自己选择男声和女声」——系统引擎都支持 voices 列表，
+  /// 以前没有入口，这里记下用户选的音色名（引擎重连后自动套用）。
+  String ttsVoice = '';
+
+  /// 朗读音色风格：neutral / female / male / deep（内置离线语音靠音调模拟）。
+  /// 内置离线朗读用的语音包 id（'chaowen' = 内置超文；其余为下载的包）。
+  String ttsVoicePack = 'chaowen';
+
+  /// 多说话人语音包的说话人编号。
+  int ttsVoiceSid = 0;
+
+  /// AI 分角色朗读：对白 / 旁白用不同音色朗读。
+  ///
+  /// 用户反馈：「番茄那种自动分角色阅读功能支持吗」——本地用规则识别
+  /// 对白（「」『』"" 开头或「人名：」开头）并给每个人分配稳定的音高，
+  /// 不需要联网、不需要 token。
+  bool ttsRolePlay = false;
+
+  // ---- 备份 / WebDAV ----
+  /// WebDAV 服务器地址（如 https://dav.jianguoyun.com/dav）。
+  String webdavUrl = '';
+  String webdavUser = '';
+  String webdavPass = '';
+
+  /// 云端目录（相对 WebDAV 根，末尾自动补 /）。
+  String webdavDir = 'sakura-read/';
+
+  /// 最近一次成功备份的时间（ISO 字符串，空 = 从未备份）。
+  String lastBackupAt = '';
 
   // ---- AI 助手（小樱） ----
   /// 兼容 OpenAI Chat Completions 的接口地址（如 https://api.openai.com/v1）。
@@ -191,12 +242,15 @@ class AppPrefs extends ChangeNotifier {
           lineHeight = (data['lineHeight'] as num?)?.toDouble() ?? 1.75;
           letterSpacing = (data['letterSpacing'] as num?)?.toDouble() ?? 0;
           readerMarginH = (data['readerMarginH'] as num?)?.toDouble() ?? 20;
+          xrayHighlight = data['xrayHighlight'] as bool? ?? true;
           // v10：段间距可调（用户反馈：段与段之间的空隙太大）
           paragraphSpacing =
               ((data['paragraphSpacing'] as num?)?.toDouble() ?? 12).clamp(
                 0,
                 40,
               );
+          searchConcurrency =
+              ((data['searchConcurrency'] as num?)?.toInt() ?? 8).clamp(1, 999);
           // v8：正文上下留白 + 页眉页脚开关（用户反馈：想自己定这些距离）
           readerPaddingTop =
               ((data['readerPaddingTop'] as num?)?.toDouble() ?? 30).clamp(
@@ -230,7 +284,7 @@ class AppPrefs extends ChangeNotifier {
           // v4：朗读设置
           ttsRate = ((data['ttsRate'] as num?)?.toDouble() ?? 1.0).clamp(
             0.5,
-            2.0,
+            3.0,
           );
           ttsPitch = ((data['ttsPitch'] as num?)?.toDouble() ?? 1.0).clamp(
             0.5,
@@ -240,6 +294,17 @@ class AppPrefs extends ChangeNotifier {
           ttsAutoNextChapter = data['ttsAutoNextChapter'] as bool? ?? true;
           // v8：朗读引擎（空 = 系统默认）
           ttsEngine = data['ttsEngine'] as String? ?? '';
+          // v15：音色 / 分角色 / 磨砂 / 备份
+          ttsVoice = data['ttsVoice'] as String? ?? '';
+          ttsVoicePack = data['ttsVoicePack'] as String? ?? 'chaowen';
+          ttsVoiceSid = (data['ttsVoiceSid'] as num?)?.toInt() ?? 0;
+          ttsRolePlay = data['ttsRolePlay'] as bool? ?? false;
+          frostedGlass = data['frostedGlass'] as bool? ?? false;
+          webdavUrl = data['webdavUrl'] as String? ?? '';
+          webdavUser = data['webdavUser'] as String? ?? '';
+          webdavPass = data['webdavPass'] as String? ?? '';
+          webdavDir = data['webdavDir'] as String? ?? 'sakura-read/';
+          lastBackupAt = data['lastBackupAt'] as String? ?? '';
           // v5：新手引导是否已看过
           guideSeen = data['guideSeen'] as bool? ?? false;
           // v6：首启使用条款
@@ -313,7 +378,7 @@ class AppPrefs extends ChangeNotifier {
   // ---- 朗读 setter ----
 
   void setTtsRate(double v) {
-    v = v.clamp(0.5, 2.0).toDouble();
+    v = v.clamp(0.5, 3.0).toDouble();
     if (ttsRate == v) return;
     ttsRate = v;
     _saveSoon();
@@ -338,6 +403,72 @@ class AppPrefs extends ChangeNotifier {
   void setTtsAutoNextChapter(bool v) {
     if (ttsAutoNextChapter == v) return;
     ttsAutoNextChapter = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 音色风格：neutral / female / male / deep。
+  void setTtsVoicePack(String v) {
+    if (ttsVoicePack == v) return;
+    ttsVoicePack = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setTtsVoiceSid(int v) {
+    if (ttsVoiceSid == v) return;
+    ttsVoiceSid = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setTtsVoice(String v) {
+    if (ttsVoice == v) return;
+    ttsVoice = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setTtsRolePlay(bool v) {
+    if (ttsRolePlay == v) return;
+    ttsRolePlay = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setFrostedGlass(bool v) {
+    if (frostedGlass == v) return;
+    frostedGlass = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setWebdav({String? url, String? user, String? pass, String? dir}) {
+    var changed = false;
+    if (url != null && url != webdavUrl) {
+      webdavUrl = url;
+      changed = true;
+    }
+    if (user != null && user != webdavUser) {
+      webdavUser = user;
+      changed = true;
+    }
+    if (pass != null && pass != webdavPass) {
+      webdavPass = pass;
+      changed = true;
+    }
+    if (dir != null && dir != webdavDir) {
+      webdavDir = dir;
+      changed = true;
+    }
+    if (!changed) return;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setLastBackupAt(String v) {
+    if (lastBackupAt == v) return;
+    lastBackupAt = v;
     _saveSoon();
     notifyListeners();
   }
@@ -381,10 +512,26 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setSearchConcurrency(int v) {
+    v = v.clamp(1, 999);
+    if (searchConcurrency == v) return;
+    searchConcurrency = v;
+    OnlineRepo.defaultConcurrency = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void setParagraphSpacing(double v) {
     v = v.clamp(0, 40).toDouble();
     if (paragraphSpacing == v) return;
     paragraphSpacing = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setXrayHighlight(bool v) {
+    if (xrayHighlight == v) return;
+    xrayHighlight = v;
     _saveSoon();
     notifyListeners();
   }
@@ -608,7 +755,9 @@ class AppPrefs extends ChangeNotifier {
           'lineHeight': lineHeight,
           'letterSpacing': letterSpacing,
           'readerMarginH': readerMarginH,
+          'xrayHighlight': xrayHighlight,
           'paragraphSpacing': paragraphSpacing,
+          'searchConcurrency': searchConcurrency,
           'readerPaddingTop': readerPaddingTop,
           'readerPaddingBottom': readerPaddingBottom,
           'readerHeaderVisible': readerHeaderVisible,
@@ -628,6 +777,16 @@ class AppPrefs extends ChangeNotifier {
           'ttsAutoFollow': ttsAutoFollow,
           'ttsAutoNextChapter': ttsAutoNextChapter,
           'ttsEngine': ttsEngine,
+          'ttsVoice': ttsVoice,
+          'ttsVoicePack': ttsVoicePack,
+          'ttsVoiceSid': ttsVoiceSid,
+          'ttsRolePlay': ttsRolePlay,
+          'frostedGlass': frostedGlass,
+          'webdavUrl': webdavUrl,
+          'webdavUser': webdavUser,
+          'webdavPass': webdavPass,
+          'webdavDir': webdavDir,
+          'lastBackupAt': lastBackupAt,
           'guideSeen': guideSeen,
           'agreementAccepted': agreementAccepted,
           'autoCheckUpdate': autoCheckUpdate,

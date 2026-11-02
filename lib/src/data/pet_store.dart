@@ -163,6 +163,11 @@ class PetStore extends ChangeNotifier {
   /// 阅读时是否显示桌宠（用户可在阅读设置 / 软件设置里开启）。
   bool showPetInReader = false;
 
+  /// 是否隐藏屏幕上的桌宠（用户反馈：「宠物设置可以关闭」）。
+  ///
+  /// 只是不显示，亲密度、投喂记录、点心背包都保留，随时可以再打开。
+  bool petHidden = false;
+
   // ---- 只读视图 ----
   int get affinity => _affinity;
   int get interactions => _interactions;
@@ -237,6 +242,7 @@ class PetStore extends ChangeNotifier {
           petX = ((data['petX'] as num?)?.toDouble() ?? 0.86).clamp(0.0, 1.0);
           petY = ((data['petY'] as num?)?.toDouble() ?? 0.62).clamp(0.0, 1.0);
           showPetInReader = data['showPetInReader'] as bool? ?? false;
+          petHidden = data['petHidden'] as bool? ?? false;
           final inv = data['inventory'];
           if (inv is Map) {
             inv.forEach((k, v) {
@@ -292,6 +298,7 @@ class PetStore extends ChangeNotifier {
           'petX': petX,
           'petY': petY,
           'showPetInReader': showPetInReader,
+          'petHidden': petHidden,
         }),
       );
     } catch (_) {
@@ -432,6 +439,14 @@ class PetStore extends ChangeNotifier {
   void setReaderActive(bool value) {
     if (_readerActive == value) return;
     _readerActive = value;
+    notifyListeners();
+  }
+
+  /// 显示 / 隐藏屏幕上的桌宠。
+  void setPetHidden(bool value) {
+    if (petHidden == value) return;
+    petHidden = value;
+    _saveSoon();
     notifyListeners();
   }
 
