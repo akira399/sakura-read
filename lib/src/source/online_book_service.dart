@@ -94,8 +94,17 @@ class OnlineBookService {
       author: g(info?.author),
       intro: g(info?.intro) == null
           ? null
-          : html_parser.parseFragment(g(info?.intro)!).text,
-      coverUrl: g(info?.coverUrl),
+          : html_parser
+                .parseFragment(
+                  g(info?.intro)!.replaceAll(
+                    RegExp(r'<br\s*/?>', caseSensitive: false),
+                    '\n',
+                  ),
+                )
+                .text,
+      coverUrl: g(info?.coverUrl) == null
+          ? null
+          : resolveUrl(g(info?.coverUrl)!, bookUrl),
       kind: g(info?.kind),
       lastChapter: g(info?.lastChapter),
       updateTime: g(info?.updateTime),

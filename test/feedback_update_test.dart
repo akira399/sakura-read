@@ -1,6 +1,11 @@
+import 'package:sakura_read/src/source/online_book_service.dart';
+import 'package:sakura_read/src/source/http_client.dart';
+import 'package:sakura_read/src/source/models.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -15,6 +20,7 @@ import 'package:sakura_read/src/data/book_store.dart';
 import 'package:sakura_read/src/data/pet_store.dart';
 import 'package:sakura_read/src/platform/native_bridge.dart';
 import 'package:sakura_read/src/source/subscription_link.dart';
+
 import 'epub_image_test.dart' show buildEpubWithImage;
 
 Uint8List unusualEpub() {
@@ -37,6 +43,31 @@ Uint8List unusualEpub() {
 }
 
 void main() {
+  test('详情封面相对地址得到解析，简介保留换行且不显示 HTML', () async {
+    final service = OnlineBookService(
+      client: SourceHttpClient(
+        client: MockClient(
+          (_) async => http.Response(
+            '<html><img src="../cover.png"><div id="intro">第一段<br>第二段</div></html>',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          ),
+        ),
+      ),
+    );
+    final source = BookSource.fromJson({
+      'bookSourceUrl': 'https://example.test',
+      'bookSourceName': 'sample',
+      'ruleBookInfo': {'coverUrl': 'tag.img@src', 'intro': 'id.intro@html'},
+    });
+    final info = await service.fetchInfo(
+      source,
+      'https://example.test/book/one',
+    );
+    expect(info.coverUrl, 'https://example.test/cover.png');
+    expect(info.intro, contains('第一段\n第二段'));
+    service.dispose();
+  });
   test('裸百分号、中文 EPUB 路径与 SVG image 正常导入', () {
     final book = EpubParser.parse(unusualEpub());
     expect(book.chapters.single.href, contains('100%篇'));
