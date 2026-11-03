@@ -7,8 +7,7 @@
 //
 // 回归背景（用户反馈「我这里已经没有新手引导了」）：用户设备上残留了
 // 旧版本的「已看过引导」标记（guideSeen=true），更新后同意了新条款，
-// 但引导（设计上只看一次）不会重播。本测试把正确的时序钉死：
-// 全新状态（guideSeen=false）下，同意条款 → 引导必须自动开始。
+// 但引导（设计上只看一次）不会重播。本同意条款后不自动弹引导；用户可在设置中主动启动。
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -24,7 +23,7 @@ import 'package:sakura_read/src/platform/native_bridge.dart';
 import 'package:sakura_read/src/source/source_store.dart';
 
 void main() {
-  testWidgets('首启全流程：同意条款后，新手引导自动开始', (tester) async {
+  testWidgets('首启同意条款后不自动强制引导，但可手动重看', (tester) async {
     late AppPrefs prefs;
     late BookStore store;
     late SourceStore sourceStore;
@@ -74,10 +73,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 300));
 
-    // 同意后：条款页消失 + 引导自动开始（小樱出场）。
+    // 同意后关闭条款；桌宠引导不再自动遮挡阅读流程。
     expect(prefs.agreementAccepted, isTrue);
     expect(find.text('同意并继续'), findsNothing);
-    expect(kPetGuideActive.value, isTrue, reason: '同意条款后引导应自动开始');
+    expect(kPetGuideActive.value, isFalse);
+    expect(find.text('跳过引导'), findsNothing);
+
+    // 设置中的「重看新手引导」仍能按用户主动请求启动。
+    petGuideRequestReplay();
+    await tester.pump();
+    expect(kPetGuideActive.value, isTrue);
     expect(find.text('跳过引导'), findsOneWidget);
 
     // 跳过 → 引导关闭 + 「已看过」标记落在 prefs 上。
@@ -92,7 +97,7 @@ void main() {
     await tester.pump(const Duration(seconds: 30));
   });
 
-  testWidgets('升级用户（旧版看过引导）同意条款后，引导也开始', (tester) async {
+  testWidgets('升级用户同意条款后不被强制引导，手动请求仍可启动', (tester) async {
     late AppPrefs prefs;
     late BookStore store;
     late SourceStore sourceStore;
@@ -143,7 +148,12 @@ void main() {
 
     expect(prefs.agreementAccepted, isTrue);
     expect(prefs.guideSeen, isFalse, reason: '同意条款时应重置「已看过」旧标记');
-    expect(kPetGuideActive.value, isTrue, reason: '升级用户同意条款后引导也应开始');
+    expect(kPetGuideActive.value, isFalse);
+    expect(find.text('跳过引导'), findsNothing);
+
+    petGuideRequestReplay();
+    await tester.pump();
+    expect(kPetGuideActive.value, isTrue);
     expect(find.text('跳过引导'), findsOneWidget);
 
     await tester.tap(find.text('跳过引导'));

@@ -1,3 +1,5 @@
+import 'package:sakura_read/src/source/source_store.dart';
+
 // 酷安反馈（第 23 轮）里可纯逻辑验证的点的回归测试。
 //
 //   ① 书架自定义分组：Book.group 的 JSON 往返 + BookStore.setGroup 落盘；
@@ -128,6 +130,16 @@ void main() {
       await again.load();
       expect(again.searchConcurrency, 3);
       expect(OnlineRepo.defaultConcurrency, 3);
+    });
+
+    test('设置 999 后已打开的默认搜索仓库也采用 999', () async {
+      final prefs = AppPrefs(dirsOverride: _tempDirs(trash));
+      final repo = OnlineRepo(store: SourceStore(initial: []));
+      prefs.setSearchConcurrency(999);
+      expect(prefs.searchConcurrency, 999);
+      expect(OnlineRepo.defaultConcurrency, 999);
+      expect(repo.concurrency, 999);
+      repo.dispose();
     });
 
     test('老版本设置文件没有该键时用默认 8，不崩', () async {

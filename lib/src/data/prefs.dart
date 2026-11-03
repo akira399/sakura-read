@@ -228,7 +228,8 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   }
 
   void setSearchOptions(int count, int seconds) {
-    searchConcurrency = count.clamp(1, 32);
+    searchConcurrency = count.clamp(1, 999);
+    OnlineRepo.defaultConcurrency = searchConcurrency;
     searchTimeout = seconds.clamp(5, 30);
     _saveSoon();
     notifyListeners();
@@ -314,7 +315,7 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
                 40,
               );
           searchConcurrency =
-              ((data['searchConcurrency'] as num?)?.toInt() ?? 8).clamp(1, 32);
+              ((data['searchConcurrency'] as num?)?.toInt() ?? 8).clamp(1, 999);
           // v8：正文上下留白 + 页眉页脚开关（用户反馈：想自己定这些距离）
           readerPaddingTop =
               ((data['readerPaddingTop'] as num?)?.toDouble() ?? 30).clamp(
@@ -625,7 +626,7 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   }
 
   void setSearchConcurrency(int v) {
-    v = v.clamp(1, 32);
+    v = v.clamp(1, 999);
     if (searchConcurrency == v) return;
     searchConcurrency = v;
     OnlineRepo.defaultConcurrency = v;

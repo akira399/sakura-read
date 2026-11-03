@@ -831,13 +831,13 @@ class _SettingsPageState extends State<SettingsPage> {
                       widget.prefs.setSearchConcurrency(v.round()),
                 ),
                 // 用户反馈「并发数改无上限可让用户选择」：滑杆到 32 之后
-                // 还能手填，最大 32（再多也只会被系统网络栈拖死）。
+                // 还能手填，最大 999。
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
                     onPressed: () => _customConcurrency(context),
                     icon: const Icon(Icons.tune_rounded, size: 18),
-                    label: const Text('自定义（最多 32）'),
+                    label: const Text('自定义（最多 999）'),
                   ),
                 ),
               ],
@@ -1264,7 +1264,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  /// 自定义并发数（1~32）。
+  /// 自定义并发数（1~999）。
   Future<void> _customConcurrency(BuildContext context) async {
     final controller = TextEditingController(
       text: '${widget.prefs.searchConcurrency}',
@@ -1278,7 +1278,7 @@ class _SettingsPageState extends State<SettingsPage> {
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             labelText: '同时搜索的书源个数',
-            helperText: '1 ~ 32；太多容易被书源站限流',
+            helperText: '1 ~ 999；过高时可能触发书源限流',
           ),
         ),
         actions: [
@@ -1297,7 +1297,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     if (value == null) return;
-    widget.prefs.setSearchConcurrency(value.clamp(1, 32));
+    widget.prefs.setSearchConcurrency(value.clamp(1, 999));
   }
 
   /// 引擎包名 → 友好短名（如 `com.iflytek.tts` → `iflytek`）。

@@ -126,7 +126,7 @@ class OnlineRepo {
     SourceHttpClient? client,
     int? concurrency,
     this.perSourceTimeout = const Duration(seconds: 15),
-  }) : concurrency = concurrency ?? defaultConcurrency,
+  }) : _configuredConcurrency = concurrency,
        _client = client ?? SourceHttpClient();
 
   bool _cancelled = false;
@@ -143,7 +143,8 @@ class OnlineRepo {
   final SourceHttpClient _client;
 
   /// 全局并发上限。
-  final int concurrency;
+  final int? _configuredConcurrency;
+  int get concurrency => _configuredConcurrency ?? defaultConcurrency;
 
   /// 单源超时。
   final Duration perSourceTimeout;
