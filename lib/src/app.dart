@@ -1,3 +1,4 @@
+import 'ui/widgets/pet_egg.dart';
 import 'data/persistence.dart';
 
 import 'package:flutter/material.dart';
@@ -59,7 +60,7 @@ class SakuraApp extends StatelessWidget {
               valueListenable: kPetEggActive,
               builder: (context, eggOn, _) => PopScope(
                 // 彩蛋激活时禁止返回 / 手势退出 → 真正的"锁定"
-                canPop: true,
+                canPop: !eggOn,
                 child: Stack(
                   children: [
                     child ?? const SizedBox.shrink(),
@@ -95,7 +96,7 @@ class SakuraApp extends StatelessWidget {
                       autoStart: false,
                       onSeen: () => prefs.setGuideSeen(true),
                     ),
-                    // Screen-lock easter eggs are no longer part of reading.
+                    PetEggOverlay(active: kPetEggActive),
                     AnimatedBuilder(
                       animation: Listenable.merge([
                         persistenceFailures,

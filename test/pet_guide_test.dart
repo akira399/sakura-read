@@ -1,4 +1,4 @@
-// 新手引导控制器（PetGuideController）的单测：推进 / 跳过 / 劝导语气 / 绝不锁屏。
+// 新手引导控制器（PetGuideController）的单测：推进 / 跳过 / 劝导语气 / 引导限定彩蛋。
 import 'package:flutter/widgets.dart' show Rect;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sakura_read/src/data/pet_guide.dart';
@@ -95,7 +95,7 @@ void main() {
     expect(finished, 1);
   });
 
-  test('点不中目标两次就软化放行，引导永远不锁屏', () {
+  test('点不中两次软化，继续耗尽耐心时只触发一次引导彩蛋', () {
     var burned = 0;
     final c = PetGuideController(onPatienceRunOut: () => burned++);
     addTearDown(c.dispose);
@@ -116,17 +116,15 @@ void main() {
     expect(c.softened, isTrue, reason: '连点两次不中就该放行');
     expect(c.anchorRect, isNull);
 
-    // 继续点也不会触发黑屏彩蛋，更不会退出引导
-    for (var i = 0; i < petGuideNags.length + 3; i++) {
-      expect(c.reportWrong(), isFalse, reason: '引导不存在任何锁屏路径');
+    for (var i = 2; i < PetGuideController.patienceLimit; i++) {
+      expect(c.reportWrong(), i == PetGuideController.patienceLimit - 1);
     }
-    expect(burned, 0, reason: '引导绝不能触发锁屏彩蛋');
-    expect(c.active, isTrue);
-
-    // 软化后点任意处 → 推进
-    final before = c.stepIndex;
-    c.advance();
-    expect(c.stepIndex, before + 1);
+    expect(burned, 1);
+    expect(c.exhausted, isTrue);
+    expect(c.active, isFalse);
+    expect(kPetGuideActive.value, isFalse);
+    expect(c.reportWrong(), isFalse);
+    expect(burned, 1);
   });
 
   test('点对位置会重置劝导计数（不算不听话）', () {

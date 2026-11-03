@@ -1,3 +1,5 @@
+import 'pet_overlay.dart' show kPetEggActive;
+
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -74,7 +76,9 @@ class _PetGuideHostState extends State<PetGuideHost> {
   }
 
   void _maybeStart() {
-    if (_started || !mounted || !widget.autoStart) return;
+    if (_started || !mounted || !widget.autoStart || kPetEggActive.value) {
+      return;
+    }
     if (!widget.enabled) return; // 未同意首启条款：先不打扰
     if (!widget.hostReady.value) return;
     if (widget.seen && !_forceShow) return;
@@ -87,7 +91,7 @@ class _PetGuideHostState extends State<PetGuideHost> {
 
   /// 设置页点了「重看新手引导」：绕过「已看过」限制，再播一遍。
   void _onReplayRequest() {
-    if (!mounted || _c.active) return;
+    if (!mounted || _c.active || kPetEggActive.value) return;
     if (!widget.enabled || !widget.hostReady.value) return;
     _started = true;
     _c.start();
@@ -96,9 +100,8 @@ class _PetGuideHostState extends State<PetGuideHost> {
   void _onFinished() => widget.onSeen();
 
   void _onPatienceRunOut() {
-    // 引导绝不锁屏：礼貌劝导只影响语气，到点就结束引导并记为「已看过」。
-    // （曾经走到黑屏彩蛋，等于把点不中目标的用户直接关在门外。）
-    widget.onSeen();
+    // 唯一的锁屏触发入口；引导已经结束并记录为已看过。
+    kPetEggActive.value = true;
   }
 
   @override
@@ -140,8 +143,8 @@ class PetGuideOverlay extends StatelessWidget {
   static const _nagFaces = [
     'assets/images/pet_chibi.png',
     'assets/images/pet_chibi.png',
-    'assets/images/pet_wave.png',
-    'assets/images/pet_rage.png',
+    'assets/images/pet_angry.png',
+    'assets/images/pet_angry.png',
     'assets/images/pet_rage.png',
   ];
 

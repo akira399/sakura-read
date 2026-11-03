@@ -161,6 +161,9 @@ class PetGuideController extends ChangeNotifier {
   /// 触发黑屏彩蛋，等于把新用户锁死在 App 外。）
   static const int softenAfterNags = 2;
 
+  /// 锁屏彩蛋只允许由进行中的新手引导触发。
+  static const int patienceLimit = 6;
+
   /// 当前步骤的锚点迟迟没出现在屏幕上时，等这么久就「软化」该步骤
   /// （点任意处即可继续），避免引导卡死在不可见的控件上。
   static const Duration anchorGrace = Duration(milliseconds: 1500);
@@ -312,12 +315,18 @@ class PetGuideController extends ChangeNotifier {
 
   /// 用户点了别处 / 迟迟不动 → 劝导。
   ///
-  /// 返回值保留给历史调用方（引导不再有任何锁屏路径，恒为 false）。
+  /// 达到耐心阈值时结束引导并通知宿主，只触发一次彩蛋。
   bool reportWrong() {
     if (!_active || _exhausted) return false;
     // 自由参观步骤：允许随便逛，不计"不听话"（功能要符合直觉）
     if (step.freeRoam) return false;
     _nagCount++;
+    if (_nagCount >= patienceLimit) {
+      _exhausted = true;
+      _finish();
+      onPatienceRunOut?.call();
+      return true;
+    }
     // 点不中目标两次就软化：点任意处继续（引导不能堵人）
     if (step.hasAnchor && _nagCount >= softenAfterNags) {
       _softened = true;

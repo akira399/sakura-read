@@ -1,3 +1,4 @@
+import 'package:sakura_read/src/ui/widgets/pet_overlay.dart' show kPetEggActive;
 // 「重看新手引导」回归测试。
 //
 // 背景：引导按设计只在首次启动自动播放一次（guideSeen 落盘后不再出现）。
@@ -35,6 +36,28 @@ Widget _host({
 }
 
 void main() {
+  tearDown(() => kPetEggActive.value = false);
+  testWidgets('锁屏只从进行中的新手引导宿主进入', (tester) async {
+    final pet = PetStore();
+    final ready = ValueNotifier<bool>(true);
+    await tester.pumpWidget(_host(pet: pet, ready: ready, seen: true));
+    pet.perform('dance');
+    await tester.pump();
+    expect(kPetEggActive.value, isFalse);
+    petGuideRequestReplay();
+    await tester.pump();
+    final guide = PetGuideController.current!;
+    for (var i = 0; i < PetGuideController.patienceLimit; i++) {
+      guide.reportWrong();
+    }
+    await tester.pump();
+    expect(kPetEggActive.value, isTrue);
+    expect(kPetGuideActive.value, isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    ready.dispose();
+    pet.dispose();
+  });
+
   testWidgets('重看引导：已看过的用户不会被打扰；重看信号能再次启动', (tester) async {
     final pet = PetStore();
     final ready = ValueNotifier<bool>(true);
