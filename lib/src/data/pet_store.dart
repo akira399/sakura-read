@@ -174,6 +174,44 @@ class PetStore extends ChangeNotifier with ReliablePersistence {
   ///
   /// 只是不显示，亲密度、投喂记录、点心背包都保留，随时可以再打开。
   bool petHidden = false;
+  bool quiet = false;
+  bool motionEnabled = true;
+  int pausedUntil = 0;
+  String activity = 'idle';
+  int activitySequence = 0;
+  bool get paused => DateTime.now().millisecondsSinceEpoch < pausedUntil;
+  void setQuiet(bool value) {
+    quiet = value;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setMotionEnabled(bool value) {
+    motionEnabled = value;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void pauseForMinutes(int minutes) {
+    pausedUntil = DateTime.now()
+        .add(Duration(minutes: minutes))
+        .millisecondsSinceEpoch;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void resumeCompanion() {
+    pausedUntil = 0;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void perform(String action) {
+    if (!{'wave', 'dance', 'read', 'rest', 'pat'}.contains(action)) return;
+    activity = action;
+    activitySequence++;
+    notifyListeners();
+  }
 
   // ---- 只读视图 ----
   int get affinity => _affinity;
@@ -249,6 +287,9 @@ class PetStore extends ChangeNotifier with ReliablePersistence {
           petX = ((data['petX'] as num?)?.toDouble() ?? 0.86).clamp(0.0, 1.0);
           petY = ((data['petY'] as num?)?.toDouble() ?? 0.62).clamp(0.0, 1.0);
           showPetInReader = data['showPetInReader'] as bool? ?? false;
+          quiet = data['quiet'] as bool? ?? false;
+          motionEnabled = data['motionEnabled'] as bool? ?? true;
+          pausedUntil = (data['pausedUntil'] as num?)?.toInt() ?? 0;
           petHidden =
               data['petHidden'] as bool? ?? !(data['enabled'] as bool? ?? true);
           final inv = data['inventory'];
@@ -312,6 +353,9 @@ class PetStore extends ChangeNotifier with ReliablePersistence {
         'enabled': enabled,
         'showPetInReader': showPetInReader,
         'petHidden': petHidden,
+        'quiet': quiet,
+        'motionEnabled': motionEnabled,
+        'pausedUntil': pausedUntil,
       }),
     );
   }

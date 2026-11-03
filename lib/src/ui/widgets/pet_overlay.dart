@@ -44,7 +44,8 @@ final ValueNotifier<bool> kPetEggActive = ValueNotifier<bool>(false);
 /// 摸头台词（双击触发）。
 const _petPatLines = ['诶嘿……被摸头啦', '呜……好舒服', '呀！别、别突然摸头啦', '再摸一下也不是不可以……'];
 
-class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
+class _PetOverlayState extends State<PetOverlay>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   static const double _size = 74;
 
   late final AnimationController _bobber;
@@ -83,6 +84,7 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   /// 生气表情持续时间。
   Timer? _angryTimer;
+  Timer? _danceTimer;
 
   /// 乱跑（捣乱）相关。
   Timer? _roamCheckTimer;
@@ -98,12 +100,16 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
   bool _positioned = false;
 
   /// 屏幕可用范围（供蹦跳计算；在 build 时刷新）。
+  int _seenActivity = 0;
+  bool _foreground = true;
+  bool _reduceMotion = false;
   double _maxX = 0;
   double _maxY = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bobber = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2200),
@@ -123,6 +129,10 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
     });
     _seenFeedAt = widget.pet.lastFeedAt;
     widget.pet.addListener(_onPetChanged);
+    widget.hostReady?.addListener(_syncActivity);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncActivity();
+    });
     kPetEggActive.addListener(_onEggClosed);
     _checkPendingGains();
     _startDozeTimer();
@@ -133,7 +143,9 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.pet.removeListener(_onPetChanged);
+    widget.hostReady?.removeListener(_syncActivity);
     kPetEggActive.removeListener(_onEggClosed);
     _lineTimer?.cancel();
     _dozeTimer?.cancel();
@@ -141,12 +153,63 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
     _greetTimer?.cancel();
     _hopTimer?.cancel();
     _angryTimer?.cancel();
+    _danceTimer?.cancel();
     _roamCheckTimer?.cancel();
     _runAnimTimer?.cancel();
     _bobber.dispose();
     _celebrate.dispose();
     _hearts.dispose();
     super.dispose();
+  }
+
+  void _syncActivity() {
+    final moving =
+        (widget.hostReady?.value ?? true) &&
+        _foreground &&
+        widget.pet.enabled &&
+        !widget.pet.paused &&
+        widget.pet.motionEnabled &&
+        !_reduceMotion &&
+        !(widget.pet.readerActive && !widget.pet.showPetInReader);
+    if (moving && !_bobber.isAnimating) _bobber.repeat(reverse: true);
+    if (!moving) {
+      _danceTimer?.cancel();
+      _tilt = 0;
+      _bobber.stop();
+      _celebrate.stop();
+      _stopRoamIfAny();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _syncActivity();
+  }
+
+  void _dance() {
+    _danceTimer?.cancel();
+    var beat = 0;
+    _danceTimer = Timer.periodic(const Duration(milliseconds: 180), (timer) {
+      if (!mounted ||
+          !widget.pet.enabled ||
+          widget.pet.paused ||
+          !widget.pet.motionEnabled ||
+          _reduceMotion ||
+          !_foreground ||
+          beat >= 12) {
+        timer.cancel();
+        if (mounted) setState(() => _tilt = 0);
+        return;
+      }
+      setState(() {
+        _tilt = beat.isEven ? -.10 : .10;
+        _faceIndex = beat % 4 < 2 ? 3 : 1;
+      });
+      beat++;
+    });
+    _playNudge();
+    _playHearts();
   }
 
   /// 首次出现时的时段问候（只做一次）。
@@ -159,7 +222,12 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   /// 升级 / 投喂：庆祝弹跳 + 开心差分。
   Future<void> _playCelebrate() async {
-    if (!mounted) return;
+    if (!mounted ||
+        !widget.pet.motionEnabled ||
+        _reduceMotion ||
+        !_foreground) {
+      return;
+    }
     setState(() => _faceIndex = _petFaces.indexOf(_cheerFace));
     try {
       _celebrate.value = 0;
@@ -187,13 +255,19 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   /// 摸头：飘心动画。
   void _playHearts() {
-    if (!mounted) return;
+    if (!mounted ||
+        !widget.pet.motionEnabled ||
+        _reduceMotion ||
+        !_foreground) {
+      return;
+    }
     setState(() => _showHearts = true);
     _hearts.forward(from: 0);
   }
 
   /// 点击 / 拖拽落地的小跳：轻量弹跳反馈。
   Future<void> _playNudge() async {
+    if (!widget.pet.motionEnabled || _reduceMotion || !_foreground) return;
     try {
       await _celebrate.animateTo(
         .32,
@@ -213,10 +287,13 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
   /// 每分钟检查一次是否该打瞌睡（深夜时段或 5 分钟没互动）。
   void _startDozeTimer() {
     _checkDoze(); // 启动时立即检查（深夜打开 App 会直接以睡容出现）
-    _dozeTimer = Timer.periodic(
-      const Duration(minutes: 1),
-      (_) => _checkDoze(),
-    );
+    _dozeTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      _checkDoze();
+      if (mounted) {
+        _syncActivity();
+        setState(() {});
+      }
+    });
   }
 
   void _checkDoze() {
@@ -261,7 +338,17 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   /// 按当前场景概率决定是否开始乱跑。
   void _maybeRoam() {
-    if (!mounted || _roaming || _dozing) return;
+    if (!mounted ||
+        _roaming ||
+        _dozing ||
+        !_foreground ||
+        !widget.pet.enabled ||
+        widget.pet.paused ||
+        widget.pet.quiet ||
+        !widget.pet.motionEnabled ||
+        _reduceMotion) {
+      return;
+    }
     if (kPetEggActive.value) return;
     if (_maxX <= 0 || _maxY <= 0) return;
     final chance = widget.pet.readerActive
@@ -443,6 +530,43 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   void _onPetChanged() {
     if (!mounted) return;
+    _syncActivity();
+    if (widget.pet.quiet) {
+      _lineTimer?.cancel();
+      _line = null;
+    }
+    if (_seenActivity != widget.pet.activitySequence) {
+      _seenActivity = widget.pet.activitySequence;
+      _stopRoamIfAny();
+      _lastInteractionAt = DateTime.now();
+      _dozing = false;
+      final action = widget.pet.activity;
+      if (action == 'pat') {
+        _onDoubleTap();
+      } else {
+        final face = {'wave': 1, 'dance': 3, 'read': 2, 'rest': 4}[action] ?? 0;
+        _faceIndex = face;
+        _showLine(
+          {
+                'wave': '嗨，今天也一起读一点吧！',
+                'dance': '给认真读书的你跳一支小舞～',
+                'read': '我会安静陪你，把故事交给书页。',
+                'rest': '稍微休息一下，眼睛也需要放松。',
+              }[action] ??
+              '我在这里',
+        );
+        if (action == 'dance' && widget.pet.motionEnabled && !_reduceMotion) {
+          _dance();
+        }
+        if (action == 'wave' && widget.pet.motionEnabled && !_reduceMotion) {
+          _playNudge();
+        }
+        _faceTimer?.cancel();
+        _faceTimer = Timer(const Duration(seconds: 8), () {
+          if (mounted) setState(() => _faceIndex = _dozing ? 4 : 0);
+        });
+      }
+    }
     setState(() {});
     _checkPendingGains();
     // 阅读状态变化 → 调整乱跑频率
@@ -464,6 +588,7 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
   }
 
   void _showLine(String text) {
+    if (widget.pet.quiet || widget.pet.paused || !_foreground) return;
     _lineTimer?.cancel();
     setState(() => _line = text);
     _lineTimer = Timer(const Duration(seconds: 3), () {
@@ -473,6 +598,7 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   void _onTap() {
     if (_markInteraction()) return;
+    _danceTimer?.cancel();
     _stopRoamIfAny(); // 点击打断乱跑
     // 频繁点击 → 生气（不涨好感度）
     if (_mood.registerTap(DateTime.now())) {
@@ -489,7 +615,9 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
         break;
       default:
         // 点击：蹦跳 + 随机台词
-        _hopAround();
+        if (!widget.pet.quiet && widget.pet.motionEnabled && !_reduceMotion) {
+          _hopAround();
+        }
         if (result.leveledUp) {
           _playCelebrate();
           _showLine('亲密度升级！现在是「${widget.pet.levelName}」啦 🎉');
@@ -532,6 +660,13 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    if (reduced != _reduceMotion) {
+      _reduceMotion = reduced;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncActivity();
+      });
+    }
     // 必须包一层 Material：桌宠挂在 MaterialApp.builder 层（Navigator 的兄弟位），
     // 不在任何页面 Material 之内。若直接放裸 Text，台词气泡会继承 MaterialApp
     // 最外层的调试用 DefaultTextStyle（红字 + 黄色双下划线），气泡文字下方
@@ -543,8 +678,11 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
           // 安全边距：弹跳缩放 / 轮廓阴影会超出 _size 一点，留缓冲保证不出屏
           const margin = 8.0;
           // 可移动范围（含安全边距）
-          final maxX = constraints.maxWidth - _size - margin;
-          final maxY = constraints.maxHeight - _size - 96 - margin; // 底部导航留空
+          final maxX = math.max(0.0, constraints.maxWidth - _size - margin);
+          final maxY = math.max(
+            0.0,
+            constraints.maxHeight - _size - 96 - margin,
+          ); // 底部导航留空
           if (!_positioned) {
             _dx = ((widget.pet.petX * maxX).clamp(0.0, maxX));
             _dy = ((widget.pet.petY * maxY).clamp(0.0, maxY));
@@ -563,7 +701,9 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
           return ValueListenableBuilder<bool>(
             valueListenable: widget.hostReady ?? _alwaysReady,
             builder: (context, ready, _) {
-              if (!ready || !widget.pet.enabled) return const SizedBox.shrink();
+              if (!ready || !widget.pet.enabled || widget.pet.paused) {
+                return const SizedBox.shrink();
+              }
               // 阅读器内：默认隐藏；用户开启「阅读时显示桌宠」才显示
               if (widget.pet.readerActive && !widget.pet.showPetInReader) {
                 return const SizedBox.shrink();
@@ -586,6 +726,7 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
                         onLongPress: _onLongPress,
                         onPanStart: (_) {
                           // 用户开始拖动 → 打断乱跑
+                          _danceTimer?.cancel();
                           _stopRoamIfAny();
                         },
                         onPanUpdate: (details) {
@@ -659,8 +800,13 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
                                 // 呼吸浮动 + 奔跑时的上下起伏
                                 offset: Offset(
                                   0,
-                                  _bobber.value * 4 -
-                                      2 -
+                                  (widget.pet.motionEnabled && !_reduceMotion
+                                          ? -(1 -
+                                                    math.cos(
+                                                      _bobber.value * math.pi,
+                                                    )) *
+                                                2
+                                          : 0) -
                                       (_roaming && _runPhase == 1 ? 5 : 0),
                                 ),
                                 child: Transform.rotate(
@@ -697,9 +843,27 @@ class _PetOverlayState extends State<PetOverlay> with TickerProviderStateMixin {
                                     // 呼吸浮动 / 弹跳只做图层合成，避免每帧重新模糊。
                                     RepaintBoundary(
                                       child: AnimatedSwitcher(
-                                        duration: const Duration(
-                                          milliseconds: 200,
+                                        duration: Duration(
+                                          milliseconds: _reduceMotion ? 0 : 320,
                                         ),
+                                        transitionBuilder: (child, animation) =>
+                                            FadeTransition(
+                                              opacity: animation,
+                                              child: ScaleTransition(
+                                                scale:
+                                                    Tween<double>(
+                                                      begin: .94,
+                                                      end: 1,
+                                                    ).animate(
+                                                      CurvedAnimation(
+                                                        parent: animation,
+                                                        curve:
+                                                            Curves.easeOutCubic,
+                                                      ),
+                                                    ),
+                                                child: child,
+                                              ),
+                                            ),
                                         child: Stack(
                                           key: ValueKey<int>(_faceIndex),
                                           fit: StackFit.expand,
@@ -936,6 +1100,50 @@ class _PetPanelPageState extends State<_PetPanelPage> {
                 ),
               ),
               const SizedBox(height: 18),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final entry in {
+                    'wave': '打招呼',
+                    'pat': '摸摸头',
+                    'dance': '跳支舞',
+                    'read': '一起读书',
+                    'rest': '打个盹',
+                  }.entries)
+                    ActionChip(
+                      label: Text(entry.value),
+                      onPressed: () {
+                        pet.perform(entry.key);
+                        _toast('小樱：${entry.value}');
+                      },
+                    ),
+                ],
+              ),
+              SwitchListTile(
+                title: const Text('安静陪伴'),
+                subtitle: const Text('不主动冒泡、不四处跑动；仍可主动互动'),
+                value: pet.quiet,
+                onChanged: pet.setQuiet,
+              ),
+              SwitchListTile(
+                title: const Text('柔和动画'),
+                subtitle: const Text('呼吸、弹跳和表情过渡；关闭后减少运动'),
+                value: pet.motionEnabled,
+                onChanged: pet.setMotionEnabled,
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  if (pet.paused) {
+                    pet.resumeCompanion();
+                  } else {
+                    pet.pauseForMinutes(15);
+                  }
+                },
+                icon: const Icon(Icons.snooze),
+                label: Text(pet.paused ? '恢复陪伴' : '暂停显示 15 分钟'),
+              ),
+              const SizedBox(height: 12),
               // 统计数据
               Row(
                 children: [

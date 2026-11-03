@@ -138,6 +138,14 @@ class BookmarkStore extends ChangeNotifier with ReliablePersistence {
     return bookmark;
   }
 
+  /// Reading notes can coexist with an ordinary bookmark at the same position.
+  void addNote(Bookmark note) {
+    if (_items.any((item) => item.id == note.id)) return;
+    _items.add(note);
+    _saveSoon();
+    notifyListeners();
+  }
+
   void remove(String id) {
     final before = _items.length;
     _items.removeWhere((b) => b.id == id);

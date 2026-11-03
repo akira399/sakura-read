@@ -1,3 +1,4 @@
+import 'reading_assistant_home.dart';
 import 'library_search_page.dart';
 import '../source/source_store.dart';
 import 'source/source_health_page.dart';
@@ -17,8 +18,44 @@ import 'widgets/cute.dart';
 final ValueNotifier<bool> kAiChatActive = ValueNotifier<bool>(false);
 
 /// 小樱 AI 阅读助手对话框。
-class AiChatPage extends StatefulWidget {
+class AiChatPage extends StatelessWidget {
   const AiChatPage({
+    super.key,
+    required this.store,
+    required this.prefs,
+    this.statsStore,
+    this.debugSeedBubbles,
+  });
+  final BookStore store;
+  final AppPrefs prefs;
+  final StatsStore? statsStore;
+  final List<(String, bool)>? debugSeedBubbles;
+  @override
+  Widget build(BuildContext context) => debugSeedBubbles != null
+      ? AiConversationPage(
+          store: store,
+          prefs: prefs,
+          statsStore: statsStore,
+          debugSeedBubbles: debugSeedBubbles,
+        )
+      : ReadingAssistantHome(
+          store: store,
+          prefs: prefs,
+          stats: statsStore,
+          onChat: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => AiConversationPage(
+                store: store,
+                prefs: prefs,
+                statsStore: statsStore,
+              ),
+            ),
+          ),
+        );
+}
+
+class AiConversationPage extends StatefulWidget {
+  const AiConversationPage({
     super.key,
     required this.store,
     required this.prefs,
@@ -37,7 +74,7 @@ class AiChatPage extends StatefulWidget {
   final List<(String, bool)>? debugSeedBubbles;
 
   @override
-  State<AiChatPage> createState() => _AiChatPageState();
+  State<AiConversationPage> createState() => _AiConversationPageState();
 }
 
 class _BubbleData {
@@ -55,7 +92,7 @@ class _BubbleData {
   bool streaming = false;
 }
 
-class _AiChatPageState extends State<AiChatPage> {
+class _AiConversationPageState extends State<AiConversationPage> {
   static const _quickAsks = [
     '/搜索 关键词',
     '/书源体检',
