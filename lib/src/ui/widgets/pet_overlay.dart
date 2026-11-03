@@ -33,6 +33,12 @@ const _petFaces = [
   'assets/images/pet_shy.png',
   'assets/images/pet_angry.png',
   'assets/images/pet_rage.png',
+  'assets/images/pet_snack.png',
+  'assets/images/pet_tea.png',
+  'assets/images/pet_curious.png',
+  'assets/images/pet_dance.png',
+  'assets/images/pet_stretch.png',
+  'assets/images/pet_encourage.png',
 ];
 
 /// hostReady 缺省值（避免每次 build 新建 ValueNotifier）。
@@ -204,7 +210,7 @@ class _PetOverlayState extends State<PetOverlay>
       }
       setState(() {
         _tilt = beat.isEven ? -.10 : .10;
-        _faceIndex = beat % 4 < 2 ? 3 : 1;
+        _faceIndex = _faceOf(petInteractionSprites['dance']!);
       });
       beat++;
     });
@@ -314,7 +320,7 @@ class _PetOverlayState extends State<PetOverlay>
   static const _sleepFace = 'assets/images/pet_sleep.png';
 
   /// 开心差分索引（庆祝时使用）。
-  static const _cheerFace = 'assets/images/pet_cheer.png';
+  static const _cheerFace = 'assets/images/pet_encourage.png';
 
   /// 生气差分索引。
   static const _angryFace = 'assets/images/pet_angry.png';
@@ -544,7 +550,7 @@ class _PetOverlayState extends State<PetOverlay>
       if (action == 'pat') {
         _onDoubleTap();
       } else {
-        final face = {'wave': 1, 'dance': 3, 'read': 2, 'rest': 4}[action] ?? 0;
+        final face = _faceOf(petInteractionSprites[action] ?? _petFaces.first);
         _faceIndex = face;
         _showLine(
           {
@@ -552,6 +558,10 @@ class _PetOverlayState extends State<PetOverlay>
                 'dance': '给认真读书的你跳一支小舞～',
                 'read': '我会安静陪你，把故事交给书页。',
                 'rest': '稍微休息一下，眼睛也需要放松。',
+                'tea': '喝口茶，让故事慢一点。',
+                'curious': '这里有什么线索呢？一起回原文找找。',
+                'stretch': '伸个懒腰，肩膀也放松一下～',
+                'encourage': '读完一小段也是进步，我陪你。',
               }[action] ??
               '我在这里',
         );
@@ -575,7 +585,12 @@ class _PetOverlayState extends State<PetOverlay>
     final feedAt = widget.pet.lastFeedAt;
     if (feedAt != _seenFeedAt) {
       _seenFeedAt = feedAt;
-      _playCelebrate();
+      _playNudge();
+      setState(() => _faceIndex = _faceOf('assets/images/pet_snack.png'));
+      _faceTimer?.cancel();
+      _faceTimer = Timer(const Duration(seconds: 6), () {
+        if (mounted) setState(() => _faceIndex = _dozing ? 4 : 0);
+      });
       _showLine('好吃！谢谢投喂～（+亲密度）');
     }
   }
@@ -607,7 +622,15 @@ class _PetOverlayState extends State<PetOverlay>
     }
     final result = widget.pet.interact();
     setState(() {
-      _faceIndex = (_faceIndex + 1) % _petFaces.length;
+      final positiveFaces = [
+        _petFaces.first,
+        'assets/images/pet_wave.png',
+        'assets/images/pet_curious.png',
+        'assets/images/pet_encourage.png',
+      ];
+      _faceIndex = _faceOf(
+        positiveFaces[DateTime.now().microsecond % positiveFaces.length],
+      );
     });
     switch (result.reason) {
       case 'daily_cap':
@@ -887,6 +910,7 @@ class _PetOverlayState extends State<PetOverlay>
                                                   ),
                                                   child: Image.asset(
                                                     _petFaces[_faceIndex],
+                                                    cacheHeight: 256,
                                                     fit: BoxFit.contain,
                                                   ),
                                                 ),
@@ -894,6 +918,7 @@ class _PetOverlayState extends State<PetOverlay>
                                             ),
                                             Image.asset(
                                               _petFaces[_faceIndex],
+                                              cacheHeight: 256,
                                               fit: BoxFit.contain,
                                             ),
                                           ],
@@ -1110,6 +1135,10 @@ class _PetPanelPageState extends State<_PetPanelPage> {
                     'dance': '跳支舞',
                     'read': '一起读书',
                     'rest': '打个盹',
+                    'tea': '喝口茶',
+                    'curious': '想一想',
+                    'stretch': '伸懒腰',
+                    'encourage': '给我打气',
                   }.entries)
                     ActionChip(
                       label: Text(entry.value),

@@ -1,0 +1,46 @@
+{
+  "generator": "built-in imagegen",
+  "transparent_background": true,
+  "refs": [
+    "C:/Users/admin/Documents/Codex/2026-11-02/https-github-com-akira399-sakura-read/outputs/sakura-read/assets/images/pet_chibi.png",
+    "C:/Users/admin/Documents/Codex/2026-11-02/https-github-com-akira399-sakura-read/outputs/sakura-read/assets/images/pet_angry.png"
+  ],
+  "entries": [
+    {
+      "name": "snack",
+      "source": "C:\\Users\\admin\\.codex\\generated_images\\01a19ad9-fdd3-7eb1-bcbf-bb6cd45c8fc3\\exec-854bd8e2-ed47-4b22-8993-e9d69b57c41c.png",
+      "asset": "assets/images/pet_snack.png",
+      "prompt": "Edit the canonical Sakura Read chibi girl into ONE new interaction sprite. Reference image 1 is canonical identity; reference image 2 is the latest approved expression rendering. Preserve exact same round face, huge head / tiny two-head-high body, long pastel pink hair and bangs, white daisy hair clip with yellow center on viewer-right, big PURPLE eyes, cream cardigan, burgundy ribbon, dark navy pleated skirt, matching socks and burgundy shoes. Soft pastel Japanese chibi cel shading, thick rounded dark-brown outline; same proportions and full-body scale as references. Full body centered, entire hair and shoes visible, genuinely transparent background, no text, symbols, scene or floor shadow. Do not redesign, change eye color, costume, hair clip, line style or age. Eating a small round pink mochi held in both hands, tiny happy chewing smile, relaxed purple eyes, cute pleased expression, standing naturally."
+    },
+    {
+      "name": "tea",
+      "source": "C:\\Users\\admin\\.codex\\generated_images\\01a19ad9-fdd3-7eb1-bcbf-bb6cd45c8fc3\\exec-2a330d9f-137c-4718-8218-8df9dd116e98.png",
+      "asset": "assets/images/pet_tea.png",
+      "prompt": "Edit the canonical Sakura Read chibi girl into ONE new interaction sprite. Reference image 1 is canonical identity; reference image 2 is the latest approved expression rendering. Preserve exact same round face, huge head / tiny two-head-high body, long pastel pink hair and bangs, white daisy hair clip with yellow center on viewer-right, big PURPLE eyes, cream cardigan, burgundy ribbon, dark navy pleated skirt, matching socks and burgundy shoes. Soft pastel Japanese chibi cel shading, thick rounded dark-brown outline; same proportions and full-body scale as references. Full body centered, entire hair and shoes visible, genuinely transparent background, no text, symbols, scene or floor shadow. Do not redesign, change eye color, costume, hair clip, line style or age. Holding a small plain teacup in both hands close to chest, calm content smile, relaxed purple eyes, a gentle rest-time pose. No table or chair."
+    },
+    {
+      "name": "curious",
+      "source": "C:\\Users\\admin\\.codex\\generated_images\\01a19ad9-fdd3-7eb1-bcbf-bb6cd45c8fc3\\exec-e4791c83-187a-4432-b452-5de7e342d3dc.png",
+      "asset": "assets/images/pet_curious.png",
+      "prompt": "Edit the canonical Sakura Read chibi girl into ONE new interaction sprite. Reference image 1 is canonical identity; reference image 2 is the latest approved expression rendering. Preserve exact same round face, huge head / tiny two-head-high body, long pastel pink hair and bangs, white daisy hair clip with yellow center on viewer-right, big PURPLE eyes, cream cardigan, burgundy ribbon, dark navy pleated skirt, matching socks and burgundy shoes. Soft pastel Japanese chibi cel shading, thick rounded dark-brown outline; same proportions and full-body scale as references. Full body centered, entire hair and shoes visible, genuinely transparent background, no text, symbols, scene or floor shadow. Do not redesign, change eye color, costume, hair clip, line style or age. Thoughtfully tilting her head slightly, one finger near cheek and the other hand holding her familiar closed brown book, curious purple eyes and tiny questioning mouth. No question-mark symbol."
+    },
+    {
+      "name": "dance",
+      "source": "C:\\Users\\admin\\.codex\\generated_images\\01a19ad9-fdd3-7eb1-bcbf-bb6cd45c8fc3\\exec-bc55cd7d-8ae0-401a-82bd-f1d02494436f.png",
+      "asset": "assets/images/pet_dance.png",
+      "prompt": "Edit the canonical Sakura Read chibi girl into ONE new interaction sprite. Reference image 1 is canonical identity; reference image 2 is the latest approved expression rendering. Preserve exact same round face, huge head / tiny two-head-high body, long pastel pink hair and bangs, white daisy hair clip with yellow center on viewer-right, big PURPLE eyes, cream cardigan, burgundy ribbon, dark navy pleated skirt, matching socks and burgundy shoes. Soft pastel Japanese chibi cel shading, thick rounded dark-brown outline; same proportions and full-body scale as references. Full body centered, entire hair and shoes visible, genuinely transparent background, no text, symbols, scene or floor shadow. Do not redesign, change eye color, costume, hair clip, line style or age. A lively dancing pose, one foot lightly lifted and arms gracefully spread, happy smile and bright purple eyes. Keep limbs short and pose compact, no motion lines."
+    },
+    {
+      "name": "stretch",
+      "source": "C:\\Users\\admin\\.codex\\generated_images\\01a19ad9-fdd3-7eb1-bcbf-bb6cd45c8fc3\\exec-58c7ee94-1a25-488f-b9a0-4962f7ec2654.png",
+      "asset": "assets/images/pet_stretch.png",
+      "prompt": "Edit the canonical Sakura Read chibi girl into ONE new interaction sprite. Reference image 1 is canonical identity; reference image 2 is the latest approved expression rendering. Preserve exact same round face, huge head / tiny two-head-high body, long pastel pink hair and bangs, white daisy hair clip with yellow center on viewer-right, big PURPLE eyes, cream cardigan, burgundy ribbon, dark navy pleated skirt, matching socks and burgundy shoes. Soft pastel Japanese chibi cel shading, thick rounded dark-brown outline; same proportions and full-body scale as references. Full body centered, entire hair and shoes visible, genuinely transparent background, no text, symbols, scene or floor shadow. Do not redesign, change eye color, costume, hair clip, line style or age. A gentle full-body stretch, both arms above her head, eyes happily half-closed and small relieved smile, both feet on ground, full hands visible, no symbols."
+    },
+    {
+      "name": "encourage",
+      "source": "C:\\Users\\admin\\.codex\\generated_images\\01a19ad9-fdd3-7eb1-bcbf-bb6cd45c8fc3\\exec-37216928-2b2b-4068-a9bb-cace585f48a4.png",
+      "asset": "assets/images/pet_encourage.png",
+      "prompt": "Edit the canonical Sakura Read chibi girl into ONE new interaction sprite. Reference image 1 is canonical identity; reference image 2 is the latest approved expression rendering. Preserve exact same round face, huge head / tiny two-head-high body, long pastel pink hair and bangs, white daisy hair clip with yellow center on viewer-right, big PURPLE eyes, cream cardigan, burgundy ribbon, dark navy pleated skirt, matching socks and burgundy shoes. Soft pastel Japanese chibi cel shading, thick rounded dark-brown outline; same proportions and full-body scale as references. Full body centered, entire hair and shoes visible, genuinely transparent background, no text, symbols, scene or floor shadow. Do not redesign, change eye color, costume, hair clip, line style or age. Encouraging the reader with a confident warm smile, one tiny fist raised beside her face, other arm hugging her closed brown book. Bright purple eyes. No words or celebratory symbols."
+    }
+  ]
+}

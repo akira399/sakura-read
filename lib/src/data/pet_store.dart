@@ -14,6 +14,18 @@ import 'package:flutter/foundation.dart';
 
 import '../platform/native_bridge.dart';
 
+/// Stable bindings shared by the panel and overlay.
+const petInteractionSprites = <String, String>{
+  'wave': 'assets/images/pet_wave.png',
+  'dance': 'assets/images/pet_dance.png',
+  'read': 'assets/images/pet_read.png',
+  'rest': 'assets/images/pet_sleep.png',
+  'tea': 'assets/images/pet_tea.png',
+  'curious': 'assets/images/pet_curious.png',
+  'stretch': 'assets/images/pet_stretch.png',
+  'encourage': 'assets/images/pet_encourage.png',
+};
+
 /// 桌宠宿主就绪标志：**开屏结束 + 权限就绪**后才显示悬浮桌宠。
 final ValueNotifier<bool> kPetHostReady = ValueNotifier<bool>(false);
 
@@ -207,7 +219,7 @@ class PetStore extends ChangeNotifier with ReliablePersistence {
   }
 
   void perform(String action) {
-    if (!{'wave', 'dance', 'read', 'rest', 'pat'}.contains(action)) return;
+    if (action != 'pat' && !petInteractionSprites.containsKey(action)) return;
     activity = action;
     activitySequence++;
     notifyListeners();

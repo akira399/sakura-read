@@ -21,7 +21,10 @@ void main() {
     pet.setQuiet(true);
     pet.setMotionEnabled(false);
     pet.pauseForMinutes(15);
-    pet.perform('dance');
+    for (final action in ['dance', 'tea', 'curious', 'stretch', 'encourage']) {
+      pet.perform(action);
+      expect(pet.activity, action);
+    }
     final sequence = pet.activitySequence;
     pet.perform('unknown');
     expect(pet.activitySequence, sequence);
