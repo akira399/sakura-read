@@ -17,6 +17,10 @@ import 'package:sakura_read/src/data/pet_store.dart';
 import 'package:sakura_read/src/data/prefs.dart';
 import 'package:sakura_read/src/platform/native_bridge.dart';
 import 'package:sakura_read/src/source/online_repo.dart';
+import 'package:sakura_read/src/source/models.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:sakura_read/src/source/http_client.dart';
 
 /// 等 prefs / pet store 的防抖落盘。
 Future<void> _settle() =>
@@ -140,6 +144,38 @@ void main() {
       expect(OnlineRepo.defaultConcurrency, 999);
       expect(repo.concurrency, 999);
       repo.dispose();
+    });
+
+    test('并发 999 会实际派发给最多 999 个启用书源（只用 MockClient）', () async {
+      var requests = 0;
+      final sources = [
+        for (var i = 0; i < 1000; i++)
+          BookSource.fromJson({
+            'bookSourceUrl': 'https://parallel-$i.example',
+            'bookSourceName': '并发源 $i',
+            'searchUrl': '/search?q={{key}}',
+            'ruleSearch': <String, dynamic>{},
+          }),
+      ];
+      final prefs = AppPrefs(dirsOverride: _tempDirs(trash));
+      prefs.setSearchConcurrency(999);
+      final repo = OnlineRepo(
+        store: SourceStore(initial: sources),
+        client: SourceHttpClient(
+          client: MockClient((_) async {
+            requests++;
+            return http.Response('<html></html>', 200);
+          }),
+        ),
+      );
+      try {
+        final results = await repo.searchAll('验收');
+        expect(repo.concurrency, 999);
+        expect(requests, 1000);
+        expect(results, hasLength(1000));
+      } finally {
+        repo.dispose();
+      }
     });
 
     test('老版本设置文件没有该键时用默认 8，不崩', () async {
