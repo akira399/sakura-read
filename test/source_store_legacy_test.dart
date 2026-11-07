@@ -30,9 +30,8 @@ void main() {
     expect(store.isEmpty, isTrue);
 
     // 直接走导入路径（等价于 ensureBuiltinSources 的核心行为）
-    final text = await File(
-      'assets/sources/builtin_sources.json',
-    ).readAsString();
+    final text = await File('assets/sources/builtin_sources.json')
+        .readAsString();
     final report = store.importFromText(text);
     await store.flush();
 
@@ -77,9 +76,8 @@ void main() {
     expect(store.sources.length, 3);
 
     // 模拟 ensureBuiltinSources：读内置资产 → 清理 legacy → 导入
-    final builtinJson = await File(
-      'assets/sources/builtin_sources.json',
-    ).readAsString();
+    final builtinJson = await File('assets/sources/builtin_sources.json')
+        .readAsString();
     // 当前内置资产**未登记**任何 legacy 地址（hkmtxt / bqgiu 已恢复为内置源，
     // 不能再被清掉）。这里用一份模拟清单单独验证清理机制本身可用。
     const simulatedLegacy = [
@@ -101,9 +99,8 @@ void main() {
   });
 
   test('当前内置资产不应再登记 hkmtxt / bqgiu 为待清理（防止自删）', () async {
-    final builtinJson = await File(
-      'assets/sources/builtin_sources.json',
-    ).readAsString();
+    final builtinJson = await File('assets/sources/builtin_sources.json')
+        .readAsString();
     final legacy = <String>{};
     for (final item in jsonDecode(builtinJson) as List) {
       final v = (item as Map)['legacyBuiltinUrls'];
@@ -117,9 +114,8 @@ void main() {
     final dir = _tmpDir('idem');
     final store = SourceStore(dirsOverride: _dirsOf(dir));
     await store.load();
-    final text = await File(
-      'assets/sources/builtin_sources.json',
-    ).readAsString();
+    final text = await File('assets/sources/builtin_sources.json')
+        .readAsString();
 
     final first = store.importFromText(text);
     final count = store.sources.length;
@@ -134,9 +130,8 @@ void main() {
     final dir = _tmpDir('keep');
     final store = SourceStore(dirsOverride: _dirsOf(dir));
     await store.load();
-    final text = await File(
-      'assets/sources/builtin_sources.json',
-    ).readAsString();
+    final text = await File('assets/sources/builtin_sources.json')
+        .readAsString();
     store.importFromText(text);
 
     // 用户手动停用了第一个源

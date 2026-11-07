@@ -46,9 +46,9 @@ void main() {
       prefs.setHighRefreshRate(false);
       await _settle();
 
-      final raw =
-          jsonDecode(File('${dirs.files}/settings.json').readAsStringSync())
-              as Map<String, dynamic>;
+      final raw = jsonDecode(
+        File('${dirs.files}/settings.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
       expect(raw['highRefreshRate'], isFalse);
 
       final again = AppPrefs(dirsOverride: dirs);
@@ -58,9 +58,8 @@ void main() {
 
     test('老版本设置文件（无该键）按默认值 true 处理', () async {
       final dirs = _tempDirs(trash);
-      File(
-        '${dirs.files}/settings.json',
-      ).writeAsStringSync(jsonEncode({'v': 2, 'fontSize': 20}));
+      File('${dirs.files}/settings.json')
+          .writeAsStringSync(jsonEncode({'v': 2, 'fontSize': 20}));
 
       final prefs = AppPrefs(dirsOverride: dirs);
       await prefs.load();

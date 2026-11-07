@@ -146,9 +146,8 @@ void main() {
     ]) async {
       final dir = store.chapterCacheDir(bookId);
       await dir.create(recursive: true);
-      await File(
-        '${dir.path}/ch_v2_${index.toString().padLeft(4, '0')}.txt',
-      ).writeAsString(text);
+      await File('${dir.path}/ch_v2_${index.toString().padLeft(4, '0')}.txt')
+          .writeAsString(text);
     }
 
     test('未缓存 → 0 章', () async {

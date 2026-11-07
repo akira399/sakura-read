@@ -53,13 +53,9 @@ void main() {
     });
 
     test('资产不再把 hkmtxt / bqgiu 列为待清理项（否则升级会把恢复的源删掉）', () async {
-      final raw =
-          jsonDecode(
-                await File(
-                  'assets/sources/builtin_sources.json',
-                ).readAsString(),
-              )
-              as List;
+      final raw = jsonDecode(
+        await File('assets/sources/builtin_sources.json').readAsString(),
+      ) as List;
       final urls = <String>[];
       for (final item in raw) {
         final v = (item as Map)['legacyBuiltinUrls'];
@@ -162,9 +158,8 @@ void main() {
   group('第三方源详情 / 目录（真实书页夹具）', () {
     test('好看吗：详情字段 + 2079 章大目录', () async {
       final src = _byHost(builtin, 'hkmtxt');
-      final html = await File(
-        'test/fixtures/source/hkmtxt_book.html',
-      ).readAsString();
+      final html = await File('test/fixtures/source/hkmtxt_book.html')
+          .readAsString();
       final engine = AnalyzeRule(html, baseUrl: src.bookSourceUrl);
       expect(engine.getString(src.bookInfoRule!.name!), '完美世界');
       expect(engine.getString(src.bookInfoRule!.author!), '辰东');
@@ -186,9 +181,8 @@ void main() {
 
     test('笔趣阁：详情字段 + 42 章目录', () async {
       final src = _byHost(builtin, 'bqgiu');
-      final html = await File(
-        'test/fixtures/source/bqgiu_book.html',
-      ).readAsString();
+      final html = await File('test/fixtures/source/bqgiu_book.html')
+          .readAsString();
       final engine = AnalyzeRule(html, baseUrl: src.bookSourceUrl);
       expect(engine.getString(src.bookInfoRule!.name!), '斗破苍穹之淫宗肆虐');
       expect(engine.getString(src.bookInfoRule!.author!), '琉璃狐');
@@ -209,9 +203,8 @@ void main() {
 
     test('搜索：解析 generator=search 接口夹具', () async {
       final src = wikisource();
-      final fixture = await File(
-        'test/fixtures/ws/wikisource_search.json',
-      ).readAsString();
+      final fixture = await File('test/fixtures/ws/wikisource_search.json')
+          .readAsString();
       final repo = OnlineRepo(store: SourceStore(initial: [src]));
       final books = repo.parseSearchPage(src, fixture);
 
@@ -225,9 +218,8 @@ void main() {
 
     test('详情 + 目录：解析真实书页（《論語》）', () async {
       final src = wikisource();
-      final html = await File(
-        'test/fixtures/ws/wikisource_book.html',
-      ).readAsString();
+      final html = await File('test/fixtures/ws/wikisource_book.html')
+          .readAsString();
       final engine = AnalyzeRule(html, baseUrl: src.bookSourceUrl);
 
       expect(engine.getString(src.bookInfoRule!.name!), '論語');
@@ -248,9 +240,8 @@ void main() {
 
     test('正文：解析真实章节页并按段拼接', () async {
       final src = wikisource();
-      final html = await File(
-        'test/fixtures/ws/wikisource_chapter.html',
-      ).readAsString();
+      final html = await File('test/fixtures/ws/wikisource_chapter.html')
+          .readAsString();
       final engine = AnalyzeRule(html, baseUrl: src.bookSourceUrl);
       final raw = engine.getStrings(src.contentRule!.content!).join('\n');
       final text = OnlineBookService.cleanChapterText(raw);

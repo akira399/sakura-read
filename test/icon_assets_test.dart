@@ -47,9 +47,8 @@ void main() {
   });
 
   test('monochrome 是纯白人物剪影（非模板占位图）', () async {
-    final bytes = File(
-      _resPath('mipmap-xxxhdpi', 'ic_launcher_monochrome'),
-    ).readAsBytesSync();
+    final bytes = File(_resPath('mipmap-xxxhdpi', 'ic_launcher_monochrome'))
+        .readAsBytesSync();
     final codec = await ui.instantiateImageCodec(bytes);
     final image = (await codec.getNextFrame()).image;
     final data = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;

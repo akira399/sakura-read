@@ -30,9 +30,9 @@ AppDirs _tempDirs(List<Directory> trash) {
 }
 
 /// 生成一段最简单的多章小说文本。
-String _novel({int chapters = 3}) => [
-  for (var i = 1; i <= chapters; i++) '第$i章 测试章节$i\n这是第$i章的正文内容，用来验证解析与导入。',
-].join('\n');
+String _novel({int chapters = 3}) =>
+    [for (var i = 1; i <= chapters; i++) '第$i章 测试章节$i\n这是第$i章的正文内容，用来验证解析与导入。']
+        .join('\n');
 
 void main() {
   final trash = <Directory>[];
@@ -58,9 +58,9 @@ void main() {
       prefs.setVolumeKeyPaging(false);
       await _settle();
 
-      final raw =
-          jsonDecode(File('${dirs.files}/settings.json').readAsStringSync())
-              as Map<String, dynamic>;
+      final raw = jsonDecode(
+        File('${dirs.files}/settings.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
       expect(raw['volumeKeyPaging'], isFalse);
 
       final again = AppPrefs(dirsOverride: dirs);
@@ -70,9 +70,8 @@ void main() {
 
     test('老版本设置文件（无该键）不会崩，按默认值处理', () async {
       final dirs = _tempDirs(trash);
-      File(
-        '${dirs.files}/settings.json',
-      ).writeAsStringSync(jsonEncode({'v': 2, 'fontSize': 20}));
+      File('${dirs.files}/settings.json')
+          .writeAsStringSync(jsonEncode({'v': 2, 'fontSize': 20}));
 
       final prefs = AppPrefs(dirsOverride: dirs);
       await prefs.load();

@@ -74,9 +74,8 @@ void main() {
     });
 
     void write(String name, [String content = 'x']) {
-      File(
-        '${tmp.path}${Platform.pathSeparator}$name',
-      ).writeAsStringSync(content);
+      File('${tmp.path}${Platform.pathSeparator}$name')
+          .writeAsStringSync(content);
     }
 
     test('识别 model.onnx + tokens + lexicon + fst', () {

@@ -21,8 +21,7 @@ Map<String, Object?> _githubRelease({
   String name = '樱读 v1.0.2',
   String body = '## 修复\n- 修了状态栏',
   int size = 100,
-  String url =
-      'https://github.com/akira399/sakura-read/releases/download/v1.0.2/SakuraRead-v1.0.2.apk',
+  String url = 'https://github.com/akira399/sakura-read/releases/download/v1.0.2/SakuraRead-v1.0.2.apk',
 }) {
   return {
     'tag_name': tag,

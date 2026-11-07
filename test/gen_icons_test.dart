@@ -20,9 +20,8 @@ void main() {
     'generate app icons',
     timeout: const Timeout(Duration(minutes: 2)),
     () async {
-      final bytes = File(
-        '$_ws/tool/artwork/src/chibi_icon.jpg',
-      ).readAsBytesSync();
+      final bytes = File('$_ws/tool/artwork/src/chibi_icon.jpg')
+          .readAsBytesSync();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       final src = frame.image;

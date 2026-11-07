@@ -16,4 +16,3 @@ class AppInfo {
   /// 许可证。
   static const String license = 'MIT License';
 }
-
