@@ -20,9 +20,15 @@ import 'widgets/sakura_petals.dart';
 /// - 立绘的缩放变换放在 `RepaintBoundary` 外层，光栅缓存可复用；
 /// - 三个阶段各自只刷新自己的 [ValueNotifier]（绽放 / 文字 / 淡出），互不牵连。
 class SplashGate extends StatefulWidget {
-  const SplashGate({super.key, required this.child, this.forcePlay = false});
+  const SplashGate({
+    super.key,
+    required this.child,
+    this.forcePlay = false,
+    this.enabled = true,
+  });
 
   final Widget child;
+  final bool enabled;
 
   /// 忽略「进程内只播一次」的限制，强制播一遍（测试 / 调试用）。
   @visibleForTesting
@@ -56,7 +62,7 @@ class _SplashGateState extends State<SplashGate>
   /// 时间屏幕上基本只有立绘和花瓣，看不出停顿。
   static const double _childMountAt = .62;
 
-  late bool _show = widget.forcePlay || !_played;
+  late bool _show = widget.forcePlay || (widget.enabled && !_played);
   bool _childMounted = false;
 
   /// 绽放进度（0 → 1）：只在前 30% 的时间段里更新。
@@ -82,6 +88,7 @@ class _SplashGateState extends State<SplashGate>
       _ticker.start();
     } else {
       // 进程内二次进入（没播开屏）：直接放行
+      _played = true;
       petMarkSplashDone();
     }
   }
@@ -192,6 +199,17 @@ class _SplashView extends StatelessWidget {
               isDark: isDark,
             ),
           ),
+          // 两页向两侧轻轻展开，露出阅读场景。
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ValueListenableBuilder<double>(
+                valueListenable: bloom,
+                builder: (context, value, _) => CustomPaint(
+                  painter: _OpeningPagesPainter(value.clamp(0.0, 1.0)),
+                ),
+              ),
+            ),
+          ),
           // 夜间模式：给立绘罩一层暗色，保持全局一致的暗色体验
           if (isDark)
             Positioned.fill(
@@ -263,7 +281,7 @@ class _SplashPhoto extends StatelessWidget {
           },
           child: RepaintBoundary(
             child: Image.asset(
-              'assets/images/splash_girl.jpg',
+              'assets/images/splash_reading_v2.jpg',
               fit: BoxFit.cover,
               cacheWidth: cacheWidth,
               filterQuality: FilterQuality.low,
@@ -302,6 +320,41 @@ class _SplashPhoto extends StatelessWidget {
       ],
     );
   }
+}
+
+class _OpeningPagesPainter extends CustomPainter {
+  const _OpeningPagesPainter(this.progress);
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress >= 1) return;
+    final width = size.width * .5 * (1 - progress);
+    final paint = Paint()
+      ..color = const Color(0xFFFFF8F4).withValues(alpha: .8 * (1 - progress));
+    final left = Path()
+      ..moveTo(0, 0)
+      ..lineTo(width, size.height * .04)
+      ..quadraticBezierTo(
+        width * .8,
+        size.height * .5,
+        width,
+        size.height * .96,
+      )
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(left, paint);
+    canvas.save();
+    canvas.translate(size.width, 0);
+    canvas.scale(-1, 1);
+    canvas.drawPath(left, paint);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _OpeningPagesPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 /// 标题 + 副标题：只重建这两个小部件，开销可忽略。

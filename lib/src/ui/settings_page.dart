@@ -452,6 +452,17 @@ class _SettingsPageState extends State<SettingsPage> {
             showSelectedIcon: false,
           ),
           const SizedBox(height: 6),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: prefs.showSplashAnimation,
+            onChanged: prefs.setShowSplashAnimation,
+            secondary: const Icon(Icons.auto_stories_rounded),
+            title: const Text('启动动画', style: TextStyle(fontSize: 14)),
+            subtitle: const Text(
+              '关闭后下次启动直接进入应用',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
           // 用户反馈「调来调去都没有磨砂」：以前只有半透明蒙层，没有真模糊
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

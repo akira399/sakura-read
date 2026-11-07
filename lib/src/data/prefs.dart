@@ -57,6 +57,7 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   // ---- 外观 ----
   ThemeMode themeMode = ThemeMode.system;
   int accentIndex = 0;
+  bool showSplashAnimation = true;
 
   // ---- 书架排列 ----
   ShelfSortMode shelfSort = ShelfSortMode.recentRead;
@@ -303,6 +304,7 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
         if (data is Map) {
           themeMode = _themeModeFrom(data['themeMode'] as String?);
           accentIndex = (data['accentIndex'] as num?)?.toInt() ?? 0;
+          showSplashAnimation = data['showSplashAnimation'] as bool? ?? true;
           fontSize = (data['fontSize'] as num?)?.toDouble() ?? 18;
           lineHeight = (data['lineHeight'] as num?)?.toDouble() ?? 1.75;
           letterSpacing = (data['letterSpacing'] as num?)?.toDouble() ?? 0;
@@ -775,6 +777,13 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   }
 
   /// 启动时自动检查更新开关。
+  void setShowSplashAnimation(bool value) {
+    if (showSplashAnimation == value) return;
+    showSplashAnimation = value;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void setAutoCheckUpdate(bool v) {
     if (autoCheckUpdate == v) return;
     autoCheckUpdate = v;
@@ -874,6 +883,7 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
         'v': 2,
         'themeMode': themeModeName,
         'accentIndex': accentIndex,
+        'showSplashAnimation': showSplashAnimation,
         'fontSize': fontSize,
         'lineHeight': lineHeight,
         'letterSpacing': letterSpacing,

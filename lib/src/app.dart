@@ -138,6 +138,7 @@ class SakuraApp extends StatelessWidget {
           home: AgreementGate(
             prefs: prefs,
             child: SplashGate(
+              enabled: prefs.showSplashAnimation,
               child: HomePage(
                 store: store,
                 prefs: prefs,

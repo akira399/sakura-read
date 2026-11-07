@@ -5,7 +5,7 @@ class AppInfo {
   AppInfo._();
 
   /// 语义化版本（不含 build 号）。
-  static const String version = '1.4.2';
+  static const String version = '1.3.0';
 
   /// 作者。
   static const String author = 'akira399';
@@ -16,3 +16,4 @@ class AppInfo {
   /// 许可证。
   static const String license = 'MIT License';
 }
+
