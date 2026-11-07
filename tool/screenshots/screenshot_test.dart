@@ -39,6 +39,7 @@ import 'package:sakura_read/src/ui/ai_settings_page.dart';
 import 'package:sakura_read/src/ui/reader/reader_page.dart';
 import 'package:sakura_read/src/ui/reader/reader_settings_panel.dart';
 import 'package:sakura_read/src/ui/stats_page.dart';
+import 'package:sakura_read/src/ui/splash_gate.dart';
 import 'package:sakura_read/src/ui/widgets/pet_overlay.dart';
 
 // ---------- 基本参数 ----------
@@ -330,12 +331,27 @@ void main() {
     configureView(tester);
     final ctx = await _setup(tester);
     _hidePet();
+    await _precacheAll(tester, ['assets/images/splash_reading_v2.jpg']);
 
-    await tester.pumpWidget(_wrap(_app(ctx)));
-    _hidePet();
-    // 停在动画中段：立绘已淡入、标题已出现、尚未淡出
-    await tester.pump(const Duration(milliseconds: 820));
-    _hidePet();
+    await tester.pumpWidget(
+      _wrap(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: SakuraTheme.build(ctx.prefs.accent, Brightness.light),
+          home: const SplashGate(forcePlay: true, child: SizedBox.shrink()),
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => precacheImage(
+        const AssetImage('assets/images/splash_reading_v2.jpg'),
+        tester.element(find.byType(MaterialApp)),
+      ),
+    );
+    // 单帧按设计最多推进 250ms；分帧走到标题和副标题都已出现的位置。
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 200));
+    }
     await _capture(tester, 'splash');
     await _finish(tester);
   });
@@ -566,6 +582,20 @@ void main() {
     );
 
     await _capture(tester, 'mascot');
+    await _finish(tester);
+  });
+
+  // ---------- 10b. 桌宠互动面板 ----------
+  testWidgets('shot: 桌宠互动面板', (tester) async {
+    configureView(tester);
+    final ctx = await _setup(tester);
+    await tester.pumpWidget(_wrap(_app(ctx)));
+    await _cycle(tester);
+    _hidePet();
+    unawaited(showPetPanelGlobal(ctx.pet));
+    await _pumpFrames(tester, frames: 20);
+    await _settle(tester, rounds: 3);
+    await _capture(tester, 'pet_panel');
     await _finish(tester);
   });
 

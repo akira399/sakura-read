@@ -167,18 +167,18 @@ void main() {
         File(preferred).existsSync() ? preferred : fallback;
     final mascot = pick('docs/images/mascot.png', 'docs/images/shelf.png');
     final reader = pick('docs/images/reader_day.png', 'docs/images/shelf.png');
-    final egg = pick('docs/images/egg.png', 'docs/images/shelf.png');
-    final icon = pick(
-      'tool/artwork/icon_rounded_512.png',
-      'tool/artwork/icon_square_512.png',
+    final assistant = pick(
+      'docs/images/ai_chat_talk.png',
+      'docs/images/reader_day.png',
     );
+    const icon = 'tool/artwork/sakura_pet_reading_icon.png';
 
     // 预热所有图片（避免首帧黑屏）
     await _precacheAll(tester, [
-      'assets/images/splash_girl.jpg',
+      'assets/images/splash_reading_v2.jpg',
       mascot,
       reader,
-      egg,
+      assistant,
       icon,
     ]);
 
@@ -200,7 +200,7 @@ void main() {
                 fit: StackFit.expand,
                 children: [
                   // 1) 立绘铺底 + 压暗
-                  _file('assets/images/splash_girl.jpg'),
+                  _file('assets/images/splash_reading_v2.jpg'),
                   const DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -215,7 +215,7 @@ void main() {
                       ),
                     ),
                   ),
-                  // 2) 右侧三张截图（倾斜排布，右边部分出界更有张力）
+                  // 2) 右侧三张竖屏界面：书架桌宠、阅读器、AI 对话
                   Positioned(
                     right: -48,
                     top: 46,
@@ -235,7 +235,10 @@ void main() {
                           ),
                         ),
                         const SizedBox(width: 20),
-                        Transform.rotate(angle: 0.09, child: _phone(egg, 320)),
+                        Transform.rotate(
+                          angle: 0.09,
+                          child: _phone(assistant, 320),
+                        ),
                       ],
                     ),
                   ),
@@ -308,8 +311,8 @@ void main() {
                           children: [
                             _chip('TXT / EPUB'),
                             _chip('阅读 3.0 书源'),
-                            _chip('在线搜书'),
-                            _chip('看板娘桌宠'),
+                            _chip('AI 阅读助手'),
+                            _chip('桌宠互动'),
                             _chip('语音朗读'),
                           ],
                         ),
@@ -336,30 +339,36 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    Widget tile(String path, String label) => Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _file(path, width: 200, height: 200, fit: BoxFit.contain),
-        const SizedBox(height: 14),
-        Text(
-          label,
-          style: const TextStyle(
-            fontFamily: 'LXGWWenKai',
-            fontSize: 17,
-            color: Color(0xFF6B5B72),
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1,
-          ),
-        ),
-      ],
-    );
+    const icon = 'tool/artwork/sakura_pet_reading_icon.png';
+    Widget tile(String label, {bool circle = false, bool rounded = false}) =>
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (circle)
+              ClipOval(child: _file(icon, width: 200, height: 200))
+            else if (rounded)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(44),
+                child: _file(icon, width: 200, height: 200),
+              )
+            else
+              _file(icon, width: 200, height: 200),
+            const SizedBox(height: 14),
+            Text(
+              label,
+              style: const TextStyle(
+                fontFamily: 'LXGWWenKai',
+                fontSize: 17,
+                color: Color(0xFF6B5B72),
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1,
+              ),
+            ),
+          ],
+        );
 
     // 预热图片
-    await _precacheAll(tester, [
-      'tool/artwork/icon_square_512.png',
-      'tool/artwork/icon_rounded_512.png',
-      'tool/artwork/icon_round_512.png',
-    ]);
+    await _precacheAll(tester, [icon]);
 
     await tester.pumpWidget(
       _wrap(
@@ -389,9 +398,9 @@ void main() {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      tile('tool/artwork/icon_square_512.png', '方形'),
-                      tile('tool/artwork/icon_rounded_512.png', '圆角（默认桌面）'),
-                      tile('tool/artwork/icon_round_512.png', '圆形'),
+                      tile('方形'),
+                      tile('圆角（默认桌面）', rounded: true),
+                      tile('圆形', circle: true),
                     ],
                   ),
                 ],

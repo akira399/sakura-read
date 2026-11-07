@@ -13,7 +13,7 @@
 [![Platform](https://img.shields.io/badge/Android-7.0%2B-lightgrey?logo=android)]()
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Version](https://img.shields.io/badge/version-1.2.5-ec5f8f)]()
+[![Version](https://img.shields.io/badge/version-1.3.0-ec5f8f)]()
 
 [下载](#-下载) · [功能](#-能做什么) · [截图](#-看看长什么样) · [自己编译](#-自己编译) · [常见问题](#-常见问题)
 
@@ -89,8 +89,8 @@
 | <img src="docs/images/shelf.png" width="180"/> | <img src="docs/images/reader_day.png" width="180"/> | <img src="docs/images/reader_night.png" width="180"/> | <img src="docs/images/reader_settings.png" width="180"/> |
 | 阅读统计 | 最近阅读 | 在线搜书 | AI 助手 |
 | <img src="docs/images/stats.png" width="180"/> | <img src="docs/images/recent.png" width="180"/> | <img src="docs/images/search_idle.png" width="180"/> | <img src="docs/images/ai_chat.png" width="180"/> |
-| AI 对话 | AI 设置 | 设置 | 关于 |
-| <img src="docs/images/ai_chat_talk.png" width="180"/> | <img src="docs/images/ai_settings.png" width="180"/> | <img src="docs/images/settings.png" width="180"/> | <img src="docs/images/settings_about.png" width="180"/> |
+| AI 对话 | AI 设置 | 设置 | 桌宠互动 |
+| <img src="docs/images/ai_chat_talk.png" width="180"/> | <img src="docs/images/ai_settings.png" width="180"/> | <img src="docs/images/settings.png" width="180"/> | <img src="docs/images/pet_panel.png" width="180"/> |
 | 开屏 | 空书架 | 首启声明 | 彩蛋 |
 | <img src="docs/images/splash.png" width="180"/> | <img src="docs/images/shelf_empty.png" width="180"/> | <img src="docs/images/agreement.png" width="180"/> | <img src="docs/images/egg.png" width="180"/> |
 
@@ -104,8 +104,8 @@
 
 | 包 | 适合 |
 | --- | --- |
-| `SakuraRead-v1.2.5-arm64.apk`（约 48 MB） | 绝大多数手机、平板 |
-| `SakuraRead-v1.2.5-x86_64.apk`（约 50 MB） | 模拟器（MuMu、雷电等） |
+| [`SakuraRead-v1.3.0-arm64.apk`](../../releases/download/v1.3.0/SakuraRead-v1.3.0-arm64.apk)（约 60 MB） | 绝大多数手机、平板 |
+| [`SakuraRead-v1.3.0-x86_64.apk`](../../releases/download/v1.3.0/SakuraRead-v1.3.0-x86_64.apk)（约 61 MB） | 模拟器（MuMu、雷电等） |
 
 两个包签名一致，可以直接覆盖升级。要求 **Android 7.0（API 24）** 以上。
 

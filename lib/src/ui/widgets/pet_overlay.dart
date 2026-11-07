@@ -1193,11 +1193,10 @@ class _PetPanelPageState extends State<_PetPanelPage> {
               ),
               const SizedBox(height: 16),
               // 显示 / 隐藏（用户反馈：「宠物设置可以关闭」）
-              Container(
-                decoration: BoxDecoration(
-                  color: scheme.surface,
-                  borderRadius: BorderRadius.circular(20),
-                ),
+              Material(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(20),
+                clipBehavior: Clip.antiAlias,
                 child: SwitchListTile(
                   value: !pet.petHidden,
                   onChanged: (v) => pet.setPetHidden(!v),
