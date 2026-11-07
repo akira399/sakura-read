@@ -92,3 +92,8 @@ windows/flutter/ephemeral/
 
 # 一次性诊断工具（不入库）
 tool/_shot_debug/
+
+# 发布签名（钥匙不入库，见 docs/signing.md）
+android/key.properties
+android/*.jks
+android/*.keystore

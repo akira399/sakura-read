@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -46,6 +48,29 @@ val releaseAbis: List<String> = run {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 发布签名。
+//
+// 历史发布包（v1.2.0 起）都是用 debug keystore 签的（applicationId 是自用包名，
+// 没上架商店）。要让新包能「覆盖安装」旧包，签名证书必须完全一致，所以：
+//
+//   android/key.properties 存在 → 用它指向的 keystore 签 release
+//   不存在                      → 沿用 debug 签名（与本机 ~/.android/debug.keystore 一致）
+//
+// key.properties 内容（4 行，路径相对 android/）：
+//   storeFile=sakura-release.jks
+//   storePassword=android
+//   keyAlias=androiddebugkey
+//   keyPassword=android
+//
+// 这两个文件都在 .gitignore 里，不要提交；交接方式见 docs/signing.md。
+// ---------------------------------------------------------------------------
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val hasKeystore = !keystoreProps.getProperty("storeFile").isNullOrBlank()
+
 android {
     namespace = "com.example.operit_flutter_project"
     compileSdk = flutter.compileSdkVersion
@@ -71,11 +96,26 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // 有 key.properties 用交接来的 keystore，没有就沿用 debug 签名
+            // （两者证书必须一致，否则老用户无法覆盖安装，见文件头的说明）。
+            signingConfig = if (hasKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             // 内置小模型依赖的 mediapipe / protobuf 有「编译期注解类缺失」与 JNI 反射
             // 两个坑，R8 需要这份规则才不会把 release 包打挂（详见 proguard-rules.pro）。
             proguardFiles(
