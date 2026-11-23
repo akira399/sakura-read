@@ -7,6 +7,7 @@ import 'persistence.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/theme/sakura_tokens.dart';
 import '../platform/native_bridge.dart';
 import '../source/online_repo.dart';
 import 'shelf_sort.dart';
@@ -280,15 +281,9 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   /// 只影响自动弹窗：设置页「检查更新」仍会展示。
   String skipUpdateVersion = '';
 
-  static const List<Color> accents = [
-    Color(0xFFFF7EB6), // 樱粉
-    Color(0xFF9D8CFF), // 薰衣草
-    Color(0xFF66C6FF), // 天空蓝
-    Color(0xFF5ED6A5), // 薄荷绿
-    Color(0xFFFFA34E), // 蜜柑橙
-  ];
+  static const List<Color> accents = SakuraAccents.all;
 
-  static const List<String> accentNames = ['樱粉', '薰衣草', '天空蓝', '薄荷绿', '蜜柑橙'];
+  static const List<String> accentNames = SakuraAccents.names;
 
   Color get accent => accents[accentIndex.clamp(0, accents.length - 1)];
 

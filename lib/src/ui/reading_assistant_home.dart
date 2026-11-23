@@ -2,6 +2,8 @@ import 'ai_settings_page.dart';
 
 import 'package:flutter/material.dart';
 
+import '../core/motion/sakura_motion.dart';
+import '../core/theme/sakura_tokens.dart';
 import '../data/ai_service.dart';
 import '../data/book_store.dart';
 import '../data/local_llm.dart';
@@ -42,20 +44,70 @@ class ReadingAssistantHome extends StatelessWidget {
       builder: (context, _) {
         final recent = store.books.where((b) => b.lastReadAt > 0).toList()
           ..sort((a, b) => b.lastReadAt.compareTo(a.lastReadAt));
+        final sakura = context.sakura;
+        final accent = Theme.of(context).colorScheme.primary;
         return ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
           children: [
-            const Text(
-              '先完成阅读任务，再和小樱聊聊',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: sakura.card,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: sakura.hairline),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: sakura.accentSoft,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      prefs.aiUseLocalModel
+                          ? '当前模型 · 本地模型'
+                          : prefs.aiHttpConfigured
+                          ? '当前模型 · 在线接口已配置'
+                          : '本地工具可直接用 · 未配置在线模型',
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '先完成阅读任务，再和小樱聊聊',
+                    style: TextStyle(
+                      color: sakura.inkPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '正文检索、书签和继续阅读无需模型。模型分析会先显示文本范围，并明确选择本地或在线方式。',
+                    style: TextStyle(
+                      color: sakura.inkSecondary,
+                      fontSize: 13,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            const Text('正文检索、书签和继续阅读无需模型。模型分析会先显示文本范围，并明确选择本地或在线方式。'),
             const SizedBox(height: 16),
             if (recent.isNotEmpty)
               _task(
                 context,
-                Icons.play_arrow,
+                Icons.play_arrow_rounded,
                 '继续《${recent.first.title}》',
                 recent.first.chapters.isEmpty
                     ? '回到阅读进度'
@@ -71,18 +123,20 @@ class ReadingAssistantHome extends StatelessWidget {
               '找一句原文',
               '检索本地书和在线缓存，显示出处并跳转',
               () => Navigator.of(context).push(
-                MaterialPageRoute(
+                SakuraPageRoute(
+                  slideHorizontal: true,
                   builder: (_) => LibrarySearchPage(store: store, prefs: prefs),
                 ),
               ),
             ),
             _task(
               context,
-              Icons.auto_awesome,
+              Icons.auto_awesome_rounded,
               '读懂当前章节',
               '摘要、人物关系、情节解释；结果可保存为笔记',
               () => Navigator.of(context).push(
-                MaterialPageRoute(
+                SakuraPageRoute(
+                  slideHorizontal: true,
                   builder: (_) =>
                       ChapterAssistantPage(store: store, prefs: prefs),
                 ),
@@ -98,11 +152,12 @@ class ReadingAssistantHome extends StatelessWidget {
             if (stats != null)
               _task(
                 context,
-                Icons.bar_chart,
+                Icons.bar_chart_rounded,
                 '阅读回顾',
                 '查看真实的阅读记录与趋势',
                 () => Navigator.of(context).push(
-                  MaterialPageRoute(
+                  SakuraPageRoute(
+                    slideHorizontal: true,
                     builder: (_) => StatsPage(statsStore: stats!),
                   ),
                 ),
@@ -114,20 +169,13 @@ class ReadingAssistantHome extends StatelessWidget {
                 '检查书源',
                 '实际检测搜索规则，不自动删除或停用',
                 () => Navigator.of(context).push(
-                  MaterialPageRoute(
+                  SakuraPageRoute(
+                    slideHorizontal: true,
                     builder: (_) =>
                         SourceHealthPage(store: SourceStore.shared!),
                   ),
                 ),
               ),
-            const SizedBox(height: 12),
-            Text(
-              '模型状态：${prefs.aiUseLocalModel
-                  ? '本地模型'
-                  : prefs.aiHttpConfigured
-                  ? '在线接口已配置'
-                  : '尚未配置，以上本地工具仍可使用'}',
-            ),
           ],
         );
       },
@@ -139,15 +187,65 @@ class ReadingAssistantHome extends StatelessWidget {
     String title,
     String detail,
     VoidCallback action,
-  ) => Card(
-    child: ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      subtitle: Text(detail),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: action,
-    ),
-  );
+  ) {
+    final sakura = context.sakura;
+    final accent = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: SakuraPressable(
+        borderRadius: BorderRadius.circular(18),
+        onTap: action,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: sakura.card,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: sakura.hairline),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: sakura.accentSoft,
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(icon, color: accent, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: sakura.inkPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      detail,
+                      style: TextStyle(
+                        color: sakura.inkSecondary,
+                        fontSize: 12.5,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: sakura.inkSecondary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _open(BuildContext context, Book book, {int? chapter, int? offset}) =>
       Navigator.of(context).push(
         MaterialPageRoute(

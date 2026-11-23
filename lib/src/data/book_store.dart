@@ -6,6 +6,8 @@ import 'persistence.dart';
 
 import 'package:flutter/foundation.dart';
 
+import '../core/database/legacy_migrator.dart';
+import '../core/database/sakura_database.dart';
 import '../platform/native_bridge.dart';
 import 'epub_parser.dart';
 import 'file_scan.dart';
@@ -25,15 +27,17 @@ class ImportResult {
   bool get success => book != null;
 }
 
-/// 书架数据：JSON 持久化 + 导入 + 阅读进度。
+/// 书架数据：SQLite 持久化（无数据库实例时回落 JSON）+ 导入 + 阅读进度。
 class BookStore extends ChangeNotifier with ReliablePersistence {
-  BookStore({this._dirsOverride});
+  BookStore({this._dirsOverride, this.database});
 
   final AppDirs? _dirsOverride;
+  final SakuraDatabase? database;
   final List<Book> _books = [];
   AppDirs? _dirs;
   File? _file;
   Timer? _saveTimer;
+  Future<void> _dbQueue = Future.value();
 
   List<Book> get books => List.unmodifiable(_books);
 
@@ -49,6 +53,15 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
   Future<void> load() async {
     _dirs = _dirsOverride ?? await NativeBridge.appDirs();
     _file = File('${_dirs!.files}/library.json');
+    final db = database;
+    if (db != null) {
+      await LegacyMigrator.migrateIfNeeded(db: db, filesDir: _dirs!.files);
+      _books
+        ..clear()
+        ..addAll(await db.loadAllBooks());
+      notifyListeners();
+      return;
+    }
     try {
       if (await _file!.exists()) {
         final data = await readJson(_file!);
@@ -92,7 +105,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     final existing = onlineByPath(book.path);
     if (existing != null) return existing;
     _books.add(book);
-    _saveSoon();
+    _persistUpsert(book);
     notifyListeners();
     return book;
   }
@@ -131,7 +144,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
       final dir = chapterCacheDir(id);
       if (await dir.exists()) await dir.delete(recursive: true);
     } catch (_) {}
-    _saveSoon();
+    _persistUpsert(b);
     notifyListeners();
   }
 
@@ -148,7 +161,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     if (_books.length == before) return;
     // 移除书时联动清理其书签
     BookmarkStore.shared?.removeForBook(id);
-    _saveSoon();
+    _persistDelete(id);
     notifyListeners();
     if (!deleteLocalFile) return;
     final path = book.path;
@@ -170,7 +183,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     final trimmed = title.trim();
     if (trimmed.isEmpty || trimmed == b.title) return;
     b.title = trimmed;
-    _saveSoon();
+    _persistMeta(id: id, title: trimmed);
     notifyListeners();
   }
 
@@ -184,7 +197,16 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     final trimmed = group.trim();
     if (b.group == trimmed) return;
     b.group = trimmed;
-    _saveSoon();
+    _persistMeta(id: id, group: trimmed);
+    notifyListeners();
+  }
+
+  /// 置顶或取消置顶书籍。
+  void setPinned(String id, bool pinned) {
+    final b = byId(id);
+    if (b == null || b.pinned == pinned) return;
+    b.pinned = pinned;
+    _persistMeta(id: id, pinned: pinned);
     notifyListeners();
   }
 
@@ -192,7 +214,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     final b = byId(id);
     if (b == null) return;
     b.lastReadAt = DateTime.now().millisecondsSinceEpoch;
-    _saveSoon();
+    _persistMeta(id: id, lastReadAt: b.lastReadAt);
   }
 
   void updateProgress(String id, {int? chapter, int? offset, bool? finished}) {
@@ -202,7 +224,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     if (offset != null) b.charOffset = offset;
     if (finished != null) b.finished = finished;
     b.lastReadAt = DateTime.now().millisecondsSinceEpoch;
-    _saveSoon();
+    _persistProgress(b);
     notifyListeners();
   }
 
@@ -212,7 +234,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     b.chapterIndex = 0;
     b.charOffset = 0;
     b.finished = false;
-    _saveSoon();
+    _persistProgress(b);
     notifyListeners();
   }
 
@@ -220,7 +242,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     final b = byId(id);
     if (b == null) return;
     b.finished = true;
-    _saveSoon();
+    _persistProgress(b);
     notifyListeners();
   }
 
@@ -249,7 +271,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
 
   void _add(Book book) {
     _books.add(book);
-    _saveSoon();
+    _persistUpsert(book);
     notifyListeners();
   }
 
@@ -430,7 +452,68 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
 
   // ---------- 持久化 ----------
 
+  void _enqueueDbOp(Future<void> Function(SakuraDatabase db) op) {
+    final db = database;
+    if (db == null) return;
+    _dbQueue = _dbQueue.then((_) => op(db)).catchError((Object _) {});
+  }
+
+  void _persistUpsert(Book book) {
+    if (database != null) {
+      _enqueueDbOp((db) => db.upsertBook(book));
+    } else {
+      _saveSoon();
+    }
+  }
+
+  void _persistProgress(Book book) {
+    if (database != null) {
+      _enqueueDbOp(
+        (db) => db.updateBookProgress(
+          id: book.id,
+          chapterIndex: book.chapterIndex,
+          charOffset: book.charOffset,
+          lastReadAt: book.lastReadAt,
+          finished: book.finished,
+        ),
+      );
+    } else {
+      _saveSoon();
+    }
+  }
+
+  void _persistMeta({
+    required String id,
+    String? title,
+    String? group,
+    bool? pinned,
+    int? lastReadAt,
+  }) {
+    if (database != null) {
+      _enqueueDbOp(
+        (db) => db.updateBookMeta(
+          id: id,
+          title: title,
+          group: group,
+          pinned: pinned,
+          lastReadAt: lastReadAt,
+        ),
+      );
+    } else {
+      _saveSoon();
+    }
+  }
+
+  void _persistDelete(String id) {
+    if (database != null) {
+      _enqueueDbOp((db) => db.deleteBook(id));
+    } else {
+      _saveSoon();
+    }
+  }
+
   void _saveSoon() {
+    if (database != null) return;
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 400), () {
       unawaited(_save().catchError((Object _) {}));
@@ -438,6 +521,9 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
   }
 
   Future<void> flush() {
+    if (database != null) {
+      return _dbQueue;
+    }
     _saveTimer?.cancel();
     return _save();
   }

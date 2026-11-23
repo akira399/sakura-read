@@ -1,31 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// 二次元风格主题：樱粉 + 薰衣草渐变。
+import '../core/theme/sakura_tokens.dart';
+
+/// 二次元风格主题：2.0 日式轻编辑美学（Editorial Anime Minimalism）。
 class SakuraTheme {
-  static const Color sakura = Color(0xFFFF7EB6);
-  static const Color lavender = Color(0xFF9D8CFF);
+  static const Color sakura = SakuraAccents.sakura;
+  static const Color lavender = SakuraAccents.wisteria;
 
   static ThemeData build(Color accent, Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final tokens = isDark
+        ? SakuraColors.dark(accent)
+        : SakuraColors.light(accent);
     final scheme = ColorScheme.fromSeed(
       seedColor: accent,
       brightness: brightness,
     );
-    final isDark = brightness == Brightness.dark;
-    final surface = isDark ? const Color(0xFF211A29) : Colors.white;
-    final background = isDark
-        ? const Color(0xFF171220)
-        : const Color(0xFFFFF6FA);
 
     final base = ThemeData(
       useMaterial3: true,
       colorScheme: scheme.copyWith(
-        surface: surface,
+        surface: tokens.card,
+        surfaceContainerLowest: tokens.canvas,
+        surfaceContainerLow: tokens.surfaceSubtle,
         primary: accent,
         secondary: lavender,
+        outlineVariant: tokens.hairline,
+        onSurface: tokens.inkPrimary,
+        onSurfaceVariant: tokens.inkSecondary,
       ),
+      extensions: [tokens],
     );
-    final titleColor = isDark ? Colors.white : const Color(0xFF3A2B3D);
+    final titleColor = tokens.inkPrimary;
     // 顶栏标题从 textTheme.titleLarge 派生，而不是写一个「裸 TextStyle」：
     // 裸样式会把主题里的字体族覆盖成 null（回到系统默认），派生写法能保持
     // 与正文一致的字体设置。
@@ -33,12 +40,23 @@ class SakuraTheme {
       color: titleColor,
       fontSize: 20,
       fontWeight: FontWeight.w800,
-      letterSpacing: .5,
+      letterSpacing: .4,
     );
 
     return base.copyWith(
       textTheme: base.textTheme.copyWith(titleLarge: titleStyle),
-      scaffoldBackgroundColor: background,
+      scaffoldBackgroundColor: tokens.canvas,
+      dividerColor: tokens.hairline,
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: tokens.card,
+        surfaceTintColor: Colors.transparent,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: tokens.hairline, width: 1),
+        ),
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -51,15 +69,42 @@ class SakuraTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         height: 68,
-        backgroundColor: isDark ? const Color(0xFF1D1626) : Colors.white,
-        indicatorColor: accent.withValues(alpha: .18),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: tokens.accentSoft,
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            color: selected ? accent : tokens.inkSecondary,
+            size: 23,
+          );
+        }),
         // 同样从 textTheme 派生：裸 TextStyle 会把字体族覆盖成 null，
         // 导致底栏文字与正文不是同一套字体（离线渲染时更是直接变成方框）。
-        labelTextStyle: WidgetStatePropertyAll(
-          base.textTheme.labelMedium!.copyWith(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return base.textTheme.labelMedium!.copyWith(
+            fontSize: 11.5,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? accent : tokens.inkSecondary,
+          );
+        }),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: accent,
+        foregroundColor: Colors.white,
+        elevation: 3,
+        highlightElevation: 6,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      ),
+      chipTheme: base.chipTheme.copyWith(
+        backgroundColor: tokens.surfaceSubtle,
+        selectedColor: tokens.accentSoft,
+        side: BorderSide(color: tokens.hairline),
+        shape: const StadiumBorder(),
+        labelStyle: base.textTheme.labelMedium?.copyWith(
+          color: tokens.inkPrimary,
+          fontWeight: FontWeight.w600,
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -74,6 +119,7 @@ class SakuraTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           shape: const StadiumBorder(),
+          side: BorderSide(color: tokens.hairline),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
         ),
       ),
@@ -82,12 +128,17 @@ class SakuraTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
       sliderTheme: SliderThemeData(
+        trackHeight: 4,
         activeTrackColor: accent,
+        inactiveTrackColor: tokens.hairline,
         thumbColor: accent,
-        overlayColor: accent.withValues(alpha: .12),
+        overlayColor: accent.withValues(alpha: .14),
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
       ),
-      bottomSheetTheme: const BottomSheetThemeData(
-        shape: RoundedRectangleBorder(
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: tokens.card,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
         showDragHandle: true,
@@ -110,15 +161,18 @@ class SakuraTheme {
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          a.withValues(alpha: .40),
-          const Color(0xFF3A2B52).withValues(alpha: .95),
+          Color.lerp(const Color(0xFF271C33), a, 0.16)!,
+          const Color(0xFF181422),
         ],
       );
     }
     return LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [a.withValues(alpha: .88), lavender.withValues(alpha: .80)],
+      colors: [
+        Color.lerp(const Color(0xFFFDECF2), a, 0.10)!,
+        const Color(0xFFEFEAFD),
+      ],
     );
   }
 }

@@ -5,15 +5,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 import 'src/app.dart';
+import 'src/core/database/sakura_database.dart';
 import 'src/data/book_store.dart';
 import 'src/data/local_llm.dart';
 import 'src/data/pet_store.dart';
 import 'src/data/prefs.dart';
 import 'src/data/stats_store.dart';
-import 'src/platform/perf_probe.dart';
 import 'src/platform/display_service.dart';
+import 'src/platform/native_bridge.dart';
+import 'src/platform/perf_probe.dart';
 import 'src/source/source_store.dart';
 
 Future<void> main() async {
@@ -28,8 +31,12 @@ Future<void> main() async {
   localModels.selectedId = prefs.aiLocalModelId;
   // 默认按屏幕支持的最高刷新率出帧（可在设置 → 性能里关掉）
   DisplayService.setHighRefresh(prefs.highRefreshRate);
+  final appDirs = await NativeBridge.appDirs();
+  final database = await SakuraDatabase.open(
+    dbPath: p.join(appDirs.files, 'sakura_read_v2.db'),
+  );
   // 各 store 互不依赖：并行读盘，省掉「一个读完再读下一个」的串行等待
-  final store = BookStore();
+  final store = BookStore(database: database);
   final sourceStore = SourceStore();
   final bookmarkStore = BookmarkStore();
   final statsStore = StatsStore();
@@ -70,6 +77,7 @@ Future<void> main() async {
         sourceStore: sourceStore,
         statsStore: statsStore,
         petStore: petStore,
+        database: database,
       ),
     ),
   );

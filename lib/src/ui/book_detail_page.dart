@@ -352,6 +352,20 @@ class _Header extends StatelessWidget {
             ),
           ),
         ),
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  const Color(0xFF1F1624).withValues(alpha: .42),
+                  const Color(0xFF1F1624).withValues(alpha: .62),
+                ],
+              ),
+            ),
+          ),
+        ),
         Container(
           padding: EdgeInsets.fromLTRB(8, topPad + 4, 16, 20),
           child: Column(
@@ -364,10 +378,18 @@ class _Header extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    width: 112,
-                    height: 156,
-                    child: BookCover(book: book, radius: 14),
+                  Hero(
+                    tag: 'book-cover-${book.id}',
+                    child: SizedBox(
+                      width: 112,
+                      height: 156,
+                      child: BookCover(
+                        book: book,
+                        radius: 14,
+                        elevated: true,
+                        showTextOnGenerated: false,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(

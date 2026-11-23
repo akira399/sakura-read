@@ -66,6 +66,7 @@ class Book {
     int? lastReadAt,
     this.finished = false,
     this.group = '',
+    this.pinned = false,
   }) : chapters = chapters ?? [],
        addedAt = addedAt ?? DateTime.now().millisecondsSinceEpoch,
        lastReadAt = lastReadAt ?? 0;
@@ -109,6 +110,9 @@ class Book {
   /// 用户反馈：「书架里的书籍可以分组吗自定义分组」——按用户自定义的
   /// 分组名归类，分组只是书签性质，不移动文件。
   String group;
+
+  /// 是否置顶在书架最前。
+  bool pinned;
 
   static final Random _rnd = Random();
 
@@ -186,6 +190,7 @@ class Book {
       lastReadAt: (json['lastReadAt'] as num?)?.toInt(),
       finished: json['finished'] as bool? ?? false,
       group: json['group'] as String? ?? '',
+      pinned: json['pinned'] as bool? ?? false,
     );
   }
 
@@ -207,5 +212,6 @@ class Book {
     'lastReadAt': lastReadAt,
     'finished': finished,
     'group': group,
+    'pinned': pinned,
   };
 }

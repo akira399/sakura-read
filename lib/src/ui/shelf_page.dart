@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/motion/sakura_motion.dart';
 import '../data/book_store.dart';
 import '../data/file_scan.dart';
 import '../data/models.dart';
@@ -13,9 +14,13 @@ import '../data/pet_guide.dart';
 import '../data/prefs.dart';
 import '../data/shelf_sort.dart';
 import '../data/stats_store.dart';
+import '../features/bookshelf/widgets/book_grid_card.dart';
+import '../features/bookshelf/widgets/book_list_tile.dart';
+import '../features/bookshelf/widgets/continue_reading_card.dart';
+import '../features/bookshelf/widgets/shelf_group_bar.dart';
+import '../features/bookshelf/widgets/shelf_header.dart';
 import '../platform/native_bridge.dart';
 import '../source/source_store.dart';
-import '../theme/app_theme.dart';
 import '../util/format.dart';
 import 'ai_chat_page.dart';
 import 'book_detail_page.dart';
@@ -112,6 +117,9 @@ class _ShelfPageState extends State<ShelfPage> {
         final books = _groupFilter == null
             ? allBooks
             : allBooks.where((b) => b.group == _groupFilter).toList();
+        final continueBook = _groupFilter == null
+            ? _latestReadBook(allBooks)
+            : null;
         return Scaffold(
           // 底栏用 extendBody 盖在正文上，Scaffold 感知不到它的高度：
           // 默认 endFloat 会把「＋」摆进底栏区域，正好压住最右侧的「设置」，
@@ -126,14 +134,47 @@ class _ShelfPageState extends State<ShelfPage> {
                 heroTag: 'shelf-add-fab',
                 onPressed: () => _showAddSheet(context),
                 tooltip: '导入书籍',
-                child: const Icon(Icons.add_rounded, size: 30),
+                child: const Icon(Icons.add_rounded, size: 28),
               ),
             ),
           ),
           body: CustomScrollView(
             slivers: [
-              _buildHeader(context, books.length),
-              _buildGroupBar(allBooks),
+              SliverToBoxAdapter(
+                child: ShelfHeader(
+                  greeting: _headerLine,
+                  bookCount: books.length,
+                  onAiTap: () => Navigator.of(context).push(
+                    SakuraPageRoute(
+                      slideHorizontal: true,
+                      builder: (_) => AiChatPage(
+                        store: widget.store,
+                        prefs: widget.prefs,
+                        statsStore: widget.statsStore,
+                      ),
+                    ),
+                  ),
+                  onSearchTap: () => _openSearch(context),
+                  onArrangeTap: _showArrangeSheet,
+                  onManageTap: _openManage,
+                ),
+              ),
+              if (continueBook != null)
+                SliverToBoxAdapter(
+                  child: ContinueReadingCard(
+                    book: continueBook,
+                    onContinue: () => _continueReading(continueBook),
+                    onOpenDetail: () => _openDetail(continueBook),
+                  ),
+                ),
+              SliverToBoxAdapter(
+                child: ShelfGroupBar(
+                  allBooks: allBooks,
+                  selectedGroup: _groupFilter,
+                  onSelectGroup: (group) =>
+                      setState(() => _groupFilter = group),
+                ),
+              ),
               if (books.isEmpty)
                 SliverFillRemaining(
                   hasScrollBody: false,
@@ -141,7 +182,7 @@ class _ShelfPageState extends State<ShelfPage> {
                 )
               else
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 114),
                   sliver: _buildBooksSliver(books),
                 ),
             ],
@@ -151,23 +192,25 @@ class _ShelfPageState extends State<ShelfPage> {
     );
   }
 
-  /// 按当前「排列方式」渲染书架（网格 / 小图 / 列表）。
+  /// 按当前「排列方式」渲染书架（网格 / 小图 / 列表 / 大封面）。
   Widget _buildBooksSliver(List<Book> books) {
     switch (widget.prefs.shelfView) {
       case ShelfViewMode.grid:
         return SliverGrid(
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 158,
-            mainAxisSpacing: 14,
+            maxCrossAxisExtent: 156,
+            mainAxisSpacing: 16,
             crossAxisSpacing: 14,
-            childAspectRatio: .64,
+            childAspectRatio: .54,
           ),
           delegate: SliverChildBuilderDelegate(
-            (context, index) => _BookCard(
-              book: books[index],
-              store: widget.store,
-              onOpen: () => _openDetail(books[index]),
-              onMenu: () => _showBookMenu(books[index]),
+            (context, index) => StaggeredReveal(
+              index: index,
+              child: BookGridCard(
+                book: books[index],
+                onOpen: () => _openDetail(books[index]),
+                onMenu: () => _showBookMenu(books[index]),
+              ),
             ),
             childCount: books.length,
           ),
@@ -175,16 +218,20 @@ class _ShelfPageState extends State<ShelfPage> {
       case ShelfViewMode.compact:
         return SliverGrid(
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 110,
+            maxCrossAxisExtent: 112,
             mainAxisSpacing: 12,
             crossAxisSpacing: 12,
-            childAspectRatio: .66,
+            childAspectRatio: .58,
           ),
           delegate: SliverChildBuilderDelegate(
-            (context, index) => _CompactBookCard(
-              book: books[index],
-              onOpen: () => _openDetail(books[index]),
-              onMenu: () => _showBookMenu(books[index]),
+            (context, index) => StaggeredReveal(
+              index: index,
+              child: BookGridCard(
+                book: books[index],
+                compact: true,
+                onOpen: () => _openDetail(books[index]),
+                onMenu: () => _showBookMenu(books[index]),
+              ),
             ),
             childCount: books.length,
           ),
@@ -193,17 +240,17 @@ class _ShelfPageState extends State<ShelfPage> {
         return SliverList.separated(
           itemCount: books.length,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
-          itemBuilder: (context, index) => _BookListTile(
-            book: books[index],
-            subtitle: _bookSubtitle(books[index]),
-            onOpen: () => _openDetail(books[index]),
-            onMenu: () => _showBookMenu(books[index]),
+          itemBuilder: (context, index) => StaggeredReveal(
+            index: index,
+            child: BookListTile(
+              book: books[index],
+              subtitle: _bookSubtitle(books[index]),
+              onOpen: () => _openDetail(books[index]),
+              onMenu: () => _showBookMenu(books[index]),
+            ),
           ),
         );
       case ShelfViewMode.cover:
-        // 用户反馈：想要 reeden 那种「大封面」书架——封面做主视觉，
-        // 书名压在封面下方，一屏 2~3 列，挑书更像逛实体书架。
-        // 列数按屏宽给固定值（手机 3 列 / 平板更多），避免宽屏排成一片小图。
         final width = MediaQuery.sizeOf(context).width;
         final columns = width >= 1100
             ? 6
@@ -216,19 +263,34 @@ class _ShelfPageState extends State<ShelfPage> {
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
             mainAxisSpacing: 18,
-            crossAxisSpacing: 18,
-            childAspectRatio: .58,
+            crossAxisSpacing: 16,
+            childAspectRatio: .54,
           ),
           delegate: SliverChildBuilderDelegate(
-            (context, index) => _CoverBookCard(
-              book: books[index],
-              onOpen: () => _openDetail(books[index]),
-              onMenu: () => _showBookMenu(books[index]),
+            (context, index) => StaggeredReveal(
+              index: index,
+              child: BookGridCard(
+                book: books[index],
+                coverEmphasized: true,
+                onOpen: () => _openDetail(books[index]),
+                onMenu: () => _showBookMenu(books[index]),
+              ),
             ),
             childCount: books.length,
           ),
         );
     }
+  }
+
+  Book? _latestReadBook(List<Book> books) {
+    Book? latest;
+    for (final book in books) {
+      if (book.lastReadAt <= 0) continue;
+      if (latest == null || book.lastReadAt > latest.lastReadAt) {
+        latest = book;
+      }
+    }
+    return latest;
   }
 
   /// 列表视图副标题：排序会随当前方式给出相关信息。
@@ -258,160 +320,26 @@ class _ShelfPageState extends State<ShelfPage> {
       widget.prefs.shelfSort,
       ascending: widget.prefs.shelfAscending,
     );
-  }
-
-  Widget _buildHeader(BuildContext context, int count) {
-    // 头部即渐变容器本身：渐变铺满整个头部（含状态栏区域），
-    // 状态栏透明 → 头部颜色直接透到状态栏底下，两者浑然一体。
-    return SliverToBoxAdapter(
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: SakuraTheme.headerGradient(context),
-          borderRadius: const BorderRadius.vertical(
-            bottom: Radius.circular(30),
-          ),
-        ),
-        padding: EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top + 18,
-          left: 20,
-          right: 8,
-          bottom: 18,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                // 看板娘小头像（纯装饰；互动已统一收进全局桌宠）
-                Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: .28),
-                  ),
-                  child: ClipOval(
-                    child: Image.asset(
-                      'assets/images/pet_wave.png',
-                      width: 40,
-                      height: 40,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '樱读',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      Text(
-                        '$_headerLine · $count 本书',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: .88),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => AiChatPage(
-                        store: widget.store,
-                        prefs: widget.prefs,
-                        statsStore: widget.statsStore,
-                      ),
-                    ),
-                  ),
-                  icon: const Icon(
-                    Icons.auto_awesome_rounded,
-                    color: Colors.white,
-                  ),
-                  tooltip: 'AI 助手',
-                ),
-                PetGuideTarget(
-                  id: 'shelf_search',
-                  child: IconButton(
-                    onPressed: () => _openSearch(context),
-                    icon: const Icon(Icons.search_rounded, color: Colors.white),
-                    tooltip: '搜索',
-                  ),
-                ),
-                IconButton(
-                  onPressed: _showArrangeSheet,
-                  icon: const Icon(Icons.tune_rounded, color: Colors.white),
-                  tooltip: '排列方式',
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 分组筛选条：只有存在自定义分组时才出现，避免空书架时多一行噪音。
-  Widget _buildGroupBar(List<Book> allBooks) {
-    final groups = <String>{
-      for (final b in allBooks)
-        if (b.group.isNotEmpty) b.group,
-    }.toList()..sort();
-    if (groups.isEmpty) {
-      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    if (books.any((b) => b.pinned)) {
+      final pinned = [
+        for (final b in books)
+          if (b.pinned) b,
+      ];
+      final rest = [
+        for (final b in books)
+          if (!b.pinned) b,
+      ];
+      books
+        ..clear()
+        ..addAll(pinned)
+        ..addAll(rest);
     }
-    final scheme = Theme.of(context).colorScheme;
-    Widget chip(String label, String? value) {
-      final on = _groupFilter == value;
-      return Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: ChoiceChip(
-          label: Text(label, style: const TextStyle(fontSize: 12)),
-          selected: on,
-          visualDensity: VisualDensity.compact,
-          onSelected: (_) => setState(() => _groupFilter = on ? null : value),
-        ),
-      );
-    }
-
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 2),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              chip('全部', null),
-              chip('未分组', ''),
-              for (final g in groups) chip(g, g),
-              IconButton(
-                tooltip: '批量管理 / 分组',
-                visualDensity: VisualDensity.compact,
-                icon: Icon(
-                  Icons.checklist_rounded,
-                  size: 20,
-                  color: scheme.onSurfaceVariant,
-                ),
-                onPressed: _openManage,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   void _openManage() {
     Navigator.of(context).push(
-      MaterialPageRoute(
+      SakuraPageRoute(
+        slideHorizontal: true,
         builder: (_) =>
             ShelfManagePage(store: widget.store, prefs: widget.prefs),
       ),
@@ -447,7 +375,7 @@ class _ShelfPageState extends State<ShelfPage> {
   void _openDetail(Book book) {
     widget.store.touch(book.id);
     Navigator.of(context).push(
-      MaterialPageRoute(
+      SakuraPageRoute(
         builder: (_) => BookDetailPage(
           store: widget.store,
           prefs: widget.prefs,
@@ -460,7 +388,7 @@ class _ShelfPageState extends State<ShelfPage> {
   void _continueReading(Book book) {
     widget.store.touch(book.id);
     Navigator.of(context).push(
-      MaterialPageRoute(
+      SakuraPageRoute(
         builder: (_) => ReaderPage(
           store: widget.store,
           prefs: widget.prefs,
@@ -986,6 +914,18 @@ class _ShelfPageState extends State<ShelfPage> {
                 },
               ),
               ListTile(
+                leading: Icon(
+                  book.pinned
+                      ? Icons.push_pin_outlined
+                      : Icons.push_pin_rounded,
+                ),
+                title: Text(book.pinned ? '取消置顶' : '置顶书籍'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  widget.store.setPinned(book.id, !book.pinned);
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.drive_file_rename_outline_rounded),
                 title: const Text('重命名'),
                 onTap: () {
@@ -1195,433 +1135,6 @@ class _ShelfPageState extends State<ShelfPage> {
 }
 
 // ---------- 子组件 ----------
-
-class _BookCard extends StatelessWidget {
-  const _BookCard({
-    required this.book,
-    required this.store,
-    required this.onOpen,
-    required this.onMenu,
-  });
-
-  final Book book;
-  final BookStore store;
-  final VoidCallback onOpen;
-  final VoidCallback onMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    final percent = (book.progress * 100).round();
-    return GestureDetector(
-      onLongPress: onMenu,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onOpen,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: .13),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  BookCover(book: book),
-                  // 底部信息条
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.black87],
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (!book.generatedCover) ...[
-                            Text(
-                              book.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w800,
-                                height: 1.25,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                          ],
-                          Text(
-                            book.author.isEmpty ? '佚名' : book.author,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: .85),
-                              fontSize: 10,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(3),
-                                  child: LinearProgressIndicator(
-                                    value: book.progress,
-                                    minHeight: 4,
-                                    backgroundColor: Colors.white.withValues(
-                                      alpha: .25,
-                                    ),
-                                    valueColor:
-                                        const AlwaysStoppedAnimation<Color>(
-                                          Color(0xFFFFB7C5),
-                                        ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                book.finished ? '读完' : '$percent%',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (book.finished)
-                    const Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Icon(
-                        Icons.check_circle_rounded,
-                        color: Color(0xFF9BE89B),
-                        size: 20,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 大封面卡片：封面占据主体，书名 / 作者放在下方（类似 reeden 的书架）。
-class _CoverBookCard extends StatelessWidget {
-  const _CoverBookCard({
-    required this.book,
-    required this.onOpen,
-    required this.onMenu,
-  });
-
-  final Book book;
-  final VoidCallback onOpen;
-  final VoidCallback onMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final percent = (book.progress * 100).round();
-    return GestureDetector(
-      onLongPress: onMenu,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onOpen,
-          borderRadius: BorderRadius.circular(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: .18),
-                        blurRadius: 14,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        BookCover(book: book, radius: 14),
-                        if (book.finished)
-                          const Positioned(
-                            top: 8,
-                            right: 8,
-                            child: Icon(
-                              Icons.check_circle_rounded,
-                              color: Color(0xFF9BE89B),
-                              size: 20,
-                            ),
-                          ),
-                        // 进度条压在封面底部（不做信息遮罩，保持封面干净）
-                        Positioned(
-                          left: 10,
-                          right: 10,
-                          bottom: 10,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(3),
-                            child: LinearProgressIndicator(
-                              value: book.progress,
-                              minHeight: 3,
-                              backgroundColor: Colors.white.withValues(
-                                alpha: .35,
-                              ),
-                              valueColor: const AlwaysStoppedAnimation<Color>(
-                                Color(0xFFFFB7C5),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                book.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  height: 1.25,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '${book.author.isEmpty ? '佚名' : book.author} · '
-                '${book.finished ? '已读完' : '$percent%'}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 小图模式卡片：封面 + 单行书名 + 进度条（紧凑，一屏更多书）。
-class _CompactBookCard extends StatelessWidget {
-  const _CompactBookCard({
-    required this.book,
-    required this.onOpen,
-    required this.onMenu,
-  });
-
-  final Book book;
-  final VoidCallback onOpen;
-  final VoidCallback onMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onLongPress: onMenu,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onOpen,
-          borderRadius: BorderRadius.circular(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: .13),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        BookCover(book: book),
-                        if (book.finished)
-                          const Positioned(
-                            top: 5,
-                            right: 5,
-                            child: Icon(
-                              Icons.check_circle_rounded,
-                              color: Color(0xFF9BE89B),
-                              size: 16,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                book.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 3),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(3),
-                child: LinearProgressIndicator(
-                  value: book.progress,
-                  minHeight: 3.5,
-                  backgroundColor: Theme.of(context)
-                      .colorScheme
-                      .surfaceContainerHighest,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 列表模式条目：小封面 + 书名 / 副标题 + 进度，信息密度最高。
-class _BookListTile extends StatelessWidget {
-  const _BookListTile({
-    required this.book,
-    required this.subtitle,
-    required this.onOpen,
-    required this.onMenu,
-  });
-
-  final Book book;
-  final String subtitle;
-  final VoidCallback onOpen;
-  final VoidCallback onMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SoftCard(
-      padding: const EdgeInsets.all(10),
-      onTap: onOpen,
-      child: GestureDetector(
-        onLongPress: onMenu,
-        child: Row(
-          children: [
-            SizedBox(
-              width: 48,
-              height: 66,
-              child: BookCover(book: book, radius: 10),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    book.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 7),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(3),
-                          child: LinearProgressIndicator(
-                            value: book.progress,
-                            minHeight: 4,
-                            backgroundColor: scheme.surfaceContainerHighest,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              scheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        book.finished ? '读完' : book.progressLabel,
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w800,
-                          color: scheme.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 4),
-            IconButton(
-              onPressed: onMenu,
-              icon: const Icon(Icons.more_vert_rounded, size: 20),
-              tooltip: '更多',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _SheetIcon extends StatelessWidget {
   const _SheetIcon(this.icon);

@@ -9,6 +9,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/motion/sakura_motion.dart';
+import '../core/theme/sakura_tokens.dart';
 import '../data/book_store.dart';
 import '../data/pet_guide.dart';
 import '../data/pet_store.dart';
@@ -204,7 +206,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final book = widget.store.byId(bookId);
     if (book == null) return;
     Navigator.of(context).push(
-      MaterialPageRoute(
+      SakuraPageRoute(
         builder: (_) => ReaderPage(
           store: widget.store,
           prefs: widget.prefs,
@@ -410,22 +412,15 @@ class _GlassBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final tint = isDark ? const Color(0xFF1D1626) : Colors.white;
+    final sakura = context.sakura;
     return ClipRect(
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            // 透明度留一点，避免完全遮住底下滚动的内容（玻璃质感的关键）
-            color: tint.withValues(alpha: isDark ? .72 : .78),
+            color: sakura.glassFill,
             border: Border(
-              top: BorderSide(
-                color: (isDark ? Colors.white : Colors.black).withValues(
-                  alpha: .07,
-                ),
-              ),
+              top: BorderSide(color: sakura.glassBorder, width: 0.8),
             ),
           ),
           child: child,

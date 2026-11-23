@@ -2,7 +2,10 @@ import 'ui/widgets/pet_egg.dart';
 import 'data/persistence.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/database/sakura_database.dart';
+import 'core/providers/app_providers.dart';
 import 'data/book_store.dart';
 import 'data/pet_guide.dart';
 import 'data/pet_store.dart';
@@ -26,6 +29,7 @@ class SakuraApp extends StatelessWidget {
     required this.sourceStore,
     required this.statsStore,
     required this.petStore,
+    this.database,
   });
 
   final AppPrefs prefs;
@@ -33,122 +37,133 @@ class SakuraApp extends StatelessWidget {
   final SourceStore sourceStore;
   final StatsStore statsStore;
   final PetStore petStore;
+  final SakuraDatabase? database;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: prefs,
-      builder: (context, _) {
-        return MaterialApp(
-          title: '樱读',
-          debugShowCheckedModeBanner: false,
-          // 帧率浮层：设置页「性能」卡片可开，用来当场看真实帧率
-          showPerformanceOverlay: prefs.showPerformanceOverlay,
-          // 根导航键：全局覆盖层（桌宠）用它打开面板（覆盖层 context 无 Navigator）
-          navigatorKey: kRootNavigatorKey,
-          // 路由观察者：引导锚点靠它感知「被其它页面盖住 / 重新露出」，
-          // 从而支持跨页引导（放大镜 → 搜索页 → 返回 → 书架「＋」）
-          navigatorObservers: [guideRouteObserver],
-          theme: SakuraTheme.build(prefs.accent, Brightness.light),
-          darkTheme: SakuraTheme.build(prefs.accent, Brightness.dark),
-          themeMode: prefs.themeMode,
-          // 隐藏 WebView 宿主：在线书正文渲染用（1×1 像素，仅被使用时构建）；
-          // 全局悬浮桌宠叠加在所有页面之上（开屏 / 权限页隐藏，阅读器内自动隐藏）；
-          // 彩蛋层（全黑锁定）在最顶层；激活时拦截返回键，只有重启才能恢复
-          builder: (context, child) => WebViewEngineHost(
-            child: ValueListenableBuilder<bool>(
-              valueListenable: kPetEggActive,
-              builder: (context, eggOn, _) => PopScope(
-                // 彩蛋激活时禁止返回 / 手势退出 → 真正的"锁定"
-                canPop: !eggOn,
-                child: Stack(
-                  children: [
-                    child ?? const SizedBox.shrink(),
-                    // 新手引导 / AI 对话进行中时隐藏常规桌宠
-                    // （引导由引导层自己摆位；对话时避免挡住气泡和输入框）
-                    ValueListenableBuilder<bool>(
-                      valueListenable: kPetGuideActive,
-                      builder: (context, guiding, _) {
-                        if (guiding) return const SizedBox.shrink();
-                        return ValueListenableBuilder<bool>(
-                          valueListenable: kAiChatActive,
-                          builder: (context, chatting, _) => chatting
-                              ? const SizedBox.shrink()
-                              : AnimatedBuilder(
-                                  animation: petStore,
-                                  builder: (_, _) => petStore.petHidden
-                                      ? const SizedBox.shrink()
-                                      : PetOverlay(
-                                          pet: petStore,
-                                          hostReady: kPetHostReady,
+    return ProviderScope(
+      overrides: [
+        sakuraDatabaseProvider.overrideWithValue(database),
+        bookStoreProvider.overrideWith((_) => store),
+        prefsProvider.overrideWith((_) => prefs),
+        sourceStoreProvider.overrideWith((_) => sourceStore),
+        statsStoreProvider.overrideWith((_) => statsStore),
+        petStoreProvider.overrideWith((_) => petStore),
+      ],
+      child: AnimatedBuilder(
+        animation: prefs,
+        builder: (context, _) {
+          return MaterialApp(
+            title: '樱读',
+            debugShowCheckedModeBanner: false,
+            // 帧率浮层：设置页「性能」卡片可开，用来当场看真实帧率
+            showPerformanceOverlay: prefs.showPerformanceOverlay,
+            // 根导航键：全局覆盖层（桌宠）用它打开面板（覆盖层 context 无 Navigator）
+            navigatorKey: kRootNavigatorKey,
+            // 路由观察者：引导锚点靠它感知「被其它页面盖住 / 重新露出」，
+            // 从而支持跨页引导（放大镜 → 搜索页 → 返回 → 书架「＋」）
+            navigatorObservers: [guideRouteObserver],
+            theme: SakuraTheme.build(prefs.accent, Brightness.light),
+            darkTheme: SakuraTheme.build(prefs.accent, Brightness.dark),
+            themeMode: prefs.themeMode,
+            // 隐藏 WebView 宿主：在线书正文渲染用（1×1 像素，仅被使用时构建）；
+            // 全局悬浮桌宠叠加在所有页面之上（开屏 / 权限页隐藏，阅读器内自动隐藏）；
+            // 彩蛋层（全黑锁定）在最顶层；激活时拦截返回键，只有重启才能恢复
+            builder: (context, child) => WebViewEngineHost(
+              child: ValueListenableBuilder<bool>(
+                valueListenable: kPetEggActive,
+                builder: (context, eggOn, _) => PopScope(
+                  // 彩蛋激活时禁止返回 / 手势退出 → 真正的"锁定"
+                  canPop: !eggOn,
+                  child: Stack(
+                    children: [
+                      child ?? const SizedBox.shrink(),
+                      // 新手引导 / AI 对话进行中时隐藏常规桌宠
+                      // （引导由引导层自己摆位；对话时避免挡住气泡和输入框）
+                      ValueListenableBuilder<bool>(
+                        valueListenable: kPetGuideActive,
+                        builder: (context, guiding, _) {
+                          if (guiding) return const SizedBox.shrink();
+                          return ValueListenableBuilder<bool>(
+                            valueListenable: kAiChatActive,
+                            builder: (context, chatting, _) => chatting
+                                ? const SizedBox.shrink()
+                                : AnimatedBuilder(
+                                    animation: petStore,
+                                    builder: (_, _) => petStore.petHidden
+                                        ? const SizedBox.shrink()
+                                        : PetOverlay(
+                                            pet: petStore,
+                                            hostReady: kPetHostReady,
+                                          ),
+                                  ),
+                          );
+                        },
+                      ),
+                      // 新手引导（首次启动）：自我介绍 + 指引点击。
+                      // 需要先同意首启条款（enabled）才会开始。
+                      PetGuideHost(
+                        pet: petStore,
+                        hostReady: kPetHostReady,
+                        seen: prefs.guideSeen,
+                        enabled: prefs.agreementAccepted,
+                        autoStart: false,
+                        onSeen: () => prefs.setGuideSeen(true),
+                      ),
+                      PetEggOverlay(active: kPetEggActive),
+                      AnimatedBuilder(
+                        animation: Listenable.merge([
+                          persistenceFailures,
+                          restoredDataAwaitingRestart,
+                        ]),
+                        builder: (context, _) =>
+                            persistenceFailures.value.isEmpty &&
+                                !restoredDataAwaitingRestart.value
+                            ? const SizedBox.shrink()
+                            : Positioned(
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                child: SafeArea(
+                                  child: Material(
+                                    color: Color(0xFFFFE0B2),
+                                    child: Padding(
+                                      padding: EdgeInsets.all(10),
+                                      child: Text(
+                                        restoredDataAwaitingRestart.value
+                                            ? '备份已恢复，请关闭并重新打开应用后继续使用。'
+                                            : '部分数据尚未保存，请检查存储空间后重试。读取失败的原文件已保留。',
+                                        style: TextStyle(
+                                          color: Color(0xFF3E2723),
+                                          fontSize: 13,
                                         ),
-                                ),
-                        );
-                      },
-                    ),
-                    // 新手引导（首次启动）：自我介绍 + 指引点击。
-                    // 需要先同意首启条款（enabled）才会开始。
-                    PetGuideHost(
-                      pet: petStore,
-                      hostReady: kPetHostReady,
-                      seen: prefs.guideSeen,
-                      enabled: prefs.agreementAccepted,
-                      autoStart: false,
-                      onSeen: () => prefs.setGuideSeen(true),
-                    ),
-                    PetEggOverlay(active: kPetEggActive),
-                    AnimatedBuilder(
-                      animation: Listenable.merge([
-                        persistenceFailures,
-                        restoredDataAwaitingRestart,
-                      ]),
-                      builder: (context, _) =>
-                          persistenceFailures.value.isEmpty &&
-                              !restoredDataAwaitingRestart.value
-                          ? const SizedBox.shrink()
-                          : Positioned(
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              child: SafeArea(
-                                child: Material(
-                                  color: Color(0xFFFFE0B2),
-                                  child: Padding(
-                                    padding: EdgeInsets.all(10),
-                                    child: Text(
-                                      restoredDataAwaitingRestart.value
-                                          ? '备份已恢复，请关闭并重新打开应用后继续使用。'
-                                          : '部分数据尚未保存，请检查存储空间后重试。读取失败的原文件已保留。',
-                                      style: TextStyle(
-                                        color: Color(0xFF3E2723),
-                                        fontSize: 13,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          // 首启条款：开屏之后、进入书架之前弹出（同意后写入设置，仅首启一次）
-          home: AgreementGate(
-            prefs: prefs,
-            child: SplashGate(
-              enabled: prefs.showSplashAnimation,
-              child: HomePage(
-                store: store,
-                prefs: prefs,
-                sourceStore: sourceStore,
-                statsStore: statsStore,
+            // 首启条款：开屏之后、进入书架之前弹出（同意后写入设置，仅首启一次）
+            home: AgreementGate(
+              prefs: prefs,
+              child: SplashGate(
+                enabled: prefs.showSplashAnimation,
+                child: HomePage(
+                  store: store,
+                  prefs: prefs,
+                  sourceStore: sourceStore,
+                  statsStore: statsStore,
+                ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
