@@ -9,7 +9,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/icons/sakura_icons.dart';
 import '../core/motion/sakura_motion.dart';
+import '../core/theme/sakura_layout.dart';
 import '../core/theme/sakura_tokens.dart';
 import '../data/book_store.dart';
 import '../data/pet_guide.dart';
@@ -37,12 +39,16 @@ class HomePage extends StatefulWidget {
     required this.prefs,
     required this.sourceStore,
     required this.statsStore,
+    this.initialStorageGranted,
+    this.storagePermissionFuture,
   });
 
   final BookStore store;
   final AppPrefs prefs;
   final SourceStore sourceStore;
   final StatsStore statsStore;
+  final bool? initialStorageGranted;
+  final Future<bool>? storagePermissionFuture;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -50,7 +56,11 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _index = 0;
-  bool? _granted;
+  late bool? _granted = widget.initialStorageGranted;
+  bool _usedInitialPermFuture = false;
+
+  /// 懒加载页签：启动时仅构建首屏书架（0），其余页签首次切换时再挂载。
+  final Set<int> _mountedTabs = <int>{0};
 
   /// 启动后自动检查更新的延迟任务（见 [_scheduleAutoUpdateCheck]）。
   Timer? _updateCheckTimer;
@@ -218,13 +228,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  void _selectTab(int i) {
+    _mountedTabs.add(i);
+    if (_index != i) setState(() => _index = i);
+  }
+
   /// 收到「重看新手引导」请求：把底部导航切回书架（第 1 格）。
   void _onGuideReplay() {
-    if (mounted && _index != 0) setState(() => _index = 0);
+    if (mounted) _selectTab(0);
   }
 
   Future<void> _check() async {
-    final granted = await NativeBridge.hasStoragePermission();
+    final future =
+        (!_usedInitialPermFuture && widget.storagePermissionFuture != null)
+        ? widget.storagePermissionFuture!
+        : NativeBridge.hasStoragePermission();
+    _usedInitialPermFuture = true;
+    final granted = await future;
     if (mounted) {
       setState(() => _granted = granted);
       // 权限就绪状态通知桌宠宿主（桌宠 = 开屏结束 + 权限就绪 才显示）
@@ -260,7 +280,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (!mounted) return;
       // 步骤可能已经被推进/跳过，别把用户又拽回旧页面。
       if (tabs[kPetGuideStepId.value] != target) return;
-      if (_index != target) setState(() => _index = target);
+      if (_index != target) _selectTab(target);
     }
 
     apply();
@@ -295,29 +315,43 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               sourceStore: widget.sourceStore,
               statsStore: widget.statsStore,
             ),
-            // 发现页（原在书架右上角，改到常驻底栏，用户要求）
-            DiscoverPage(
-              bookStore: widget.store,
-              prefs: widget.prefs,
-              sourceStore: widget.sourceStore,
-            ),
-            RecentPage(
-              store: widget.store,
-              prefs: widget.prefs,
-              statsStore: widget.statsStore,
-            ),
-            SettingsPage(
-              store: widget.store,
-              prefs: widget.prefs,
-              sourceStore: widget.sourceStore,
-              statsStore: widget.statsStore,
-            ),
+            // 发现页（原在书架右上角，改到常驻底栏；仅首次切入时挂载，避免冷启动即扫源发请求）
+            if (_mountedTabs.contains(1))
+              DiscoverPage(
+                bookStore: widget.store,
+                prefs: widget.prefs,
+                sourceStore: widget.sourceStore,
+              )
+            else
+              const SizedBox.shrink(),
+            if (_mountedTabs.contains(2))
+              RecentPage(
+                store: widget.store,
+                prefs: widget.prefs,
+                statsStore: widget.statsStore,
+              )
+            else
+              const SizedBox.shrink(),
+            if (_mountedTabs.contains(3))
+              SettingsPage(
+                store: widget.store,
+                prefs: widget.prefs,
+                sourceStore: widget.sourceStore,
+                statsStore: widget.statsStore,
+              )
+            else
+              const SizedBox.shrink(),
           ],
         ),
       ),
-      bottomNavigationBar: _GuidedNavBar(
-        index: _index,
-        onSelect: (i) => setState(() => _index = i),
+      bottomNavigationBar: AnimatedBuilder(
+        animation: widget.prefs,
+        builder: (context, _) => _GuidedNavBar(
+          index: _index,
+          floatingDock: widget.prefs.floatingGlassDock,
+          visualStyle: widget.prefs.visualStyle,
+          onSelect: _selectTab,
+        ),
       ),
     );
   }
@@ -325,16 +359,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
 /// 底部导航 + 每格独立的引导锚点（书架 / 发现 / 最近 / 设置）。
 ///
-/// 四格都在**常驻导航栏**上，因此引导要求用户点击时不会导致页面结构失效——
-/// 这是引导设计的硬约束（指向会跳页的按钮会让后续步骤锚点消失）。
+/// 2.5 升级：使用自绘双色图标 [SakuraNavIcon]，支持悬浮液态玻璃胶囊 Dock、
+/// 蔚蓝轻漫斜切 HUD Dock，或全宽磨砂底栏。
 class _GuidedNavBar extends StatelessWidget {
-  const _GuidedNavBar({required this.index, required this.onSelect});
+  const _GuidedNavBar({
+    required this.index,
+    required this.floatingDock,
+    required this.visualStyle,
+    required this.onSelect,
+  });
 
   final int index;
+  final bool floatingDock;
+  final VisualStylePreset visualStyle;
   final ValueChanged<int> onSelect;
 
-  /// 格数（与 [NavigationBar.destinations] 数量保持一致）。
+  /// 格数（与导航目标数量保持一致）。
   static const int _slots = 4;
+
+  static const _tabs = [
+    (SakuraNavGlyph.shelf, '书架'),
+    (SakuraNavGlyph.discover, '发现'),
+    (SakuraNavGlyph.recent, '最近'),
+    (SakuraNavGlyph.settings, '设置'),
+  ];
 
   /// 把整条栏按等分切成 [_slots] 格。
   Rect Function(Size) _cell(int slot) =>
@@ -347,7 +395,39 @@ class _GuidedNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PetGuideTarget(
+    final sakura = context.sakura;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = Theme.of(context).colorScheme.primary;
+    final bottomPad = MediaQuery.paddingOf(context).bottom;
+    final isAnime = visualStyle == VisualStylePreset.animePop;
+    final borderCol = isDark
+        ? const Color(0xFF38BDF8)
+        : const Color(0xFF0F172A);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final dockMaxWidth = SakuraLayout.dockMaxWidth(screenWidth);
+    final shortLandscape = SakuraLayout.isShortLandscape(context);
+
+    final row = SizedBox(
+      height: shortLandscape ? 54 : 62,
+      child: Row(
+        children: [
+          for (var i = 0; i < _tabs.length; i++)
+            Expanded(
+              child: _DockNavItem(
+                glyph: _tabs[i].$1,
+                label: _tabs[i].$2,
+                selected: index == i,
+                accent: isAnime ? const Color(0xFF38BDF8) : accent,
+                inactiveColor: sakura.inkSecondary,
+                isAnime: isAnime,
+                onTap: () => onSelect(i),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    final guidedRow = PetGuideTarget(
       id: 'nav_shelf',
       rectOf: _cell(0),
       child: PetGuideTarget(
@@ -359,39 +439,195 @@ class _GuidedNavBar extends StatelessWidget {
           child: PetGuideTarget(
             id: 'nav_settings',
             rectOf: _cell(3),
-            child: _GlassBar(
-              child: NavigationBar(
-                selectedIndex: index,
-                onDestinationSelected: onSelect,
-                // 让 NavigationBar 自身透明，透出下面的模糊层，
-                // 否则它的实色背景会把毛玻璃整块盖住（正是用户反馈的现象）。
-                backgroundColor: Colors.transparent,
-                surfaceTintColor: Colors.transparent,
-                elevation: 0,
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.auto_stories_outlined),
-                    selectedIcon: Icon(Icons.auto_stories),
-                    label: '书架',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.explore_outlined),
-                    selectedIcon: Icon(Icons.explore),
-                    label: '发现',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.history_outlined),
-                    selectedIcon: Icon(Icons.history),
-                    label: '最近',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.favorite_outline_rounded),
-                    selectedIcon: Icon(Icons.favorite_rounded),
-                    label: '设置',
+            child: row,
+          ),
+        ),
+      ),
+    );
+
+    if (isAnime && floatingDock) {
+      return Align(
+        alignment: Alignment.bottomCenter,
+        heightFactor: 1.0,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: dockMaxWidth),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              14,
+              0,
+              14,
+              bottomPad + (shortLandscape ? 6 : 10),
+            ),
+            child: Transform(
+              transform: Matrix4.skewX(-0.08),
+              alignment: Alignment.center,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF182235) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderCol, width: 1.8),
+                  boxShadow: [
+                    BoxShadow(color: borderCol, offset: const Offset(3.5, 4)),
+                  ],
+                ),
+                child: Transform(
+                  transform: Matrix4.skewX(0.08),
+                  alignment: Alignment.center,
+                  child: guidedRow,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (floatingDock) {
+      return Align(
+        alignment: Alignment.bottomCenter,
+        heightFactor: 1.0,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: dockMaxWidth),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              14,
+              0,
+              14,
+              bottomPad + (shortLandscape ? 6 : 10),
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                boxShadow: [
+                  BoxShadow(
+                    color: sakura.coverShadow.withValues(
+                      alpha: isDark ? 0.45 : 0.20,
+                    ),
+                    blurRadius: 22,
+                    offset: const Offset(0, 8),
                   ),
                 ],
               ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: isDark
+                            ? [
+                                const Color(0xFF231E30).withValues(alpha: 0.78),
+                                const Color(0xFF161320).withValues(alpha: 0.68),
+                              ]
+                            : [
+                                Colors.white.withValues(alpha: 0.82),
+                                const Color(0xFFFFF4F8).withValues(alpha: 0.68),
+                              ],
+                      ),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.18)
+                            : Colors.white.withValues(alpha: 0.90),
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: guidedRow,
+                    ),
+                  ),
+                ),
+              ),
             ),
+          ),
+        ),
+      );
+    }
+
+    return _GlassBar(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomPad),
+        child: Center(
+          heightFactor: 1.0,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: dockMaxWidth),
+            child: guidedRow,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DockNavItem extends StatelessWidget {
+  const _DockNavItem({
+    required this.glyph,
+    required this.label,
+    required this.selected,
+    required this.accent,
+    required this.inactiveColor,
+    required this.isAnime,
+    required this.onTap,
+  });
+
+  final SakuraNavGlyph glyph;
+  final String label;
+  final bool selected;
+  final Color accent;
+  final Color inactiveColor;
+  final bool isAnime;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final activeTextColor = isAnime
+        ? const Color(0xFF0F172A)
+        : (isDark ? Colors.white : const Color(0xFF241B25));
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Center(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected
+                ? (isAnime
+                      ? const Color(0xFF38BDF8)
+                      : accent.withValues(alpha: isDark ? 0.22 : 0.14))
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(isAnime ? 10 : 999),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SakuraNavIcon(
+                glyph: glyph,
+                active: selected,
+                color: selected ? activeTextColor : inactiveColor,
+                accentColor: isAnime ? const Color(0xFFEC4899) : accent,
+                size: 22,
+              ),
+              const SizedBox(height: 2.5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  height: 1.1,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  color: selected ? activeTextColor : inactiveColor,
+                ),
+              ),
+            ],
           ),
         ),
       ),

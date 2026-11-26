@@ -24,9 +24,8 @@ class KanbanMascot extends StatefulWidget {
 
 /// 透明立绘差分（只含人物，无背景）。
 const kanbanFaces = [
-  'assets/images/pet_chibi.png',
-  'assets/images/pet_wave.png',
   'assets/images/pet_read.png',
+  'assets/images/pet_chibi.png',
   'assets/images/pet_cheer.png',
   'assets/images/pet_sleep.png',
   'assets/images/pet_shy.png',

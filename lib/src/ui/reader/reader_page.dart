@@ -19,8 +19,13 @@ import '../../data/pet_store.dart';
 import '../../data/prefs.dart';
 import '../../data/stats_store.dart';
 import '../../data/tts_role.dart';
-import '../widgets/glass_bar.dart';
 import '../../data/xray.dart';
+import '../../features/reader/annotation_models.dart';
+import '../../features/reader/annotation_sheet.dart';
+import '../../features/reader/chapter_paginator_cache.dart';
+import '../../features/reader/image_viewer_page.dart';
+import '../../features/reader/reader_chrome.dart';
+import '../../features/reader/simulation_turn.dart';
 import '../../platform/native_bridge.dart';
 import '../../platform/tts_service.dart';
 import '../../platform/url_launcher.dart';
@@ -32,7 +37,23 @@ import 'page_snap_physics.dart';
 import 'reader_settings_panel.dart';
 import 'tts_bar.dart';
 
-/// 沉浸式小说阅读器：分页 / 覆盖 / 淡入 / 滚动四种模式。
+/// 正文净化钩子类型：供替换净化规则引擎无缝接入。
+typedef ReaderTextPurifier = String Function(
+  String text, {
+  String? bookTitle,
+  String? sourceUrl,
+});
+
+/// 段内「问小樱 (AI)」回调类型：供 AI 伴读模块接入内联伴读浮层。
+typedef ReaderAskAiCallback = void Function(
+  BuildContext context, {
+  required String bookId,
+  required String bookTitle,
+  required String chapterTitle,
+  required String excerpt,
+});
+
+/// 沉浸式小说阅读器：仿真 3D 卷页 / 覆盖 / 滑动 / 淡入 / 滚动五种模式。
 class ReaderPage extends StatefulWidget {
   const ReaderPage({
     super.key,
@@ -41,13 +62,23 @@ class ReaderPage extends StatefulWidget {
     required this.bookId,
     this.chapterIndex,
     this.charOffset,
+    this.textPurifier,
+    this.onAskAi,
   });
+
+  /// 可选全局正文净化钩子（当页面未单独传入 [textPurifier] 时生效）。
+  static ReaderTextPurifier? defaultTextPurifier;
+
+  /// 可选全局段内 AI 伴读回调（当页面未单独传入 [onAskAi] 时生效）。
+  static ReaderAskAiCallback? defaultAskAiHandler;
 
   final BookStore store;
   final AppPrefs prefs;
   final String bookId;
   final int? chapterIndex;
   final int? charOffset;
+  final ReaderTextPurifier? textPurifier;
+  final ReaderAskAiCallback? onAskAi;
 
   @override
   State<ReaderPage> createState() => _ReaderPageState();
@@ -70,10 +101,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   String _layoutSig = '';
   int _paginateGen = 0;
   Size _viewport = Size.zero;
-  final Map<String, List<PageSlice>> _pagesCache = {};
-  final Map<int, String> _rawTextCache = {};
-  final Map<String, String> _processedCache = {};
-  final Set<String> _preloading = {};
+  final ChapterPaginatorCache _cache = ChapterPaginatorCache();
+
+  // ---- 划线与批注（直连 SQLite annotations DAO） ----
+  late final ReaderAnnotationStore _annotations = ReaderAnnotationStore(
+    database: widget.store.database,
+  );
 
   // ---- 人物（X-Ray）：从正文里识别出人名，支持正文高亮与一键跳转 ----
   XrayIndex? _xray;
@@ -88,6 +121,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   bool _flowDirty = false;
   bool _pendingCross = false;
   GlobalKey<_PagedReaderState> _pagerKey = GlobalKey<_PagedReaderState>();
+  GlobalKey<SimulationTurnViewState> _simKey =
+      GlobalKey<SimulationTurnViewState>();
   GlobalKey<_ScrollReaderState> _scrollKey = GlobalKey<_ScrollReaderState>();
 
   // ---- 滚动阅读的章节流（相邻章节拼进同一个列表，实现无缝衔接） ----
@@ -148,6 +183,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _targetOffset = widget.charOffset ?? book?.charOffset ?? 0;
     WidgetsBinding.instance.addObserver(this);
     widget.prefs.addListener(_onPrefsChanged);
+    _annotations.addListener(_onAnnotationsChanged);
+    unawaited(_annotations.loadForBook(widget.bookId));
     _enterImmersive();
     _loadChapter(revealBars: true);
     _scheduleHide();
@@ -160,6 +197,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       pet.setReaderActive(true);
       pet.onReadingSessionStart();
     }
+  }
+
+  void _onAnnotationsChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -176,6 +217,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       unawaited(_tts.stop());
     }
     _xrayRev.dispose();
+    _annotations.removeListener(_onAnnotationsChanged);
+    _annotations.dispose();
     PetStore.shared?.setReaderActive(false);
     WidgetsBinding.instance.removeObserver(this);
     _saveProgress();
@@ -312,10 +355,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       if (mounted) {
         if (_imageDir != imgDir) _imageDir = imgDir;
       }
-      var raw = _rawTextCache[_chapterIndex];
+      var raw = _cache.getRawText(_chapterIndex);
       final rawCached = raw != null;
       raw ??= await _content!.chapterText(_chapterIndex);
-      _rawTextCache[_chapterIndex] = raw;
+      _cache.putRawText(_chapterIndex, raw);
       if (!mounted) return;
       _chapterText = _processText(_chapterIndex, raw);
       _layoutSig = '';
@@ -327,7 +370,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       String? preSig;
       if (rawCached && widget.prefs.pageMode != PageTurnMode.scroll) {
         preSig = _layoutSigFor(_chapterIndex, _chapterText);
-        prePages = _pagesCache[preSig];
+        prePages = _cache.getPages(preSig);
       }
       setState(() {
         _loading = false;
@@ -335,6 +378,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           _pages = prePages;
           _pageIndex = _pageForOffset(prePages, _targetOffset);
           _pagerKey = GlobalKey<_PagedReaderState>();
+          _simKey = GlobalKey<SimulationTurnViewState>();
           _revealed = true;
           _paginationComplete = true;
           _layoutSig = preSig;
@@ -360,14 +404,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   String _processText(int chapterIndex, String raw) {
-    final key = '${chapterIndex}_${widget.prefs.paragraphIndent}';
-    final cached = _processedCache[key];
+    final isScroll = widget.prefs.pageMode == PageTurnMode.scroll;
+    final purifier = widget.textPurifier ?? ReaderPage.defaultTextPurifier;
+    final key =
+        '${chapterIndex}_${widget.prefs.paragraphIndent}_${isScroll ? 1 : 0}_${purifier.hashCode}';
+    final cached = _cache.getProcessedText(key);
     if (cached != null) return cached;
     var text = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    if (purifier != null) {
+      text = purifier(
+        text,
+        bookTitle: _book?.title,
+        sourceUrl: _book?.sourceUrl,
+      );
+    }
     // 分页模式无法把图片嵌进文字排版里（分页按字符测量），
     // 这里把插图标记换成可读的占位文字，避免控制字符混进正文。
     // 滚动模式会保留标记并渲染真图（见 _ScrollReader）。
-    if (widget.prefs.pageMode != PageTurnMode.scroll) {
+    if (!isScroll) {
       text = text.replaceAll(RegExp('\u0001IMG:[^\u0001]*\u0001'), '［插图］');
     }
     if (widget.prefs.paragraphIndent) {
@@ -395,10 +449,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         text = '$title\n\n$text';
       }
     }
-    _processedCache[key] = text;
-    if (_processedCache.length > 6) {
-      _processedCache.remove(_processedCache.keys.first);
-    }
+    _cache.putProcessedText(key, text);
     return text;
   }
 
@@ -413,6 +464,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _pages = [];
       _scrollFlow.clear();
       _pagerKey = GlobalKey<_PagedReaderState>();
+      _simKey = GlobalKey<SimulationTurnViewState>();
       _scrollKey = GlobalKey<_ScrollReaderState>();
     });
     await _loadChapter();
@@ -504,13 +556,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       });
       return;
     }
-    final cached = _pagesCache[sig];
+    final cached = _cache.getPages(sig);
     if (cached != null) {
       final idx = _pageForOffset(cached, _targetOffset);
       setState(() {
         _pages = cached;
         _pageIndex = idx;
         _pagerKey = GlobalKey<_PagedReaderState>();
+        _simKey = GlobalKey<SimulationTurnViewState>();
         _revealed = true;
         _paginationComplete = true;
         _reconcileFlow();
@@ -527,6 +580,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _pages = pages;
       _pageIndex = 0;
       _pagerKey = GlobalKey<_PagedReaderState>();
+      _simKey = GlobalKey<SimulationTurnViewState>();
     });
 
     var offset = 0;
@@ -553,10 +607,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
     session.dispose();
     if (!mounted || gen != _paginateGen) return;
-    _pagesCache[sig] = pages;
-    if (_pagesCache.length > 8) {
-      _pagesCache.remove(_pagesCache.keys.first);
-    }
+    _cache.putPages(sig, pages);
     setState(() {
       _paginationComplete = true;
       if (!_revealed) {
@@ -573,10 +624,49 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // ---------- 跨章连页（翻越章界时无缝衔接） ----------
 
+  bool get _isSimulation => widget.prefs.pageMode == PageTurnMode.simulation;
+
+  bool get _isPagerIdle => _isSimulation
+      ? (_simKey.currentState?.isIdle ?? true)
+      : (_pagerKey.currentState?.isIdle ?? true);
+
+  void _shiftPager(int delta) {
+    if (delta == 0) return;
+    if (_isSimulation) {
+      _simKey.currentState?.shiftPages(delta);
+    } else {
+      _pagerKey.currentState?.shiftPages(delta.toDouble());
+    }
+  }
+
+  void _animatePagerNext() {
+    if (_isSimulation) {
+      _simKey.currentState?.animateNext();
+    } else {
+      _pagerKey.currentState?.animateNext();
+    }
+  }
+
+  void _animatePagerPrev() {
+    if (_isSimulation) {
+      _simKey.currentState?.animatePrev();
+    } else {
+      _pagerKey.currentState?.animatePrev();
+    }
+  }
+
+  void _jumpPagerTo(int index) {
+    if (_isSimulation) {
+      _simKey.currentState?.jumpToIndex(index);
+    } else {
+      _pagerKey.currentState?.jumpToIndex(index);
+    }
+  }
+
   /// 取某章处理后的正文（未加载时返回 null）。
   String? _textOfChapter(int chapter) {
     if (chapter < 0) return null;
-    final raw = _rawTextCache[chapter];
+    final raw = _cache.getRawText(chapter);
     if (raw == null) return null;
     return _processText(chapter, raw);
   }
@@ -585,7 +675,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   List<PageSlice>? _cachedPagesOf(int chapter) {
     final text = _textOfChapter(chapter);
     if (text == null) return null;
-    return _pagesCache[_layoutSigFor(chapter, text)];
+    return _cache.getPages(_layoutSigFor(chapter, text));
   }
 
   static String _sliceText(String text, PageSlice p) =>
@@ -609,21 +699,27 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final prevText = _textOfChapter(_chapterIndex - 1);
     if (prevPages != null && prevPages.isNotEmpty && prevText != null) {
       flow.add(
-        _FlowPage(_chapterIndex - 1, _sliceText(prevText, prevPages.last)),
+        _FlowPage(
+          _chapterIndex - 1,
+          _sliceText(prevText, prevPages.last),
+          prevPages.last.start,
+        ),
       );
     }
     final head = flow.length;
     // 本章全部页
     final curText = _textOfChapter(_chapterIndex) ?? _chapterText;
     for (final p in _pages) {
-      flow.add(_FlowPage(_chapterIndex, _sliceText(curText, p)));
+      flow.add(_FlowPage(_chapterIndex, _sliceText(curText, p), p.start));
     }
     // 下一章全部页（已预加载时纳入，可以连续向前翻过章界）
     final nextPages = _cachedPagesOf(_chapterIndex + 1);
     final nextText = _textOfChapter(_chapterIndex + 1);
     if (nextPages != null && nextText != null) {
       for (final p in nextPages) {
-        flow.add(_FlowPage(_chapterIndex + 1, _sliceText(nextText, p)));
+        flow.add(
+          _FlowPage(_chapterIndex + 1, _sliceText(nextText, p), p.start),
+        );
       }
     }
     final newIndex = (head + _pageIndex).clamp(0, flow.length - 1).toInt();
@@ -632,15 +728,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _flowChapterStart = head;
     _flowIndex = newIndex;
     if (delta != 0) {
-      _pagerKey.currentState?.shiftPages(delta.toDouble());
+      _shiftPager(delta);
     }
   }
 
   /// 预加载完成后的页流刷新：静止时立即执行，否则等本次滚动结束。
   void _requestFlowExtend() {
     if (!mounted) return;
-    final pager = _pagerKey.currentState;
-    if (pager != null && !pager.isIdle) {
+    if (!_isPagerIdle) {
       _flowDirty = true;
       return;
     }
@@ -668,12 +763,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       if (_pendingCross) {
         _commitCross();
       }
-      if (_flowDirty) {
-        final pager = _pagerKey.currentState;
-        if (pager == null || pager.isIdle) {
-          _flowDirty = false;
-          setState(_reconcileFlow);
-        }
+      if (_flowDirty && _isPagerIdle) {
+        _flowDirty = false;
+        setState(_reconcileFlow);
       }
     });
   }
@@ -781,9 +873,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _scrollFlowLoading = true;
     try {
       _content ??= createBookContent(book, widget.store);
-      var raw = _rawTextCache[next];
+      var raw = _cache.getRawText(next);
       raw ??= await _content!.chapterText(next);
-      _rawTextCache[next] = raw;
+      _cache.putRawText(next, raw);
       if (!mounted) return;
       final text = _processText(next, raw);
       if (_scrollFlow.any((c) => c.chapter == next)) return;
@@ -816,9 +908,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _scrollFlowLoading = true;
     try {
       _content ??= createBookContent(book, widget.store);
-      var raw = _rawTextCache[prev];
+      var raw = _cache.getRawText(prev);
       raw ??= await _content!.chapterText(prev);
-      _rawTextCache[prev] = raw;
+      _cache.putRawText(prev, raw);
       if (!mounted) return;
       final text = _processText(prev, raw);
       if (_scrollFlow.any((c) => c.chapter == prev)) return;
@@ -845,7 +937,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
     _content ??= createBookContent(book, widget.store);
-    var raw = _rawTextCache[index];
+    var raw = _cache.getRawText(index);
     if (raw == null) {
       try {
         raw = await _content!.chapterText(index);
@@ -853,12 +945,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         return;
       }
       if (!mounted) return;
-      _rawTextCache[index] = raw;
+      _cache.putRawText(index, raw);
     }
     final text = _processText(index, raw);
     final sig = _layoutSigFor(index, text);
-    if (_pagesCache.containsKey(sig) || _preloading.contains(sig)) return;
-    _preloading.add(sig);
+    if (!_cache.tryStartPreload(sig)) return;
     try {
       final session = PaginatorSession(style: _textStyle, size: _bodySize());
       final pages = <PageSlice>[];
@@ -874,16 +965,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       }
       session.dispose();
       if (!mounted) return;
-      _pagesCache[sig] = pages;
-      if (_pagesCache.length > 8) {
-        _pagesCache.remove(_pagesCache.keys.first);
-      }
+      _cache.putPages(sig, pages);
       // 相邻章就绪：并入连页流（翻越章界可以连续进行）
       if (index == _chapterIndex + 1 || index == _chapterIndex - 1) {
         _requestFlowExtend();
       }
     } finally {
-      _preloading.remove(sig);
+      _cache.finishPreload(sig);
     }
   }
 
@@ -946,7 +1034,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       return;
     }
     if (_flowIndex < _flow.length - 1) {
-      _pagerKey.currentState?.animateNext();
+      _animatePagerNext();
     } else if (!_paginationComplete) {
       // 还在分页，稍等
     } else {
@@ -965,7 +1053,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       return;
     }
     if (_flowIndex > 0) {
-      _pagerKey.currentState?.animatePrev();
+      _animatePagerPrev();
     } else if (_chapterIndex > 0) {
       _goToChapter(_chapterIndex - 1, -1);
     }
@@ -1026,7 +1114,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               ),
             ),
           _buildTopBar(bg),
-          _buildBottomBar(),
+          _buildBottomBar(bg),
           // 朗读控制条（朗读时悬浮在底部，位于底栏之上）
           if (_ttsActive)
             Positioned(
@@ -1128,12 +1216,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final book = _book;
     final chapter = book?.chapters[_chapterIndex];
 
+    final darkPaper =
+        ThemeData.estimateBrightnessForColor(bg.color) == Brightness.dark;
     Widget reader;
     if (mode == PageTurnMode.scroll) {
       reader = _ScrollReader(
         key: _scrollKey,
         namePattern: widget.prefs.xrayHighlight ? _xray?.pattern : null,
         nameColor: Theme.of(context).colorScheme.primary,
+        annotationsForChapter: _annotations.forChapter,
+        darkPaper: darkPaper,
         chapters: _scrollChapters,
         style: _textStyle,
         marginH: _effectiveMarginH,
@@ -1163,6 +1255,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         onNeedNext: _extendScrollFlow,
         onNeedPrev: _prependScrollFlow,
         onToggleBars: _toggleBars,
+        onLongPressParagraph: (ch, offset, text) => _openAnnotationSheet(
+          chapterIndex: ch,
+          startOffset: offset,
+          endOffset: offset + text.length,
+          selectedText: text,
+        ),
       );
       // 首次进入滚动模式时把下一章先接上，用户滑到底不用等加载。
       if (_scrollFlow.length <= 1) {
@@ -1181,6 +1279,32 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           ),
         ),
       );
+    } else if (mode == PageTurnMode.simulation) {
+      reader = SimulationTurnView(
+        key: _simKey,
+        itemCount: _flow.length,
+        initialPage: _flowChapterStart + _pageIndex,
+        backdrop: bg.color,
+        onPageChanged: _onFlowPageChanged,
+        onSettled: _onReaderSettled,
+        onBeyondNext: () {
+          if (_paginationComplete) {
+            _nextPage();
+          }
+        },
+        onBeyondPrev: _prevPage,
+        onToggleBars: _toggleBars,
+        onLongPress: _openAnnotationForCurrentPage,
+        itemBuilder: (context, index) {
+          final fp = _flow[index];
+          return _buildFlowPageCanvas(
+            fp: fp,
+            backdrop: bg.color,
+            darkPaper: darkPaper,
+            nameColor: Theme.of(context).colorScheme.primary,
+          );
+        },
+      );
     } else {
       // 页面全屏出血（文字左右边距在页面内部实现），翻页动画才能像
       // 阅读 3.0 一样覆盖到屏幕最左 / 最右边缘，两侧不留静止的空白缝。
@@ -1188,6 +1312,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         key: _pagerKey,
         namePattern: widget.prefs.xrayHighlight ? _xray?.pattern : null,
         nameColor: Theme.of(context).colorScheme.primary,
+        annotationsForChapter: _annotations.forChapter,
+        darkPaper: darkPaper,
         pages: _flow,
         style: _textStyle,
         backdrop: bg.color,
@@ -1205,6 +1331,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         },
         onBeyondPrev: _prevPage,
         onToggleBars: _toggleBars,
+        onLongPress: _openAnnotationForCurrentPage,
       );
     }
 
@@ -1360,290 +1487,179 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 顶栏 / 底栏容器：普通模式是纯色圆角，磨砂模式加一层实时模糊。
-  ///
-  /// 用户反馈「调来调去都没有磨砂」——以前只有半透明蒙层，没有真模糊。
-  /// 实时模糊每帧要采样一次背景，低端机会掉帧，所以做成设置里的开关。
-  Widget _glassBar({
-    required Widget child,
-    required Color tint,
-    required BorderRadius radius,
-    bool dark = false,
-    List<BoxShadow>? shadow,
+  Widget _buildFlowPageCanvas({
+    required _FlowPage fp,
+    required Color backdrop,
+    required bool darkPaper,
+    required Color nameColor,
   }) {
-    return GlassBar(
-      frosted: widget.prefs.frostedGlass,
-      tint: tint,
-      radius: radius,
-      dark: dark,
-      shadow: shadow,
-      child: child,
+    return Container(
+      color: backdrop,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          _effectiveMarginH,
+          _topReserve,
+          _effectiveMarginH,
+          _bottomReserve,
+        ),
+        child: SizedBox.expand(
+          child: _ReaderRichText(
+            text: fp.text,
+            baseOffset: fp.startOffset,
+            style: _textStyle,
+            color: nameColor,
+            pattern: widget.prefs.xrayHighlight ? _xray?.pattern : null,
+            annotations: _annotations.forChapter(fp.chapter),
+            darkPaper: darkPaper,
+            scaler: TextScaler.noScaling,
+          ),
+        ),
+      ),
     );
+  }
+
+  /// 长按当前分页打开划线 / 批注 / 金句卡片 / 问小樱动作面板。
+  void _openAnnotationForCurrentPage() {
+    if (_flow.isEmpty) return;
+    final idx = _flowIndex.clamp(0, _flow.length - 1);
+    final fp = _flow[idx];
+    final lines = fp.text.split('\n');
+    var relStart = 0;
+    var chosen = '';
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.length >= 6) {
+        chosen = trimmed;
+        break;
+      }
+      relStart += line.length + 1;
+    }
+    if (chosen.isEmpty) {
+      chosen = fp.text.trim();
+      relStart = 0;
+    }
+    if (chosen.isEmpty) return;
+    _openAnnotationSheet(
+      chapterIndex: fp.chapter,
+      startOffset: fp.startOffset + relStart,
+      endOffset: fp.startOffset + relStart + chosen.length,
+      selectedText: chosen,
+    );
+  }
+
+  void _openAnnotationSheet({
+    required int chapterIndex,
+    required int startOffset,
+    required int endOffset,
+    required String selectedText,
+  }) {
+    final book = _book;
+    if (book == null || selectedText.trim().isEmpty) return;
+    final chTitle = chapterIndex >= 0 && chapterIndex < book.chapters.length
+        ? book.chapters[chapterIndex].title
+        : '第 ${chapterIndex + 1} 章';
+    final askAi = widget.onAskAi ?? ReaderPage.defaultAskAiHandler;
+    showReaderAnnotationActionSheet(
+      context,
+      bookId: book.id,
+      bookTitle: book.title,
+      author: book.author,
+      chapterIndex: chapterIndex,
+      chapterTitle: chTitle,
+      startOffset: startOffset,
+      endOffset: endOffset,
+      selectedText: selectedText,
+      store: _annotations,
+      onAskAi: askAi == null
+          ? null
+          : (excerpt) => askAi(
+              context,
+              bookId: book.id,
+              bookTitle: book.title,
+              chapterTitle: chTitle,
+              excerpt: excerpt,
+            ),
+    );
+  }
+
+  void _showAnnotationsSheet() {
+    final book = _book;
+    if (book == null) return;
+    showBookAnnotationsSheet(
+      context,
+      book: book,
+      store: _annotations,
+      onJump: (chapter, offset) => unawaited(_goToChapter(chapter, offset)),
+    );
+  }
+
+  Future<void> _openEpubOriginal() async {
+    final book = _book;
+    if (book == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EpubDocumentPage(
+          book: book,
+          store: widget.store,
+          prefs: widget.prefs,
+          chapter: _chapterIndex,
+        ),
+      ),
+    );
+    if (mounted) {
+      _chapterIndex = book.safeChapterIndex;
+      _targetOffset = 0;
+      _loadChapter();
+    }
   }
 
   Widget _buildTopBar(ReaderBg bg) {
     final book = _book;
-    final dark =
-        ThemeData.estimateBrightnessForColor(bg.color) == Brightness.dark;
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
-      left: 0,
-      right: 0,
-      top: _barsVisible ? 0 : -140,
-      child: IgnorePointer(
-        ignoring: !_barsVisible,
-        child: _glassBar(
-          tint: bg.color,
-          radius: const BorderRadius.vertical(bottom: Radius.circular(18)),
-          dark: dark,
-          shadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: dark ? .30 : .10),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
-            ),
-          ],
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(6, 2, 10, 12),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    icon: Icon(
-                      Icons.arrow_back_rounded,
-                      color: dark ? Colors.white : Colors.black87,
-                    ),
-                    tooltip: '返回',
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          book?.title ?? '',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: dark ? Colors.white : Colors.black87,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                          ),
-                        ),
-                        if (book != null)
-                          // 下载中优先显示进度，让用户知道还要多久
-                          if (_offlineProgress != null)
-                            Row(
-                              children: [
-                                SizedBox(
-                                  width: 46,
-                                  height: 5,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(3),
-                                    child: LinearProgressIndicator(
-                                      value: _offlineProgress!.fraction,
-                                      minHeight: 5,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '缓存 ${_offlineProgress!.done}/${_offlineProgress!.total}',
-                                  style: TextStyle(
-                                    color:
-                                        (dark ? Colors.white : Colors.black87)
-                                            .withValues(alpha: .65),
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ],
-                            )
-                          else
-                            Text(
-                              '第 ${_chapterIndex + 1}/${book.chapterCount} 章',
-                              style: TextStyle(
-                                color: (dark ? Colors.white : Colors.black87)
-                                    .withValues(alpha: .65),
-                                fontSize: 11,
-                              ),
-                            ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: _showXraySheet,
-                    icon: Icon(
-                      Icons.groups_2_outlined,
-                      color: dark ? Colors.white : Colors.black87,
-                    ),
-                    tooltip: '人物',
-                  ),
-                  IconButton(
-                    onPressed: _showChapterSheet,
-                    icon: Icon(
-                      Icons.format_list_bulleted_rounded,
-                      color: dark ? Colors.white : Colors.black87,
-                    ),
-                    tooltip: '目录',
-                  ),
-                  if (book?.format == BookFormat.epub)
-                    IconButton(
-                      tooltip: '原书排版（插图与注释）',
-                      icon: const Icon(Icons.auto_stories_outlined),
-                      onPressed: () async {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => EpubDocumentPage(
-                              book: book!,
-                              store: widget.store,
-                              prefs: widget.prefs,
-                              chapter: _chapterIndex,
-                            ),
-                          ),
-                        );
-                        if (mounted) {
-                          _chapterIndex = book!.safeChapterIndex;
-                          _targetOffset = 0;
-                          _loadChapter();
-                        }
-                      },
-                    ),
-                  // 离线缓存（在线书）：把整本提前下好
-                  if (book?.format == BookFormat.online)
-                    IconButton(
-                      onPressed: _downloadWholeBook,
-                      icon: Icon(
-                        _offlineProgress != null
-                            ? Icons.cloud_sync_rounded
-                            : Icons.cloud_download_outlined,
-                        color: dark ? Colors.white : Colors.black87,
-                      ),
-                      tooltip: '离线缓存',
-                    ),
-                  // 当前章节来源：跳浏览器打开本章原始页面
-                  if (_currentChapterUrl != null)
-                    IconButton(
-                      onPressed: _openChapterSource,
-                      icon: Icon(
-                        Icons.open_in_new_rounded,
-                        color: dark ? Colors.white : Colors.black87,
-                      ),
-                      tooltip: '查看本章来源',
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
+    return ReaderTopBar(
+      visible: _barsVisible,
+      bg: bg,
+      frosted: widget.prefs.frostedGlass,
+      book: book,
+      chapterIndex: _chapterIndex,
+      offlineProgress: _offlineProgress,
+      currentChapterUrl: _currentChapterUrl,
+      annotationCount: _annotations.highlightsAndNotes.length,
+      onBack: () => Navigator.of(context).maybePop(),
+      onShowXray: _showXraySheet,
+      onShowAnnotations: _showAnnotationsSheet,
+      onShowChapters: _showChapterSheet,
+      onOpenEpubOriginal: book?.format == BookFormat.epub
+          ? _openEpubOriginal
+          : null,
+      onDownloadWholeBook: book?.format == BookFormat.online
+          ? _downloadWholeBook
+          : null,
+      onOpenChapterSource: _currentChapterUrl != null
+          ? _openChapterSource
+          : null,
     );
   }
 
-  Widget _buildBottomBar() {
+  Widget _buildBottomBar(ReaderBg bg) {
     final book = _book;
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
-      left: 0,
-      right: 0,
-      bottom: _barsVisible ? 0 : -230,
-      child: IgnorePointer(
-        ignoring: !_barsVisible,
-        child: _glassBar(
-          tint: Colors.black87,
-          radius: const BorderRadius.vertical(top: Radius.circular(24)),
-          dark: true,
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _BookSlider(
-                    progress: progress,
-                    onJump: (value) => _jumpToProgress(value),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _barButton(
-                        icon: Icons.skip_previous_rounded,
-                        label: '上一章',
-                        enabled: _chapterIndex > 0,
-                        onTap: () => _goToChapter(_chapterIndex - 1, 0),
-                      ),
-                      _barButton(
-                        icon: Icons.format_list_bulleted_rounded,
-                        label: '目录',
-                        onTap: _showChapterSheet,
-                      ),
-                      _barButton(
-                        icon: Icons.bookmark_border_rounded,
-                        label: '书签',
-                        onTap: _showBookmarkSheet,
-                      ),
-                      _barButton(
-                        icon: _ttsActive
-                            ? Icons.record_voice_over_rounded
-                            : Icons.record_voice_over_outlined,
-                        label: '朗读',
-                        onTap: _startTts,
-                      ),
-                      if (book?.format == BookFormat.online)
-                        _barButton(
-                          icon: Icons.swap_horiz_rounded,
-                          label: '换源',
-                          onTap: _showSourceSwitch,
-                        ),
-                      _barButton(
-                        icon: Icons.text_fields_rounded,
-                        label: '设置',
-                        onTap: _showSettingsSheet,
-                      ),
-                      _barButton(
-                        icon: Icons.skip_next_rounded,
-                        label: '下一章',
-                        enabled:
-                            book != null &&
-                            _chapterIndex < book.chapterCount - 1,
-                        onTap: () => _goToChapter(_chapterIndex + 1, 0),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _barButton({
-    required IconData icon,
-    required String label,
-    bool enabled = true,
-    required VoidCallback onTap,
-  }) {
-    final color = enabled ? Colors.white : Colors.white38;
-    return InkWell(
-      onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(14),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 3),
-            Text(label, style: TextStyle(color: color, fontSize: 10.5)),
-          ],
-        ),
-      ),
+    return ReaderBottomBar(
+      visible: _barsVisible,
+      bg: bg,
+      frosted: widget.prefs.frostedGlass,
+      book: book,
+      chapterIndex: _chapterIndex,
+      progress: progress,
+      ttsActive: _ttsActive,
+      onPrevChapter: () => _goToChapter(_chapterIndex - 1, 0),
+      onNextChapter: () => _goToChapter(_chapterIndex + 1, 0),
+      onShowChapters: _showChapterSheet,
+      onShowBookmarks: _showBookmarkSheet,
+      onStartTts: _startTts,
+      onShowSettings: _showSettingsSheet,
+      onJumpProgress: _jumpToProgress,
+      onShowSourceSwitch: book?.format == BookFormat.online
+          ? _showSourceSwitch
+          : null,
     );
   }
 
@@ -1733,7 +1749,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         if (total >= 400000) break;
         String raw;
         try {
-          raw = _rawTextCache[i] ?? await content.chapterText(i);
+          raw = _cache.getRawText(i) ?? await content.chapterText(i);
         } catch (_) {
           continue;
         }
@@ -1877,7 +1893,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         all: _xray?.entities ?? const <XrayEntity>[],
         book: book,
         loadText: (chapter) async =>
-            _rawTextCache[chapter] ?? await content.chapterText(chapter),
+            _cache.getRawText(chapter) ?? await content.chapterText(chapter),
         prepare: _processText,
         onJump: (chapter, offset) {
           Navigator.of(sheetContext).pop();
@@ -1957,9 +1973,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _scrollKey.currentState?.scrollToOffset(_chapterIndex, offset);
     } else {
       final page = _pageForOffset(_pages, offset);
-      // 只改 _pageIndex 不会动 PageView（它只在 initialPage 里读一次），
+      // 只改 _pageIndex 不会动 PageView / PageCurlView（它只在 initialPage 里读一次），
       // 所以这里直接驱动翻页 + 同步页码状态。
-      _pagerKey.currentState?.jumpToIndex(_flowChapterStart + page);
+      _jumpPagerTo(_flowChapterStart + page);
       if (page != _pageIndex) {
         setState(() => _pageIndex = page);
       }
@@ -2478,10 +2494,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (book == null) return;
     _content?.dispose();
     _content = null;
-    _rawTextCache.clear();
-    _processedCache.clear();
-    _pagesCache.clear();
-    _preloading.clear();
+    _cache.clearAll();
     _flow = const <_FlowPage>[];
     _flowIndex = 0;
     _flowChapterStart = 0;
@@ -2493,6 +2506,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _pageIndex = 0;
     _targetOffset = 0;
     _pagerKey = GlobalKey<_PagedReaderState>();
+    _simKey = GlobalKey<SimulationTurnViewState>();
     _scrollKey = GlobalKey<_ScrollReaderState>();
     _scrollFlow.clear();
     _toastLate('已换源，正在重新加载本章…');
@@ -3065,46 +3079,98 @@ class _XraySnippetText extends StatelessWidget {
   }
 }
 
-/// 正文里的「人名高亮」：把命中的名字换成主题色加粗，其余文字保持不变。
-///
-/// 用 [Text.rich] 而不是 `.replaceAll` 拼富文本，是因为一段里可能
-/// 出现十几次人名，逐个 TextSpan 拼接最省事，也不影响换行排版。
-class _NameRichText extends StatelessWidget {
-  const _NameRichText({
+/// 正文富文本渲染：支持四色荧光划线背景与可选的 X-Ray 人名高亮。
+class _ReaderRichText extends StatelessWidget {
+  const _ReaderRichText({
     required this.text,
     required this.style,
     required this.color,
+    this.baseOffset = 0,
     this.pattern,
+    this.annotations = const <ReaderAnnotation>[],
+    this.darkPaper = false,
     this.scaler,
   });
 
   final String text;
+  final int baseOffset;
   final TextStyle style;
   final Color color;
   final RegExp? pattern;
+  final List<ReaderAnnotation> annotations;
+  final bool darkPaper;
   final TextScaler? scaler;
 
   @override
   Widget build(BuildContext context) {
-    final matches = pattern?.allMatches(text).toList();
-    if (matches == null || matches.isEmpty) {
+    final len = text.length;
+    final nameMatches =
+        pattern?.allMatches(text).toList() ?? const <RegExpMatch>[];
+    final localHighlights =
+        <({int start, int end, Color fill, Color underline})>[];
+    for (final a in annotations) {
+      final s = (a.startOffset - baseOffset).clamp(0, len);
+      final e = (a.endOffset - baseOffset).clamp(0, len);
+      if (e > s) {
+        localHighlights.add((
+          start: s,
+          end: e,
+          fill: a.color.highlightFill(dark: darkPaper),
+          underline: a.color.swatch,
+        ));
+      }
+    }
+
+    if (nameMatches.isEmpty && localHighlights.isEmpty) {
       return Text(text, style: style, textScaler: scaler);
     }
-    final spans = <TextSpan>[];
-    var last = 0;
-    for (final m in matches) {
-      if (m.start > last) {
-        spans.add(TextSpan(text: text.substring(last, m.start)));
-      }
-      spans.add(
-        TextSpan(
-          text: m.group(0),
-          style: TextStyle(color: color, fontWeight: FontWeight.w600),
-        ),
-      );
-      last = m.end;
+
+    // 收集所有区间边界点，切分出互不重叠的文本片段。
+    final cuts = <int>{0, len};
+    for (final m in nameMatches) {
+      cuts.add(m.start);
+      cuts.add(m.end);
     }
-    if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
+    for (final h in localHighlights) {
+      cuts.add(h.start);
+      cuts.add(h.end);
+    }
+    final points = cuts.toList()..sort();
+
+    final spans = <TextSpan>[];
+    for (var i = 0; i < points.length - 1; i++) {
+      final a = points[i];
+      final b = points[i + 1];
+      if (b <= a) continue;
+      final isName = nameMatches.any((m) => m.start <= a && m.end >= b);
+      Color? bgFill;
+      Color? underlineColor;
+      for (final h in localHighlights) {
+        if (h.start <= a && h.end >= b) {
+          bgFill = h.fill;
+          underlineColor = h.underline;
+        }
+      }
+      if (!isName && bgFill == null) {
+        spans.add(TextSpan(text: text.substring(a, b)));
+      } else {
+        spans.add(
+          TextSpan(
+            text: text.substring(a, b),
+            style: TextStyle(
+              color: isName ? color : null,
+              fontWeight: isName ? FontWeight.w600 : null,
+              backgroundColor: bgFill,
+              decoration: underlineColor != null
+                  ? TextDecoration.underline
+                  : null,
+              decorationColor: underlineColor?.withValues(alpha: 0.65),
+              decorationStyle: TextDecorationStyle.solid,
+            ),
+          ),
+        );
+      }
+    }
     return Text.rich(
       TextSpan(style: style, children: spans),
       textScaler: scaler,
@@ -3119,6 +3185,8 @@ class _PagedReader extends StatefulWidget {
     required this.style,
     this.namePattern,
     required this.nameColor,
+    required this.annotationsForChapter,
+    required this.darkPaper,
     required this.backdrop,
     required this.marginH,
     required this.initialPage,
@@ -3130,6 +3198,7 @@ class _PagedReader extends StatefulWidget {
     required this.onBeyondNext,
     required this.onBeyondPrev,
     required this.onToggleBars,
+    this.onLongPress,
   });
 
   final List<_FlowPage> pages;
@@ -3140,6 +3209,9 @@ class _PagedReader extends StatefulWidget {
 
   /// 人名高亮颜色。
   final Color nameColor;
+
+  final List<ReaderAnnotation> Function(int chapter) annotationsForChapter;
+  final bool darkPaper;
 
   /// 页面不透明底色（阅读背景色），保证覆盖 / 淡入动画不会透出下页文字。
   final Color backdrop;
@@ -3157,6 +3229,7 @@ class _PagedReader extends StatefulWidget {
   final VoidCallback onBeyondNext;
   final VoidCallback onBeyondPrev;
   final VoidCallback onToggleBars;
+  final VoidCallback? onLongPress;
 
   @override
   State<_PagedReader> createState() => _PagedReaderState();
@@ -3277,6 +3350,7 @@ class _PagedReaderState extends State<_PagedReader> {
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapUp: (details) => _onTapUp(details, size),
+          onLongPress: widget.onLongPress,
           child: NotificationListener<ScrollNotification>(
             onNotification: _onScrollNotification,
             child: PageView.builder(
@@ -3287,7 +3361,7 @@ class _PagedReaderState extends State<_PagedReader> {
               itemCount: widget.pages.length,
               onPageChanged: widget.onPageChanged,
               itemBuilder: (context, index) {
-                final pageText = widget.pages[index].text;
+                final fp = widget.pages[index];
                 final content = Container(
                   color: widget.backdrop,
                   child: Padding(
@@ -3298,11 +3372,14 @@ class _PagedReaderState extends State<_PagedReader> {
                       widget.bottomReserve,
                     ),
                     child: SizedBox.expand(
-                      child: _NameRichText(
-                        text: pageText,
+                      child: _ReaderRichText(
+                        text: fp.text,
+                        baseOffset: fp.startOffset,
                         style: widget.style,
                         color: widget.nameColor,
                         pattern: widget.namePattern,
+                        annotations: widget.annotationsForChapter(fp.chapter),
+                        darkPaper: widget.darkPaper,
                         scaler: TextScaler.noScaling,
                       ),
                     ),
@@ -3358,12 +3435,13 @@ class _PagedReaderState extends State<_PagedReader> {
   }
 }
 
-/// 跨章连页中的一页：切好的正文文本 + 所属章节（章节号用于调试与校验）。
+/// 跨章连页中的一页：切好的正文文本 + 所属章节 + 章内起始偏移。
 class _FlowPage {
-  const _FlowPage(this.chapter, this.text);
+  const _FlowPage(this.chapter, this.text, this.startOffset);
 
   final int chapter;
   final String text;
+  final int startOffset;
 }
 
 // ==================== 滚动视图 ====================
@@ -3387,6 +3465,8 @@ class _ScrollReader extends StatefulWidget {
     required this.style,
     this.namePattern,
     required this.nameColor,
+    required this.annotationsForChapter,
+    required this.darkPaper,
     required this.marginH,
     required this.topReserve,
     required this.bottomReserve,
@@ -3395,6 +3475,7 @@ class _ScrollReader extends StatefulWidget {
     required this.onPositionChanged,
     required this.onNeedNext,
     required this.onToggleBars,
+    this.onLongPressParagraph,
     this.onNeedPrev,
     this.imageDir,
     this.paragraphGap = 12,
@@ -3413,6 +3494,8 @@ class _ScrollReader extends StatefulWidget {
 
   /// 人名高亮颜色。
   final Color nameColor;
+  final List<ReaderAnnotation> Function(int chapter) annotationsForChapter;
+  final bool darkPaper;
   final double marginH;
   final double topReserve;
   final double bottomReserve;
@@ -3431,6 +3514,10 @@ class _ScrollReader extends StatefulWidget {
   final VoidCallback? onNeedPrev;
 
   final VoidCallback onToggleBars;
+
+  /// 长按段落时触发（用于划线 / 批注 / 金句卡片 / 问小樱）。
+  final void Function(int chapter, int offset, String paragraph)?
+  onLongPressParagraph;
 
   /// 段间距（px，见 [AppPrefs.paragraphSpacing]）。
   final double paragraphGap;
@@ -3752,14 +3839,24 @@ class _ScrollReaderState extends State<_ScrollReader> {
             key: key,
             behavior: HitTestBehavior.opaque,
             onTap: widget.onToggleBars,
+            onLongPress: widget.onLongPressParagraph == null
+                ? null
+                : () => widget.onLongPressParagraph!(
+                    _paraChapter[index],
+                    _paraOffset[index],
+                    paragraph,
+                  ),
             child: Padding(
               // 段间距可调（用户反馈：段与段之间的空隙太大/太小）
               padding: EdgeInsets.only(bottom: widget.paragraphGap),
-              child: _NameRichText(
+              child: _ReaderRichText(
                 text: paragraph,
+                baseOffset: _paraOffset[index],
                 style: widget.style,
                 color: widget.nameColor,
                 pattern: widget.namePattern,
+                annotations: widget.annotationsForChapter(_paraChapter[index]),
+                darkPaper: widget.darkPaper,
                 scaler: TextScaler.noScaling,
               ),
             ),
@@ -3826,61 +3923,26 @@ class BookImage extends StatelessWidget {
     final file = File('$d/$name');
     if (!file.existsSync()) return placeholder;
 
-    return Image.file(
-      file,
-      fit: BoxFit.contain,
-      errorBuilder: (_, _, _) => placeholder,
-      frameBuilder: (_, child, frame, wasSync) {
-        if (wasSync || frame != null) return child;
-        return placeholder;
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ReaderImageViewerPage.file(file, caption: name),
+          ),
+        );
       },
-    );
-  }
-}
-
-// ==================== 全书进度滑杆 ====================
-
-class _BookSlider extends StatefulWidget {
-  const _BookSlider({required this.progress, required this.onJump});
-
-  final double progress;
-  final ValueChanged<double> onJump;
-
-  @override
-  State<_BookSlider> createState() => _BookSliderState();
-}
-
-class _BookSliderState extends State<_BookSlider> {
-  double? _dragging;
-
-  @override
-  Widget build(BuildContext context) {
-    final value = _dragging ?? widget.progress.clamp(0.0, 1.0);
-    return Row(
-      children: [
-        Expanded(
-          child: Slider(
-            value: value,
-            onChanged: (v) => setState(() => _dragging = v),
-            onChangeEnd: (v) {
-              setState(() => _dragging = null);
-              widget.onJump(v);
-            },
-          ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.file(
+          file,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) => placeholder,
+          frameBuilder: (_, child, frame, wasSync) {
+            if (wasSync || frame != null) return child;
+            return placeholder;
+          },
         ),
-        SizedBox(
-          width: 44,
-          child: Text(
-            '${(value * 100).round()}%',
-            textAlign: TextAlign.end,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

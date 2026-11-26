@@ -12,6 +12,7 @@ import 'package:xml/xml.dart' as xml;
 import 'analyze_rule.dart';
 import 'analyze_url.dart';
 import 'http_client.dart';
+import 'js_engine.dart';
 import 'models.dart';
 import 'source_store.dart';
 
@@ -212,16 +213,14 @@ class OnlineRepo {
       if (rawUrl == null || rawUrl.trim().isEmpty) {
         throw const FormatException('未配置搜索地址（searchUrl）');
       }
-      // JS 生成地址（`@js:` / `<js>`）当前引擎不执行 JS：给出明确原因，
-      // 而不是把它当普通 URL 去请求（那样只会得到含糊的「无效的地址」）。
-      final probe = rawUrl.trim().toLowerCase();
-      if (probe.startsWith('@js:') || probe.startsWith('<js>')) {
-        throw const FormatException('该源用 JS 生成搜索地址，当前版本暂不支持 JS 书源');
-      }
-      final req = buildRequest(rawUrl, source.bookSourceUrl, {
-        'key': key,
-        'page': page,
-      });
+      final req = await buildRequestAsync(
+        rawUrl,
+        source.bookSourceUrl,
+        {'key': key, 'page': page},
+        sourceKey: source.bookSourceUrl,
+        cookieBridge: _client,
+        httpAsync: _client.asJsAsyncHttpCallback(timeout: perSourceTimeout),
+      );
       final headers = _mergeHeaders(source, req.options);
       final method = (req.options['method']?.toString() ?? 'GET').toUpperCase();
       final charset = req.options['charset']?.toString();
@@ -233,7 +232,14 @@ class OnlineRepo {
       SourceResponse resp;
       if (method == 'POST') {
         final bodyTpl = req.options['body']?.toString() ?? '';
-        final body = renderUrlTemplate(bodyTpl, {'key': key, 'page': page});
+        final body = await renderUrlTemplateAsync(
+          bodyTpl,
+          {'key': key, 'page': page},
+          baseUrl: source.bookSourceUrl,
+          sourceKey: source.bookSourceUrl,
+          cookieBridge: _client,
+          httpAsync: _client.asJsAsyncHttpCallback(timeout: perSourceTimeout),
+        );
         resp = await _client.post(
           req.url,
           headers: headers,
@@ -254,7 +260,12 @@ class OnlineRepo {
       if (!resp.ok) {
         throw SourceHttpException('HTTP ${resp.statusCode}');
       }
-      final books = parseSearchPage(source, resp.body);
+      final books = await parseSearchPageAsync(
+        source,
+        resp.body,
+        key: key,
+        page: page,
+      );
       return SourceSearchResult(
         source: source,
         books: books,
@@ -281,21 +292,94 @@ class OnlineRepo {
     }
   }
 
-  /// 解析搜索结果页 → [SearchBook] 列表。
-  List<SearchBook> parseSearchPage(BookSource source, String body) {
+  /// 解析搜索结果页 → [SearchBook] 列表（同步版，支持 CSS/JSON/XPath/正则与同步 JS）。
+  List<SearchBook> parseSearchPage(
+    BookSource source,
+    String body, {
+    String key = '',
+    int page = 1,
+    List<String>? jsLogs,
+  }) {
     final rule = source.searchRule;
     if (rule == null) return const [];
     final listRule = (rule.bookList ?? '').trim();
     if (listRule.isEmpty) return const [];
-    // JS 解析列表（`<js>…</js>` / `@js:`）当前引擎不执行 JS：明确告知，
-    // 避免界面只显示「没有搜索结果」让人以为是站点挂了。
-    final listProbe = listRule.toLowerCase();
-    if (listProbe.startsWith('<js>') || listProbe.startsWith('@js:')) {
-      throw const FormatException('该书源用 JS 解析搜索结果，当前版本暂不支持 JS 书源');
-    }
 
-    final engine = AnalyzeRule(body, baseUrl: source.bookSourceUrl);
+    final engine = AnalyzeRule(
+      body,
+      baseUrl: source.bookSourceUrl,
+      sourceKey: source.bookSourceUrl,
+      key: key,
+      page: page,
+      cookieBridge: _client,
+      jsLogs: jsLogs,
+    );
     final items = engine.getRawList(listRule);
+    return _extractSearchBooksSync(source, rule, engine, items);
+  }
+
+  /// 解析搜索结果页 → [SearchBook] 列表（异步版，支持 JS 内 `java.ajax`/`java.get`/`java.post`）。
+  Future<List<SearchBook>> parseSearchPageAsync(
+    BookSource source,
+    String body, {
+    String key = '',
+    int page = 1,
+    List<String>? jsLogs,
+  }) async {
+    final rule = source.searchRule;
+    if (rule == null) return const [];
+    final listRule = (rule.bookList ?? '').trim();
+    if (listRule.isEmpty) return const [];
+
+    final engine = AnalyzeRule(
+      body,
+      baseUrl: source.bookSourceUrl,
+      sourceKey: source.bookSourceUrl,
+      key: key,
+      page: page,
+      cookieBridge: _client,
+      httpAsync: _client.asJsAsyncHttpCallback(timeout: perSourceTimeout),
+      jsLogs: jsLogs,
+    );
+    final items = await engine.getRawListAsync(listRule);
+    final books = <SearchBook>[];
+    for (final item in items) {
+      if (!(item is dom.Element || item is xml.XmlElement || item is Map)) {
+        continue;
+      }
+      final name = await _fieldAsync(engine, rule.name, item);
+      if (name == null || name.isEmpty) continue;
+      final bookUrlRaw = await _fieldAsync(engine, rule.bookUrl, item);
+      final coverRaw = await _fieldAsync(engine, rule.coverUrl, item);
+      books.add(
+        SearchBook(
+          origin: source.bookSourceUrl,
+          originName: source.bookSourceName,
+          name: name,
+          author: await _fieldAsync(engine, rule.author, item),
+          kind: await _fieldAsync(engine, rule.kind, item),
+          intro: await _fieldAsync(engine, rule.intro, item),
+          coverUrl: coverRaw == null
+              ? null
+              : resolveUrl(coverRaw, source.bookSourceUrl),
+          bookUrl: bookUrlRaw == null
+              ? null
+              : resolveUrl(bookUrlRaw, source.bookSourceUrl),
+          latestChapterTitle: await _fieldAsync(engine, rule.lastChapter, item),
+          time: await _fieldAsync(engine, rule.updateTime, item),
+          wordCount: await _fieldAsync(engine, rule.wordCount, item),
+        ),
+      );
+    }
+    return books;
+  }
+
+  List<SearchBook> _extractSearchBooksSync(
+    BookSource source,
+    SearchRule rule,
+    AnalyzeRule engine,
+    List<Object> items,
+  ) {
     final books = <SearchBook>[];
     for (final item in items) {
       // 只处理可继续求值的上下文：DOM 元素 / XML 节点 / JSON 对象
@@ -336,6 +420,17 @@ class OnlineRepo {
     return (v == null || v.isEmpty) ? null : v;
   }
 
+  Future<String?> _fieldAsync(
+    AnalyzeRule engine,
+    String? rule,
+    Object item,
+  ) async {
+    final r = rule?.trim();
+    if (r == null || r.isEmpty) return null;
+    final v = await engine.getStringAsync(r, ctx: item);
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
   // ==================== 发现页（exploreUrl / ruleExplore） ====================
 
   /// 解析书源的 exploreUrl → 分类列表。
@@ -359,11 +454,17 @@ class OnlineRepo {
     final raw = source.exploreUrl?.trim();
     if (raw == null || raw.isEmpty) return const [];
 
-    // JS 脚本：无法静态解析
-    if (raw.startsWith('@js:') ||
-        raw.startsWith('<js>') ||
-        raw.startsWith('@JS:')) {
-      return const [];
+    // JS 脚本：使用 LegadoJsEngine 动态生成分类（JSON 数组或行格式）
+    if (LegadoJsEngine.containsJs(raw)) {
+      final rendered = AnalyzeRule(
+        '',
+        baseUrl: source.bookSourceUrl,
+        sourceKey: source.bookSourceUrl,
+      ).getString(raw);
+      if (rendered == null || rendered.trim().isEmpty) return const [];
+      final t = rendered.trim();
+      if (t.startsWith('[')) return _parseJsonCategories(t);
+      return _parseLineCategories(t);
     }
 
     // JSON 数组格式
@@ -478,12 +579,13 @@ class OnlineRepo {
     // ExploreRule 与 SearchRule 字段同名，这里统一取字段
     final listRule = _exploreField(rule, 'bookList');
     if (listRule == null || listRule.trim().isEmpty) return const [];
-    final exploreProbe = listRule.trim().toLowerCase();
-    if (exploreProbe.startsWith('<js>') || exploreProbe.startsWith('@js:')) {
-      throw const FormatException('该分类用 JS 解析书单，当前版本暂不支持 JS 书源');
-    }
 
-    final engine = AnalyzeRule(body, baseUrl: source.bookSourceUrl);
+    final engine = AnalyzeRule(
+      body,
+      baseUrl: source.bookSourceUrl,
+      sourceKey: source.bookSourceUrl,
+      cookieBridge: _client,
+    );
     final items = engine.getRawList(listRule);
     final books = <SearchBook>[];
     for (final item in items) {

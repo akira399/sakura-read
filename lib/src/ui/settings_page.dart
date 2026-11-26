@@ -1,20 +1,21 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
-import '../platform/display_service.dart';
-import '../app_info.dart';
+import '../core/icons/sakura_icons.dart';
+import '../core/motion/sakura_motion.dart';
+import '../core/theme/sakura_layout.dart';
+import '../core/theme/sakura_tokens.dart';
 import '../data/book_store.dart';
-import '../data/pet_guide.dart';
 import '../data/pet_store.dart';
 import '../data/prefs.dart';
+import '../data/stats_store.dart';
 import '../data/tts_voice_catalog.dart';
 import '../data/tts_voice_store.dart';
-import '../data/stats_store.dart';
-import '../platform/native_bridge.dart';
-import '../platform/tts_service.dart';
-import '../platform/url_launcher.dart';
-import '../platform/update_service.dart';
+import '../features/book_source/replace_rule_store.dart';
+import '../features/book_source/replace_rules_page.dart';
+import '../features/settings/appearance_studio_page.dart';
+import '../features/settings/reading_defaults_page.dart';
+import '../features/settings/system_about_page.dart';
+import '../features/settings/tts_settings_page.dart';
 import '../source/source_store.dart';
 import '../util/format.dart';
 import 'ai_chat_page.dart';
@@ -22,13 +23,16 @@ import 'ai_settings_page.dart';
 import 'backup_page.dart';
 import 'legado_import_page.dart';
 import 'reader/reader_page.dart';
-import 'reader/reader_settings_panel.dart';
 import 'source/source_manager_page.dart';
 import 'stats_page.dart';
-import 'update_dialog.dart';
-import 'widgets/cute.dart';
 import 'widgets/pet_overlay.dart';
 
+/// 设置 2.5 主控台（清爽分组枢纽 + 小樱伴读名片 + 全风格联动）。
+///
+/// 摒弃旧版冗长堆叠开关列表与悬浮遮挡球：
+/// - 顶部独立安全区顶栏内置「日间 / 夜间」一键切换胶囊，绝不与状态栏重叠；
+/// - 顶部保留原版小樱桌宠立绘的「伴读名片」入口；
+/// - 4 组轻盈分类条目直达所有深度设置页与功能面板。
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
@@ -48,1612 +52,1135 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  int? _cacheBytes;
-
-  /// 手动检查更新进行中（按钮转圈、避免重复点击）。
-  bool _checkingUpdate = false;
-
-  /// 设备上可用的朗读引擎（懒加载）。
-  List<String>? _ttsEngines;
-
-  /// 当前引擎的音色名列表（null = 还没加载）。
-  List<String>? _ttsVoices;
-
-  /// 音色加载中。
-  bool _ttsVoicesLoading = false;
-
-  /// 朗读引擎探测中。
-  bool _ttsProbing = false;
-
-  /// 上一次朗读自检结果（null = 未测过）。
-  String? _ttsProbeResult;
-  bool _ttsProbeOk = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(TtsVoiceStore.instance.refresh());
-    _loadCacheSize();
+  void _push(Widget page) {
+    Navigator.of(context)
+        .push(SakuraPageRoute(slideHorizontal: true, builder: (_) => page));
   }
 
-  Future<void> _loadCacheSize() async {
-    final size = await widget.store.cacheSizeBytes();
-    if (mounted) setState(() => _cacheBytes = size);
-  }
+  String _pageModeLabel(PageTurnMode mode) => switch (mode) {
+    PageTurnMode.slide => '平滑滑动',
+    PageTurnMode.cover => '覆盖翻页',
+    PageTurnMode.fade => '淡入淡出',
+    PageTurnMode.simulation => '拟真卷页',
+    PageTurnMode.scroll => '上下滚动',
+  };
 
-  /// 快速切换日间 / 夜间模式（阅读背景与全局主题同步；设置页悬浮按钮）。
-  void _toggleTheme() {
-    final prefs = widget.prefs;
-    final effectiveDark = switch (prefs.themeMode) {
-      ThemeMode.dark => true,
-      ThemeMode.light => false,
-      _ => MediaQuery.platformBrightnessOf(context) == Brightness.dark,
-    };
-    prefs.setNightMode(!effectiveDark);
-  }
-
-  /// 「语音包」区块：内置音色 + 可下载的语音包，多说话人的还能挑音色。
-  ///
-  /// 用户反馈「语音模型应该是选择下载的，不是打在包里」——所以除了随包的
-  /// 超文，其余都是点了才下载、可单独删除。
-  Widget _voicePackSection(BuildContext context, ColorScheme scheme) {
-    final store = TtsVoiceStore.instance;
-    return AnimatedBuilder(
-      animation: store,
-      builder: (context, _) {
-        final currentId = widget.prefs.ttsVoicePack;
-        final current = ttsVoicePackById(currentId) ?? builtinVoicePack;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.graphic_eq_rounded,
-                  size: 18,
-                  color: scheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '语音包',
-                  style: TextStyle(fontSize: 14, color: scheme.onSurface),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '内置只有一个音色，想要男声 / 女声自己下载',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            for (final pack in ttsVoiceCatalog)
-              _voicePackTile(context, scheme, store, pack, currentId),
-            if (current.isMultiSpeaker) ...[
-              const SizedBox(height: 10),
-              Text(
-                '音色（共 ${current.speakerCount} 个说话人，先挑几个常用的）',
-                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  for (final preset in current.presets)
-                    ChoiceChip(
-                      label: Text(
-                        preset.label,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      selected: widget.prefs.ttsVoiceSid == preset.sid,
-                      onSelected: (_) {
-                        widget.prefs.setTtsVoiceSid(preset.sid);
-                        unawaited(
-                          TtsService.instance.setVoicePack(
-                            current.id,
-                            preset.sid,
-                          ),
-                        );
-                        setState(() {});
-                      },
-                    ),
-                ],
-              ),
-            ],
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _voicePackTile(
-    BuildContext context,
-    ColorScheme scheme,
-    TtsVoiceStore store,
-    TtsVoicePack pack,
-    String currentId,
-  ) {
-    final installed = store.isInstalled(pack.id);
-    final downloading = store.isDownloading(pack.id);
-    final active = currentId == pack.id;
-    final error = store.errorOf(pack.id);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(12),
-        border: active
-            ? Border.all(color: scheme.primary.withValues(alpha: 0.55))
-            : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          pack.name,
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSurface,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          pack.bundled
-                              ? '内置'
-                              : '${pack.sizeMb.toStringAsFixed(0)} MB',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        if (active) ...[
-                          const SizedBox(width: 6),
-                          Icon(
-                            Icons.check_circle_rounded,
-                            size: 14,
-                            color: scheme.primary,
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      pack.tagline,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (downloading)
-                SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.4,
-                    value: store.progressOf(pack.id) == 0
-                        ? null
-                        : store.progressOf(pack.id),
-                  ),
-                )
-              else if (installed)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (!active)
-                      TextButton(
-                        onPressed: () => _selectVoicePack(pack),
-                        child: const Text('使用', style: TextStyle(fontSize: 12)),
-                      ),
-                    if (!pack.bundled)
-                      IconButton(
-                        tooltip: '删除这个语音包',
-                        onPressed: store.downloadingId == null
-                            ? () async {
-                                await store.remove(pack.id);
-                                if (widget.prefs.ttsVoicePack == pack.id) {
-                                  widget.prefs.setTtsVoicePack(
-                                    builtinVoicePack.id,
-                                  );
-                                  widget.prefs.setTtsVoiceSid(0);
-                                  unawaited(
-                                    TtsService.instance.setVoicePack(
-                                      builtinVoicePack.id,
-                                      0,
-                                    ),
-                                  );
-                                }
-                                if (mounted) setState(() {});
-                              }
-                            : null,
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          size: 18,
-                        ),
-                      ),
-                  ],
-                )
-              else
-                FilledButton.tonal(
-                  onPressed: store.downloadingId == null
-                      ? () => _downloadVoicePack(pack)
-                      : null,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    minimumSize: const Size(0, 32),
-                  ),
-                  child: const Text('下载', style: TextStyle(fontSize: 12)),
-                ),
-            ],
-          ),
-          if (downloading) ...[
-            const SizedBox(height: 8),
-            LinearProgressIndicator(
-              value: store.progressOf(pack.id) == 0
-                  ? null
-                  : store.progressOf(pack.id),
-              minHeight: 4,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              store.progressOf(pack.id) >= 0.99
-                  ? '下载完成，正在解压…'
-                  : '下载中 ${(store.progressOf(pack.id) * 100).toStringAsFixed(0)}%',
-              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-            ),
-          ],
-          if (error != null) ...[
-            const SizedBox(height: 6),
-            Text(error, style: TextStyle(fontSize: 11.5, color: scheme.error)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Future<void> _downloadVoicePack(TtsVoicePack pack) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await TtsVoiceStore.instance.install(pack);
-    if (!mounted) return;
-    if (ok) {
-      await _selectVoicePack(pack);
-      messenger.showSnackBar(SnackBar(content: Text('「${pack.name}」装好了，已切换')));
-    } else {
-      setState(() {});
+  String _aiSummary(AppPrefs prefs) {
+    if (!prefs.aiConfigured) return '尚未配置模型或密钥 · 点此接入';
+    if (prefs.aiUseLocalModel) {
+      final local = prefs.aiLocalModelId.trim();
+      return local.isEmpty ? '已启用本地离线模型' : '本地模型：$local';
     }
+    final model = prefs.aiModel.trim();
+    return model.isEmpty ? '已配置云端模型 · 可随时对话' : '当前模型：$model';
   }
 
-  Future<void> _selectVoicePack(TtsVoicePack pack) async {
-    widget.prefs.setTtsVoicePack(pack.id);
-    widget.prefs.setTtsVoiceSid(pack.defaultSid);
-    await TtsService.instance.setVoicePack(pack.id, pack.defaultSid);
-    if (mounted) setState(() {});
+  String _ttsSummary(AppPrefs prefs) {
+    final pack = ttsVoicePackById(prefs.ttsVoicePack) ?? builtinVoicePack;
+    final role = prefs.ttsRolePlay ? ' · AI 分角色开启' : '';
+    return '音色「${pack.name}」$role';
   }
 
   @override
   Widget build(BuildContext context) {
+    final listenables = <Listenable>[
+      widget.prefs,
+      widget.store,
+      widget.sourceStore,
+      widget.statsStore,
+      TtsVoiceStore.instance,
+      ReplaceRuleStore.shared,
+      if (PetStore.shared != null) PetStore.shared!,
+      if (BookmarkStore.shared != null) BookmarkStore.shared!,
+    ];
+
     return AnimatedBuilder(
-      animation: widget.prefs,
+      animation: Listenable.merge(listenables),
       builder: (context, _) {
+        final sakura = context.sakura;
+        final scheme = Theme.of(context).colorScheme;
         final isDark = Theme.of(context).brightness == Brightness.dark;
+        final preset = widget.prefs.visualStyle;
+        final pet = PetStore.shared;
+        final bookmarks = BookmarkStore.shared;
+
+        final topTint = switch (preset) {
+          VisualStylePreset.sakuraAtelier => scheme.primary.withAlpha(
+            isDark ? 28 : 22,
+          ),
+          VisualStylePreset.liquidGlass => Color.lerp(
+            scheme.primary,
+            const Color(0xFF7CA7D9),
+            0.4,
+          )!.withAlpha(isDark ? 26 : 18),
+          VisualStylePreset.kyotoWashi => const Color(
+            0xFFD9B282,
+          ).withAlpha(isDark ? 22 : 24),
+          VisualStylePreset.animePop => scheme.primary.withAlpha(
+            isDark ? 24 : 14,
+          ),
+        };
+
+        final bottomPad = MediaQuery.paddingOf(context).bottom + 104;
+        final isWide = SakuraLayout.isWide(context);
+        final hInsets = SakuraLayout.horizontalInsets(context);
+
+        final heroCard = _MascotProfileHeroCard(
+          pet: pet,
+          statsStore: widget.statsStore,
+          bookCount: widget.store.books.length,
+          preset: preset,
+          onOpenPanel: pet == null ? null : () => showPetPanel(context, pet),
+          onOpenQuickSheet: () => _showPetControlsSheet(context),
+        );
+
+        final visualSection = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const _SectionTitle(
+              title: '书房视觉与排版',
+              caption: '视觉预设 · 默认排版 · 离线听书',
+            ),
+            const SizedBox(height: 8),
+            _SettingsGroupCard(
+              preset: preset,
+              children: [
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.appearance,
+                  badgeColor: scheme.primary,
+                  title: '书房风格与外观',
+                  subtitle:
+                      '${preset.shortLabel} · ${widget.prefs.shelfPlankStyle.shortLabel}',
+                  onTap: () => _push(AppearanceStudioPage(prefs: widget.prefs)),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.typography,
+                  badgeColor: const Color(0xFF7B61FF),
+                  title: '阅读默认排版',
+                  subtitle:
+                      '${widget.prefs.fontSize.toInt()}pt · 行距 ${widget.prefs.lineHeight.toStringAsFixed(1)} · ${_pageModeLabel(widget.prefs.pageMode)}',
+                  onTap: () => _push(ReadingDefaultsPage(prefs: widget.prefs)),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.audio,
+                  badgeColor: const Color(0xFF2B8A7E),
+                  title: '听书与离线语音',
+                  subtitle: _ttsSummary(widget.prefs),
+                  onTap: () => _push(TtsSettingsPage(prefs: widget.prefs)),
+                ),
+              ],
+            ),
+          ],
+        );
+
+        final companionSection = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const _SectionTitle(
+              title: '小樱与 AI 伴读',
+              caption: '桌面伴读宠物 · AI 模型 · 对话手账',
+            ),
+            const SizedBox(height: 8),
+            _SettingsGroupCard(
+              preset: preset,
+              children: [
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.mascot,
+                  badgeColor: const Color(0xFFE05D7C),
+                  title: '小樱桌宠与看板娘',
+                  subtitle: pet == null
+                      ? '开屏动画${widget.prefs.showSplashAnimation ? '开启' : '关闭'}'
+                      : pet.enabled
+                      ? '已启用 · Lv.${pet.level} ${pet.levelName}'
+                      : '桌宠已收起 · 点此唤醒',
+                  onTap: () => _showPetControlsSheet(context),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.aiCompanion,
+                  badgeColor: const Color(0xFF5A6EE8),
+                  title: 'AI 模型与提示词',
+                  subtitle: _aiSummary(widget.prefs),
+                  onTap: () => _push(AiSettingsPage(prefs: widget.prefs)),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.aiCompanion,
+                  badgeColor: const Color(0xFF9E4784),
+                  title: 'AI 书伴对话',
+                  subtitle: '全库检索 · 角色访谈 · 防剧透记忆',
+                  onTap: () => _push(
+                    AiChatPage(
+                      store: widget.store,
+                      prefs: widget.prefs,
+                      statsStore: widget.statsStore,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+
+        final sourceSection = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const _SectionTitle(
+              title: '书源与阅读记录',
+              caption: 'Legado 书源 · 净化规则 · 统计与书签',
+            ),
+            const SizedBox(height: 8),
+            _SettingsGroupCard(
+              preset: preset,
+              children: [
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.sources,
+                  badgeColor: const Color(0xFFD97736),
+                  title: '书源管理与 AI 写源',
+                  subtitle:
+                      '已启用 ${widget.sourceStore.enabledCount} / ${widget.sourceStore.sources.length} 条兼容书源',
+                  onTap: () =>
+                      _push(SourceManagerPage(store: widget.sourceStore)),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.purify,
+                  badgeColor: const Color(0xFF3E8E7E),
+                  title: '正文净化规则',
+                  subtitle:
+                      '已启用 ${ReplaceRuleStore.shared.enabledCount} / ${ReplaceRuleStore.shared.rules.length} 条替换规则',
+                  onTap: () => _push(const ReplaceRulesPage()),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.typography,
+                  badgeColor: const Color(0xFF4F7CAC),
+                  title: '阅读统计与周报',
+                  subtitle:
+                      '累计 ${widget.statsStore.readDays} 天 · 连续 ${widget.statsStore.streak} 天 · 完本 ${widget.statsStore.finishedBooks}',
+                  onTap: () => _push(StatsPage(statsStore: widget.statsStore)),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.about,
+                  badgeColor: const Color(0xFFC25970),
+                  title: '书签与批注',
+                  subtitle: '共保存 ${bookmarks?.count ?? 0} 条阅读书签与摘录',
+                  onTap: () => _showBookmarks(context, bookmarks),
+                ),
+              ],
+            ),
+          ],
+        );
+
+        final systemSection = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const _SectionTitle(
+              title: '数据与系统',
+              caption: '备份恢复 · 阅读 3.0 迁移 · 性能与关于',
+            ),
+            const SizedBox(height: 8),
+            _SettingsGroupCard(
+              preset: preset,
+              children: [
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.backup,
+                  badgeColor: const Color(0xFF3B7A9E),
+                  title: '备份与 WebDAV 同步',
+                  subtitle: '本地快照导出 / 云端恢复设置与进度',
+                  onTap: () => _push(BackupPage(prefs: widget.prefs)),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.sources,
+                  badgeColor: const Color(0xFF8C6239),
+                  title: '阅读 3.0 数据迁移',
+                  subtitle: '导入 Legado 书架、书源、书签与阅读记录',
+                  onTap: () => _push(
+                    LegadoImportPage(
+                      prefs: widget.prefs,
+                      shelf: widget.store,
+                      sources: widget.sourceStore,
+                    ),
+                  ),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.performance,
+                  badgeColor: const Color(0xFF6B5B95),
+                  title: '性能、存储与关于',
+                  subtitle:
+                      '并发 ${widget.prefs.searchConcurrency} · 高刷${widget.prefs.highRefreshRate ? '开启' : '关闭'}',
+                  onTap: () => _push(
+                    SystemAboutPage(prefs: widget.prefs, store: widget.store),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+
         return Scaffold(
-          // 与书架同一个坑：底栏 extendBody 盖住正文，默认 FAB 会压在「设置」格上。
-          floatingActionButton: Padding(
-            padding: const EdgeInsets.only(bottom: 96),
-            child: FloatingActionButton.small(
-              // 与书架的 FAB 区分（两者同时在 IndexedStack 中存活，避免 Hero tag 冲突）
-              heroTag: 'settings-theme-fab',
-              onPressed: _toggleTheme,
-              tooltip: isDark ? '切换到浅色模式' : '切换到深色模式',
-              child: Icon(
-                isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+          backgroundColor: sakura.canvas,
+          body: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color.alphaBlend(topTint, sakura.canvas),
+                  sakura.canvas,
+                ],
+                stops: const [0.0, 0.36],
               ),
             ),
-          ),
-          body: ListView(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              MediaQuery.paddingOf(context).top + 18,
-              16,
-              100,
+            child: Column(
+              children: [
+                _SettingsTopHeader(
+                  prefs: widget.prefs,
+                  isDark: isDark,
+                  preset: preset,
+                  onToggleTheme: () {
+                    widget.prefs.setThemeMode(
+                      isDark ? ThemeMode.light : ThemeMode.dark,
+                    );
+                  },
+                ),
+                Expanded(
+                  child: ListView(
+                    padding: EdgeInsets.fromLTRB(
+                      hInsets.left,
+                      8,
+                      hInsets.right,
+                      bottomPad,
+                    ),
+                    children: [
+                      if (isWide)
+                        Center(
+                          heightFactor: 1.0,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxWidth: SakuraLayout.contentMaxWidth,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      heroCard,
+                                      const SizedBox(height: 18),
+                                      visualSection,
+                                      const SizedBox(height: 18),
+                                      companionSection,
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 18),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      sourceSection,
+                                      const SizedBox(height: 18),
+                                      systemSection,
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      else ...[
+                        heroCard,
+                        const SizedBox(height: 18),
+                        visualSection,
+                        const SizedBox(height: 18),
+                        companionSection,
+                        const SizedBox(height: 18),
+                        sourceSection,
+                        const SizedBox(height: 18),
+                        systemSection,
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
-            children: [
-              _title(context),
-              const SizedBox(height: 16),
-              _appearanceCard(context),
-              const SizedBox(height: 14),
-              _readingCard(context),
-              const SizedBox(height: 14),
-              _ttsCard(context),
-              const SizedBox(height: 14),
-              _petCard(context),
-              const SizedBox(height: 14),
-              _performanceCard(context),
-              const SizedBox(height: 14),
-              _statsCard(context),
-              const SizedBox(height: 14),
-              _aiCard(context),
-              const SizedBox(height: 14),
-              _sourceCard(context),
-              const SizedBox(height: 14),
-              _storageCard(context),
-              const SizedBox(height: 14),
-              _dataCard(context),
-              const SizedBox(height: 14),
-              _helpCard(context),
-              const SizedBox(height: 14),
-              _updateCard(context),
-              const SizedBox(height: 14),
-              _aboutCard(context),
-            ],
           ),
         );
       },
     );
   }
 
-  Widget _title(BuildContext context) {
+  Future<void> _showPetControlsSheet(BuildContext context) async {
+    final pet = PetStore.shared;
+    final sakura = context.sakura;
     final scheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        const PetalLogo(size: 42),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '设置',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-            ),
-            Text(
-              '把阅读体验调成你喜欢的样子',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
 
-  Widget _appearanceCard(BuildContext context) {
-    final prefs = widget.prefs;
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.palette_rounded, title: '外观'),
-          const SizedBox(height: 14),
-          SegmentedButton<ThemeMode>(
-            segments: const [
-              ButtonSegment(value: ThemeMode.system, label: Text('跟随系统')),
-              ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
-              ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
-            ],
-            selected: {prefs.themeMode},
-            onSelectionChanged: (s) => prefs.setThemeMode(s.first),
-            showSelectedIcon: false,
-          ),
-          const SizedBox(height: 6),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: prefs.showSplashAnimation,
-            onChanged: prefs.setShowSplashAnimation,
-            secondary: const Icon(Icons.auto_stories_rounded),
-            title: const Text('启动动画', style: TextStyle(fontSize: 14)),
-            subtitle: const Text(
-              '关闭后下次启动直接进入应用',
-              style: TextStyle(fontSize: 12),
-            ),
-          ),
-          // 用户反馈「调来调去都没有磨砂」：以前只有半透明蒙层，没有真模糊
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: prefs.frostedGlass,
-            onChanged: prefs.setFrostedGlass,
-            secondary: const Icon(Icons.blur_on_rounded),
-            title: const Text('磨砂玻璃', style: TextStyle(fontSize: 14)),
-            subtitle: const Text(
-              '阅读页顶栏 / 底栏用实时模糊，透出下面的正文；低端机上会略耗电',
-              style: TextStyle(fontSize: 12),
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            '主题色',
-            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              for (var i = 0; i < AppPrefs.accents.length; i++)
-                Padding(
-                  padding: const EdgeInsets.only(right: 14),
-                  child: GestureDetector(
-                    onTap: () => prefs.setAccentIndex(i),
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: AppPrefs.accents[i],
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: prefs.accentIndex == i
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.transparent,
-                          width: 3,
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: sakura.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        return AnimatedBuilder(
+          animation: Listenable.merge([widget.prefs, ?pet]),
+          builder: (sheetCtx, _) {
+            return SafeArea(
+              top: false,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.85,
+                ),
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: sakura.accentSoft,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Image.asset(
+                                'assets/images/pet_read.png',
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '小樱桌宠与看板娘',
+                                    style: Theme.of(sheetCtx)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                  Text(
+                                    pet == null
+                                        ? '原版立绘伴读设定'
+                                        : 'Lv.${pet.level} ${pet.levelName} · 好感度 ${pet.affinity}',
+                                    style: Theme.of(sheetCtx)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(color: sakura.inkSecondary),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (pet != null)
+                              FilledButton.tonal(
+                                onPressed: () {
+                                  Navigator.of(sheetCtx).pop();
+                                  showPetPanel(context, pet);
+                                },
+                                child: const Text('互动面板'),
+                              ),
+                          ],
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppPrefs.accents[i].withValues(alpha: .45),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
+                        const SizedBox(height: 12),
+                        if (pet != null) ...[
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            activeTrackColor: scheme.primary,
+                            title: const Text('启用桌面小樱'),
+                            subtitle: const Text('在书架与各页面边缘贴靠陪伴'),
+                            value: pet.enabled,
+                            onChanged: pet.setEnabled,
+                          ),
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            activeTrackColor: scheme.primary,
+                            title: const Text('阅读器内伴读'),
+                            subtitle: const Text('看书时记录时长并适时陪伴'),
+                            value: pet.showPetInReader,
+                            onChanged: pet.setShowPetInReader,
+                          ),
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            activeTrackColor: scheme.primary,
+                            title: const Text('呼吸与拖拽微动效'),
+                            subtitle: const Text('关闭后保持静态展示以节省电量'),
+                            value: pet.motionEnabled,
+                            onChanged: pet.setMotionEnabled,
+                          ),
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            activeTrackColor: scheme.primary,
+                            title: const Text('静默模式'),
+                            subtitle: const Text('暂停主动冒泡气泡提醒'),
+                            value: pet.quiet,
+                            onChanged: pet.setQuiet,
                           ),
                         ],
-                      ),
-                      child: prefs.accentIndex == i
-                          ? const Icon(
-                              Icons.check_rounded,
-                              color: Colors.white,
-                              size: 18,
-                            )
-                          : null,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _readingCard(BuildContext context) {
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.menu_book_rounded, title: '阅读偏好'),
-          const SizedBox(height: 6),
-          Text(
-            '也可以在阅读界面点击屏幕中间，随时调整',
-            style: TextStyle(
-              fontSize: 11.5,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 10),
-          ReaderSettingsPanel(prefs: widget.prefs, petStore: PetStore.shared),
-        ],
-      ),
-    );
-  }
-
-  Widget _petCard(BuildContext context) {
-    final pet = PetStore.shared;
-    if (pet == null) return const SizedBox.shrink();
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.pets_rounded, title: '看板娘'),
-          AnimatedBuilder(
-            animation: pet,
-            builder: (_, _) => SwitchListTile(
-              title: const Text('显示桌宠'),
-              subtitle: const Text('可完全关闭；不会锁屏或强制互动'),
-              value: pet.enabled,
-              onChanged: pet.setEnabled,
-            ),
-          ),
-          const SizedBox(height: 6),
-          AnimatedBuilder(
-            animation: pet,
-            builder: (_, _) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: SizedBox(
-                width: 42,
-                height: 42,
-                child: Image.asset(
-                  'assets/images/pet_chibi.png',
-                  fit: BoxFit.contain,
-                ),
-              ),
-              title: Text(
-                '亲密度 Lv.${pet.level}「${pet.levelName}」',
-                style: const TextStyle(fontSize: 14),
-              ),
-              subtitle: Text(
-                '已互动 ${pet.interactions} 次 · 点心 '
-                '${kPetFoods.map((f) => pet.foodCount(f.id)).fold<int>(0, (a, b) => a + b)} 份',
-                style: const TextStyle(fontSize: 12),
-              ),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => showPetPanel(context, pet),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statsCard(BuildContext context) {
-    final bookmarkStore = BookmarkStore.shared;
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.insights_rounded, title: '阅读记录'),
-          const SizedBox(height: 6),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.timer_outlined),
-            title: const Text('阅读统计', style: TextStyle(fontSize: 14)),
-            subtitle: AnimatedBuilder(
-              animation: widget.statsStore,
-              builder: (_, _) => Text(
-                '累计 ${formatDuration(widget.statsStore.totalSeconds)} · '
-                '连续 ${widget.statsStore.streak} 天 · '
-                '读完 ${widget.statsStore.finishedBooks} 本',
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => StatsPage(statsStore: widget.statsStore),
-              ),
-            ),
-          ),
-          if (bookmarkStore != null)
-            AnimatedBuilder(
-              animation: bookmarkStore,
-              builder: (_, _) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.bookmark_border_rounded),
-                title: const Text('我的书签', style: TextStyle(fontSize: 14)),
-                subtitle: Text(
-                  bookmarkStore.count == 0
-                      ? '阅读时点底栏「书签」收藏精彩段落'
-                      : '共 ${bookmarkStore.count} 条书签',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _showBookmarks(context, bookmarkStore),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _aiCard(BuildContext context) {
-    final prefs = widget.prefs;
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.auto_awesome_rounded, title: 'AI 助手'),
-          const SizedBox(height: 6),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: CircleAvatar(
-              radius: 18,
-              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-              backgroundImage: const AssetImage('assets/images/pet_wave.png'),
-            ),
-            title: const Text('小樱 AI 助手', style: TextStyle(fontSize: 14)),
-            subtitle: Text(
-              prefs.aiConfigured
-                  ? '已配置 · ${prefs.aiModel}${prefs.aiIncludeReading ? ' · 可读取阅读数据' : ''}'
-                  : '还没配置接口，点右侧设置',
-              style: const TextStyle(fontSize: 12),
-            ),
-            trailing: IconButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => AiSettingsPage(prefs: prefs)),
-              ),
-              icon: const Icon(Icons.settings_outlined, size: 20),
-              tooltip: 'AI 设置',
-            ),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => AiChatPage(
-                  store: widget.store,
-                  prefs: prefs,
-                  statsStore: widget.statsStore,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 全量书签列表（跨书查看，点击删除）。
-  void _showBookmarks(BuildContext context, BookmarkStore store) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(sheetContext).height * 0.62,
-          child: AnimatedBuilder(
-            animation: store,
-            builder: (context, _) {
-              final items = store.items;
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.bookmark_border_rounded, size: 18),
-                        const SizedBox(width: 8),
-                        Text(
-                          '全部书签 · 共 ${items.length} 条',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          activeTrackColor: scheme.primary,
+                          title: const Text('启动看板娘开屏动画'),
+                          subtitle: const Text('保留原版看板娘启动画卷'),
+                          value: widget.prefs.showSplashAnimation,
+                          onChanged: widget.prefs.setShowSplashAnimation,
                         ),
                       ],
                     ),
                   ),
-                  Expanded(
-                    child: items.isEmpty
-                        ? const Center(
-                            child: Text(
-                              '还没有书签，去阅读界面收藏吧～',
-                              style: TextStyle(fontSize: 13),
-                            ),
-                          )
-                        : ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                            itemCount: items.length,
-                            separatorBuilder: (_, _) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final b = items[index];
-                              final book = widget.store.byId(b.bookId);
-                              final title = book == null
-                                  ? '（已删除的书）'
-                                  : book.title;
-                              return ListTile(
-                                dense: true,
-                                title: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  '${b.chapterTitle.isEmpty ? '第 ${b.chapterIndex + 1} 章' : b.chapterTitle}'
-                                  '${b.excerpt.isEmpty ? '' : '\n${b.excerpt}'}',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                trailing: IconButton(
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                    size: 18,
-                                  ),
-                                  tooltip: '删除',
-                                  onPressed: () => store.remove(b.id),
-                                ),
-                                onTap: book == null
-                                    ? null
-                                    : () {
-                                        Navigator.of(sheetContext).pop();
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => ReaderPage(
-                                              store: widget.store,
-                                              prefs: widget.prefs,
-                                              bookId: b.bookId,
-                                              chapterIndex: b.chapterIndex,
-                                              charOffset: b.charOffset,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _sourceCard(BuildContext context) {
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.cloud_outlined, title: '书源'),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.menu_book_rounded),
-            title: const Text('书源管理', style: TextStyle(fontSize: 14)),
-            subtitle: AnimatedBuilder(
-              animation: widget.sourceStore,
-              builder: (_, _) => Text(
-                widget.sourceStore.isEmpty
-                    ? '导入「阅读 3.0」格式的书源，搜遍全网小说'
-                    : '共 ${widget.sourceStore.sources.length} 个 · '
-                          '已启用 ${widget.sourceStore.enabledCount} 个',
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => SourceManagerPage(store: widget.sourceStore),
-              ),
-            ),
-          ),
-          // 用户反馈：「书源搜索能不能设置线程，搜索太慢了」——并发数可调
-          AnimatedBuilder(
-            animation: widget.prefs,
-            builder: (_, _) => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.speed_rounded),
-                  title: const Text('搜索并发数', style: TextStyle(fontSize: 14)),
-                  subtitle: Text(
-                    '同时搜索 ${widget.prefs.searchConcurrency} 个书源 · '
-                    '调大更快，弱网时容易失败',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-                Slider(
-                  value: widget.prefs.searchConcurrency.clamp(1, 32).toDouble(),
-                  min: 1,
-                  max: 32,
-                  divisions: 31,
-                  label: '${widget.prefs.searchConcurrency} 个',
-                  onChanged: (v) =>
-                      widget.prefs.setSearchConcurrency(v.round()),
-                ),
-                // 用户反馈「并发数改无上限可让用户选择」：滑杆到 32 之后
-                // 还能手填，最大 999。
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => _customConcurrency(context),
-                    icon: const Icon(Icons.tune_rounded, size: 18),
-                    label: const Text('自定义（最多 999）'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _storageCard(BuildContext context) {
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(
-            icon: Icons.cleaning_services_rounded,
-            title: '存储',
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.text_snippet_rounded),
-            title: const Text('EPUB 章节缓存', style: TextStyle(fontSize: 14)),
-            subtitle: Text(
-              _cacheBytes == null ? '计算中…' : formatBytes(_cacheBytes!),
-            ),
-          ),
-          OutlinedButton.icon(
-            onPressed: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              await widget.store.clearCache();
-              await _loadCacheSize();
-              if (!mounted) return;
-              messenger.showSnackBar(const SnackBar(content: Text('缓存已清空')));
-            },
-            icon: const Icon(Icons.delete_sweep_rounded, size: 18),
-            label: const Text('清除缓存'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 用户反馈：「后期考不考虑添加 WebDAV 或其他备份功能」「能把阅读的数据导进来吗」
-  Widget _dataCard(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.inventory_2_rounded, title: '数据'),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.backup_rounded),
-            title: const Text('备份与恢复', style: TextStyle(fontSize: 14)),
-            subtitle: Text(
-              widget.prefs.lastBackupAt.isEmpty
-                  ? '本地 zip 备份，也可以传到 WebDAV'
-                  : '上次备份：${widget.prefs.lastBackupAt.replaceFirst('T', ' ').split('.').first}',
-              style: const TextStyle(fontSize: 12),
-            ),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => BackupPage(prefs: widget.prefs),
-              ),
-            ),
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.move_to_inbox_rounded),
-            title: const Text('从「阅读」导入', style: TextStyle(fontSize: 14)),
-            subtitle: Text(
-              '读取「阅读 3.0」的备份文件，把书架搬过来',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => LegadoImportPage(
-                  prefs: widget.prefs,
-                  shelf: widget.store,
-                  sources: widget.sourceStore,
                 ),
               ),
-            ),
-          ),
-        ],
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
-  Widget _helpCard(BuildContext context) {
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.school_rounded, title: '帮助'),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.replay_rounded),
-            title: const Text('重看新手引导', style: TextStyle(fontSize: 14)),
-            subtitle: const Text(
-              '小樱再带你走一遍搜书、导入等功能',
-              style: TextStyle(fontSize: 12),
-            ),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: _replayGuide,
-          ),
-        ],
-      ),
-    );
-  }
+  Future<void> _showBookmarks(
+    BuildContext context,
+    BookmarkStore? store,
+  ) async {
+    final sakura = context.sakura;
+    if (store == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('书签服务尚未初始化')));
+      return;
+    }
 
-  /// 重看新手引导：先切回书架（主界面监听该信号），再请求引导层重播。
-  ///
-  /// 引导按设计只在首次启动自动出现一次；这是用户**主动重看**的入口，
-  /// 处理旧版本「已看过」标记导致升级后见不到引导的困惑。
-  void _replayGuide() {
-    final already = kPetGuideActive.value;
-    petGuideRequestReplay();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(already ? '小樱正在给你带路呢～' : '小樱马上就来找你～'),
-        duration: const Duration(seconds: 2),
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: sakura.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-    );
-  }
-
-  /// 朗读卡片：引擎选择 + 自检。
-  ///
-  /// 用户反馈「一加15 自带语音引擎，用不了朗读」：国产 ROM 的引擎有时
-  /// 不会被系统选为默认，需要能让用户**手动指定**并当场验证。
-  Widget _ttsCard(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final tts = TtsService.instance;
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(
-            icon: Icons.record_voice_over_rounded,
-            title: '朗读',
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '没声音？换一个语音引擎试试；系统没有引擎也能用「内置离线语音」',
-            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 8),
-          // 引擎选择
-          AnimatedBuilder(
-            animation: tts,
-            builder: (_, _) {
-              final engines = _ttsEngines;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (engines == null)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      leading: const Icon(Icons.memory_rounded, size: 20),
-                      title: const Text('语音引擎', style: TextStyle(fontSize: 14)),
-                      subtitle: Text(
-                        _ttsProbing ? '正在检测…' : '点击检测设备上的语音引擎',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      trailing: _ttsProbing
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.chevron_right_rounded),
-                      onTap: _ttsProbing ? null : _probeTtsEngines,
-                    )
-                  else ...[
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: DropdownButtonFormField<String>(
-                        initialValue: widget.prefs.ttsEngine,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: '语音引擎',
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
+      builder: (sheetCtx) {
+        return AnimatedBuilder(
+          animation: store,
+          builder: (sheetCtx, _) {
+            final items = store.items.reversed.toList();
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.65,
+              minChildSize: 0.4,
+              maxChildSize: 0.9,
+              builder: (_, controller) {
+                if (items.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SakuraIcon(
+                            glyph: SakuraGlyph.about,
+                            size: 36,
+                            color: sakura.inkSecondary,
                           ),
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: '',
-                            child: Text('系统默认（推荐）'),
+                          const SizedBox(height: 12),
+                          Text(
+                            '还没有保存书签或笔记',
+                            style: TextStyle(color: sakura.inkSecondary),
                           ),
-                          // 内置离线语音：系统没引擎时的兜底，永远可选
-                          const DropdownMenuItem(
-                            value: TtsService.builtinEngineId,
-                            child: Text('内置离线语音（无需安装）'),
-                          ),
-                          for (final e in engines)
-                            DropdownMenuItem(
-                              value: e,
-                              child: Text(
-                                _shortEngineName(e),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
                         ],
-                        onChanged: (v) => _changeTtsEngine(v ?? ''),
                       ),
                     ),
-                    if (engines.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.info_outline_rounded,
-                              size: 15,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                '这台设备没检测到系统语音引擎，可以直接用上面的「内置离线语音」；'
-                                '想用系统音色就点下面的按钮去安装。',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  height: 1.5,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                  // 音色（男声 / 女声）：系统引擎的 voices 列表
-                  if (engines != null &&
-                      engines.isNotEmpty &&
-                      widget.prefs.ttsEngine != TtsService.builtinEngineId) ...[
-                    const SizedBox(height: 8),
-                    if (_ttsVoices == null)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        leading: const Icon(Icons.record_voice_over, size: 20),
-                        title: const Text(
-                          '音色（男声 / 女声）',
-                          style: TextStyle(fontSize: 14),
-                        ),
-                        subtitle: const Text(
-                          '点「检测引擎」后就能选这台手机里的音色',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                        trailing: _ttsVoicesLoading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.chevron_right_rounded),
-                        onTap: _ttsVoicesLoading ? null : _loadTtsVoices,
-                      )
-                    else if (_ttsVoices!.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          '这个引擎没提供音色列表，只能用默认声音。',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: scheme.onSurfaceVariant,
+                  );
+                }
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+                      child: Row(
+                        children: [
+                          Text(
+                            '全部书签与批注 (${items.length})',
+                            style: Theme.of(sheetCtx).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
                           ),
-                        ),
-                      )
-                    else
-                      DropdownButtonFormField<String>(
-                        initialValue:
-                            _ttsVoices!.contains(widget.prefs.ttsVoice)
-                            ? widget.prefs.ttsVoice
-                            : '',
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: '音色（男声 / 女声）',
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: '',
-                            child: Text('引擎默认音色'),
-                          ),
-                          for (final v in _ttsVoices!)
-                            DropdownMenuItem(
-                              value: v,
-                              child: Text(v, overflow: TextOverflow.ellipsis),
-                            ),
                         ],
-                        onChanged: (v) async {
-                          widget.prefs.setTtsVoice(v ?? '');
-                          final ok = await tts.setPreferredVoice(v ?? '');
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                ok ? '音色已切换，点「测试朗读」听听看' : '这个音色暂时用不了，先保持默认',
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView.separated(
+                        controller: controller,
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                        itemCount: items.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (_, i) {
+                          final b = items[i];
+                          final book = widget.store.byId(b.bookId);
+                          final bookTitle = book?.title ?? '已移除书籍';
+                          return Material(
+                            color: sakura.surfaceSubtle,
+                            borderRadius: BorderRadius.circular(14),
+                            child: ListTile(
+                              title: Text(
+                                '$bookTitle · ${b.chapterTitle}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  '${b.excerpt}\n${timeAgo(b.createdAt)}',
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: sakura.inkSecondary,
+                                  ),
+                                ),
+                              ),
+                              trailing: IconButton(
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 20,
+                                ),
+                                tooltip: '删除书签',
+                                onPressed: () => store.remove(b.id),
+                              ),
+                              onTap: book == null
+                                  ? null
+                                  : () {
+                                      Navigator.of(sheetCtx).pop();
+                                      _push(
+                                        ReaderPage(
+                                          store: widget.store,
+                                          prefs: widget.prefs,
+                                          bookId: book.id,
+                                          chapterIndex: b.chapterIndex,
+                                          charOffset: b.charOffset,
+                                        ),
+                                      );
+                                    },
                             ),
                           );
                         },
                       ),
+                    ),
                   ],
-                  // 音色风格：内置离线语音只有一种声音，用音调模拟男女声
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [_voicePackSection(context, scheme)],
-                    ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _SettingsTopHeader extends StatelessWidget {
+  const _SettingsTopHeader({
+    required this.prefs,
+    required this.isDark,
+    required this.preset,
+    required this.onToggleTheme,
+  });
+
+  final AppPrefs prefs;
+  final bool isDark;
+  final VisualStylePreset preset;
+  final VoidCallback onToggleTheme;
+
+  @override
+  Widget build(BuildContext context) {
+    final sakura = context.sakura;
+    final scheme = Theme.of(context).colorScheme;
+    final isPop = preset == VisualStylePreset.animePop;
+
+    final hInsets = SakuraLayout.horizontalInsets(context, min: 20);
+    final shortLandscape = SakuraLayout.isShortLandscape(context);
+
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          hInsets.left,
+          shortLandscape ? 8 : 12,
+          hInsets.right < 16 ? 16 : hInsets.right,
+          shortLandscape ? 6 : 10,
+        ),
+        child: Center(
+          heightFactor: 1.0,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: SakuraLayout.contentMaxWidth,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '书房设置',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                              color: sakura.inkPrimary,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '当前风格：${preset.shortLabel}',
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: sakura.inkSecondary),
+                      ),
+                    ],
                   ),
-                  // AI 分角色朗读：本地规则区分旁白 / 对白，不联网
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: widget.prefs.ttsRolePlay,
-                    onChanged: widget.prefs.setTtsRolePlay,
-                    secondary: const Icon(Icons.theater_comedy_rounded),
-                    title: const Text(
-                      'AI 分角色朗读',
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    subtitle: const Text(
-                      '旁白和对白用不同音调，同一角色保持一致；完全本地，不花 token',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ),
-                  if (_ttsProbeResult != null) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(
-                          _ttsProbeOk
-                              ? Icons.check_circle_rounded
-                              : Icons.error_outline_rounded,
-                          size: 16,
-                          color: _ttsProbeOk ? scheme.primary : scheme.error,
+                ),
+                SakuraPressable(
+                  onTap: onToggleTheme,
+                  child: Semantics(
+                    button: true,
+                    label: isDark ? '切换日间模式' : '切换夜间模式',
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 13,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: sakura.card,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: isPop ? sakura.inkPrimary : sakura.hairline,
+                          width: isPop ? 1.5 : 1,
                         ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            _ttsProbeResult!,
+                        boxShadow: isPop
+                            ? [
+                                BoxShadow(
+                                  color: sakura.inkPrimary.withAlpha(38),
+                                  offset: const Offset(2, 2),
+                                ),
+                              ]
+                            : [
+                                BoxShadow(
+                                  color: sakura.coverShadow.withAlpha(18),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isDark
+                                ? Icons.wb_sunny_rounded
+                                : Icons.nights_stay_rounded,
+                            size: 16,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            isDark ? '日间' : '夜间',
                             style: TextStyle(
-                              fontSize: 12,
-                              color: _ttsProbeOk
-                                  ? scheme.onSurfaceVariant
-                                  : scheme.error,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: sakura.inkPrimary,
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _ttsProbing ? null : _probeTtsEngines,
-                icon: const Icon(Icons.search_rounded, size: 18),
-                label: const Text('检测引擎'),
-              ),
-              FilledButton.icon(
-                onPressed: _ttsProbing ? null : _testTts,
-                icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                label: const Text('测试朗读'),
-              ),
-              if (_ttsEngines != null && _ttsEngines!.isEmpty)
-                TextButton.icon(
-                  onPressed: () async {
-                    final ok = await NativeBridge.openTtsSettings();
-                    if (!ok && context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('没能打开系统语音设置，请手动到「设置 → 无障碍 → 语音合成」查看'),
-                        ),
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                  label: const Text('去装系统语音'),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 加载当前引擎的音色列表（男声 / 女声）。
-  Future<void> _loadTtsVoices() async {
-    if (_ttsVoicesLoading) return;
-    setState(() => _ttsVoicesLoading = true);
-    try {
-      final tts = TtsService.instance;
-      await tts.ensureReady();
-      final list = await tts.voices();
-      if (!mounted) return;
-      setState(() => _ttsVoices = list);
-    } finally {
-      if (mounted) setState(() => _ttsVoicesLoading = false);
-    }
-  }
-
-  /// 自定义并发数（1~999）。
-  Future<void> _customConcurrency(BuildContext context) async {
-    final controller = TextEditingController(
-      text: '${widget.prefs.searchConcurrency}',
-    );
-    final value = await showDialog<int>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('自定义并发数'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: '同时搜索的书源个数',
-            helperText: '1 ~ 999；过高时可能触发书源限流',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final v = int.tryParse(controller.text.trim());
-              Navigator.of(dialogContext).pop(v);
-            },
-            child: const Text('好'),
-          ),
-        ],
-      ),
-    );
-    if (value == null) return;
-    widget.prefs.setSearchConcurrency(value.clamp(1, 999));
-  }
-
-  /// 引擎包名 → 友好短名（如 `com.iflytek.tts` → `iflytek`）。
-  String _shortEngineName(String pkg) {
-    final parts = pkg.split('.');
-    if (parts.length >= 2) return '${parts[parts.length - 2]} · $pkg';
-    return pkg;
-  }
-
-  /// 检测设备上可用的朗读引擎。
-  Future<void> _probeTtsEngines() async {
-    setState(() {
-      _ttsProbing = true;
-      _ttsProbeResult = null;
-    });
-    final tts = TtsService.instance;
-    final list = await tts.engines();
-    if (!mounted) return;
-    // 把用户已选引擎同步给服务（首次进入设置页时）
-    await tts.setPreferredEngine(widget.prefs.ttsEngine);
-    if (!mounted) return;
-    // 引擎列表出来后顺手把音色也读一次，省得用户再点一次（男声 / 女声）
-    final voices = list.isEmpty ? const <String>[] : await tts.voices();
-    if (!mounted) return;
-    setState(() {
-      _ttsEngines = list;
-      _ttsVoices = voices;
-      _ttsProbing = false;
-      _ttsProbeResult = list.isEmpty
-          ? '没有系统语音引擎，可以改用上面的「内置离线语音」'
-          : '检测到 ${list.length} 个引擎';
-      // 系统引擎为空不算失败：内置离线语音能兜住
-      _ttsProbeOk = true;
-    });
-  }
-
-  /// 切换引擎并重新初始化。
-  Future<void> _changeTtsEngine(String engine) async {
-    final tts = TtsService.instance;
-    widget.prefs.setTtsEngine(engine);
-    await tts.setPreferredEngine(engine);
-    if (!mounted) return;
-    setState(() {
-      _ttsProbeResult = engine == TtsService.builtinEngineId
-          ? '已切到内置离线语音（首次使用会释放语音模型，约需几秒）'
-          : '已切换引擎，点「测试朗读」验证';
-      _ttsProbeOk = true;
-    });
-  }
-
-  /// 自检：真正初始化一次 TTS 并试播一小段。
-  Future<void> _testTts() async {
-    final tts = TtsService.instance;
-    setState(() {
-      _ttsProbing = true;
-      _ttsProbeResult = null;
-    });
-    await tts.setPreferredEngine(widget.prefs.ttsEngine);
-    final ok = await tts.reinit();
-    if (!mounted) return;
-    if (!ok) {
-      setState(() {
-        _ttsProbing = false;
-        _ttsProbeOk = false;
-        _ttsProbeResult = tts.lastError ?? '初始化失败，试试换一个引擎';
-      });
-      return;
-    }
-    // 试播一句中文，确认真的能出声（有些引擎初始化成功但中文缺失）
-    await tts.start(['樱读朗读测试，听到这句话说明朗读正常。'], from: 0);
-    if (!mounted) return;
-    setState(() {
-      _ttsProbing = false;
-      _ttsProbeOk = true;
-      _ttsProbeResult = tts.usingOffline
-          ? '正在用内置离线语音播放…能听到声音就说明可用'
-          : '正在播放测试语音…能听到声音就说明可用';
-    });
-  }
-
-  /// 性能：帧率浮层开关（排查「卡」的时候最直接）。
-  Widget _performanceCard(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.speed_rounded, title: '性能'),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            secondary: const Icon(Icons.monitor_heart_outlined),
-            title: const Text('显示帧率', style: TextStyle(fontSize: 14)),
-            subtitle: Text(
-              '在屏幕上方叠加实时帧率与每帧耗时（排查卡顿用）',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-            value: widget.prefs.showPerformanceOverlay,
-            onChanged: (v) => widget.prefs.setShowPerformanceOverlay(v),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            secondary: const Icon(Icons.slow_motion_video_rounded),
-            title: const Text('高刷新率', style: TextStyle(fontSize: 14)),
-            subtitle: Text(
-              '有 120Hz 屏幕时按最高刷新率出帧，而不是固定 60Hz；关掉更省电',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-            value: widget.prefs.highRefreshRate,
-            onChanged: (v) {
-              widget.prefs.setHighRefreshRate(v);
-              DisplayService.setHighRefresh(v);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 更新卡片：手动检查更新 + 启动自动检查开关。
-  Widget _updateCard(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SoftCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionTitle(icon: Icons.system_update_rounded, title: '检查更新'),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.refresh_rounded),
-            title: const Text('检查新版本', style: TextStyle(fontSize: 14)),
-            subtitle: Text(
-              '当前版本 v${AppInfo.version}',
-              style: const TextStyle(fontSize: 12),
-            ),
-            trailing: _checkingUpdate
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.chevron_right_rounded),
-            onTap: _checkingUpdate ? null : _checkUpdate,
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            secondary: const Icon(Icons.schedule_rounded),
-            title: const Text('启动时自动检查更新', style: TextStyle(fontSize: 14)),
-            subtitle: Text(
-              '有新版时弹出更新公告（默认通过国内镜像下载）',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-            value: widget.prefs.autoCheckUpdate,
-            onChanged: (v) => widget.prefs.setAutoCheckUpdate(v),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 手动检查更新（无论是否「以后再说」都会展示结果）。
-  Future<void> _checkUpdate() async {
-    setState(() => _checkingUpdate = true);
-    final messenger = ScaffoldMessenger.of(context);
-    final result = await UpdateService.instance.check();
-    if (!mounted) return;
-    setState(() => _checkingUpdate = false);
-
-    switch (result.status) {
-      case UpdateCheckStatus.updateAvailable:
-        await showUpdateDialog(
-          context,
-          info: result.info!,
-          isAuto: false,
-          prefs: widget.prefs,
-        );
-        // 手动检查不记「以后再说」，也不清除已记版本
-        break;
-      case UpdateCheckStatus.upToDate:
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('已经是最新版本啦～'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case UpdateCheckStatus.failed:
-        messenger.showSnackBar(
-          SnackBar(
-            content: const Text('检查更新失败，请稍后重试（网络繁忙）'),
-            duration: const Duration(seconds: 3),
-            action: SnackBarAction(label: '重试', onPressed: _checkUpdate),
-          ),
-        );
-        break;
-    }
-  }
-
-  Widget _aboutCard(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SoftCard(
-      child: Column(
-        children: [
-          SizedBox(
-            width: 110,
-            height: 110,
-            child: Image.asset(
-              'assets/images/pet_wave.png',
-              fit: BoxFit.contain,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            '樱读',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'v${AppInfo.version} · 本地 + 在线小说阅读器',
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '二次元风格的阅读器\n本地 TXT / EPUB + 书源在线搜书 · 看书 · 一键换源',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              color: scheme.onSurfaceVariant,
-              height: 1.6,
-            ),
-          ),
-          const SizedBox(height: 14),
-          // 开源信息
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest.withValues(alpha: .5),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.code_rounded, size: 15, color: scheme.primary),
-                    const SizedBox(width: 6),
-                    const Text(
-                      '开源信息',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
+                        ],
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                _aboutRow(context, '作者', AppInfo.author),
-                _aboutRow(context, '许可证', AppInfo.license),
-                _aboutRow(
-                  context,
-                  '项目主页',
-                  'github.com/akira399/sakura-read',
-                  onTap: () async {
-                    final ok = await launchUrlString(AppInfo.repo);
-                    if (!context.mounted || ok) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('没有找到可用的浏览器'),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          Text(
-            '声明：本软件是阅读工具，不提供、不分发任何书籍内容；\n'
-            '通过书源获取的正文来自第三方网站，版权归原作者所有。',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 10.5,
-              height: 1.7,
-              color: scheme.onSurfaceVariant.withValues(alpha: .8),
-            ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MascotProfileHeroCard extends StatelessWidget {
+  const _MascotProfileHeroCard({
+    required this.pet,
+    required this.statsStore,
+    required this.bookCount,
+    required this.preset,
+    required this.onOpenPanel,
+    required this.onOpenQuickSheet,
+  });
+
+  final PetStore? pet;
+  final StatsStore statsStore;
+  final int bookCount;
+  final VisualStylePreset preset;
+  final VoidCallback? onOpenPanel;
+  final VoidCallback onOpenQuickSheet;
+
+  @override
+  Widget build(BuildContext context) {
+    final sakura = context.sakura;
+    final scheme = Theme.of(context).colorScheme;
+    final isPop = preset == VisualStylePreset.animePop;
+    final petStore = pet;
+
+    final levelTitle = petStore == null
+        ? '小樱书屋手账'
+        : 'Lv.${petStore.level} · ${petStore.levelName}';
+    final statusSub = petStore == null
+        ? '今天也和小樱一起安静读书吧'
+        : petStore.enabled
+        ? '好感度 ${petStore.affinity} · 互动 ${petStore.interactions} 次'
+        : '桌宠当前休眠中 · 点右下按钮唤醒';
+
+    return SakuraPressable(
+      onTap: onOpenPanel ?? onOpenQuickSheet,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: sakura.card,
+          borderRadius: BorderRadius.circular(isPop ? 18 : 22),
+          border: Border.all(
+            color: isPop ? sakura.inkPrimary : sakura.hairline,
+            width: isPop ? 1.8 : 1,
           ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.favorite_rounded, size: 14, color: scheme.primary),
-              const SizedBox(width: 6),
-              Text(
-                '用 Flutter 构建 · Made by ${AppInfo.author}',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: scheme.onSurfaceVariant,
+          boxShadow: isPop
+              ? [
+                  BoxShadow(
+                    color: sakura.inkPrimary.withAlpha(46),
+                    offset: const Offset(3, 3),
+                  ),
+                ]
+              : [
+                  BoxShadow(
+                    color: sakura.coverShadow.withAlpha(24),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 66,
+                  height: 66,
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [sakura.accentSoft, sakura.surfaceSubtle],
+                    ),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: scheme.primary.withAlpha(55)),
+                  ),
+                  child: Image.asset(
+                    'assets/images/pet_read.png',
+                    fit: BoxFit.contain,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              levelTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: sakura.inkPrimary,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        statusSub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: sakura.inkSecondary),
+                      ),
+                      if (petStore != null) ...[
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: petStore.levelProgress.clamp(0.0, 1.0),
+                            minHeight: 5,
+                            backgroundColor: sakura.surfaceSubtle,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              scheme.primary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (onOpenPanel != null) ...[
+                  const SizedBox(width: 10),
+                  FilledButton.tonal(
+                    onPressed: onOpenPanel,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('互动面板'),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _HeroStatChip(
+                    label: '累计阅读',
+                    value: formatDuration(statsStore.totalSeconds),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _HeroStatChip(
+                    label: '连续坚持',
+                    value: '${statsStore.streak} 天',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _HeroStatChip(label: '书架藏书', value: '$bookCount 本'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroStatChip extends StatelessWidget {
+  const _HeroStatChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final sakura = context.sakura;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: sakura.surfaceSubtle,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontSize: 11, color: sakura.inkSecondary),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w700,
+              color: sakura.inkPrimary,
+            ),
           ),
         ],
       ),
     );
   }
+}
 
-  /// 关于卡里的一行「键 - 值」（值可按需点击）。
-  Widget _aboutRow(
-    BuildContext context,
-    String label,
-    String value, {
-    VoidCallback? onTap,
-  }) {
-    final scheme = Theme.of(context).colorScheme;
-    final valueStyle = TextStyle(
-      fontSize: 11.5,
-      color: onTap == null ? scheme.onSurfaceVariant : scheme.primary,
-      decoration: onTap == null ? null : TextDecoration.underline,
-      decorationColor: scheme.primary.withValues(alpha: .5),
-    );
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, required this.caption});
+
+  final String title;
+  final String caption;
+
+  @override
+  Widget build(BuildContext context) {
+    final sakura = context.sakura;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 58,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 11.5,
-                color: scheme.onSurfaceVariant.withValues(alpha: .75),
-              ),
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: sakura.inkPrimary,
             ),
           ),
+          const SizedBox(width: 8),
           Expanded(
-            child: onTap == null
-                ? Text(value, style: valueStyle)
-                : GestureDetector(
-                    onTap: onTap,
-                    child: Text(value, style: valueStyle),
-                  ),
+            child: Text(
+              caption,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(fontSize: 11.5, color: sakura.inkSecondary),
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsGroupCard extends StatelessWidget {
+  const _SettingsGroupCard({required this.preset, required this.children});
+
+  final VisualStylePreset preset;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final sakura = context.sakura;
+    final isPop = preset == VisualStylePreset.animePop;
+    final divided = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      divided.add(children[i]);
+      if (i != children.length - 1) {
+        divided.add(
+          Divider(
+            height: 1,
+            indent: 66,
+            endIndent: 16,
+            color: sakura.hairline.withAlpha(140),
+          ),
+        );
+      }
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: sakura.card,
+        borderRadius: BorderRadius.circular(isPop ? 16 : 20),
+        border: Border.all(
+          color: isPop ? sakura.inkPrimary : sakura.hairline,
+          width: isPop ? 1.6 : 1,
+        ),
+        boxShadow: isPop
+            ? [
+                BoxShadow(
+                  color: sakura.inkPrimary.withAlpha(36),
+                  offset: const Offset(3, 3),
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: sakura.coverShadow.withAlpha(16),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(isPop ? 14.5 : 19),
+        child: Column(mainAxisSize: MainAxisSize.min, children: divided),
+      ),
+    );
+  }
+}
+
+class _SettingsNavRow extends StatelessWidget {
+  const _SettingsNavRow({
+    required this.glyph,
+    required this.badgeColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final SakuraGlyph glyph;
+  final Color badgeColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final sakura = context.sakura;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          child: Row(
+            children: [
+              SakuraIconBadge(
+                glyph: glyph,
+                color: badgeColor,
+                size: 40,
+                iconSize: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: sakura.inkPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontSize: 12.2,
+                        color: sakura.inkSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: sakura.inkSecondary.withAlpha(170),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

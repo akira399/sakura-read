@@ -7,6 +7,13 @@ final persistenceFailures = ValueNotifier<Set<String>>({});
 final restoredDataAwaitingRestart = ValueNotifier<bool>(false);
 List<Future<void> Function()> persistenceFlushers = [];
 final restoredFilePaths = <String>{};
+
+dynamic _decodeJsonObject(String raw) {
+  final value = jsonDecode(raw);
+  if (value is! Map) throw const FormatException('Expected a JSON object');
+  return value;
+}
+
 Future<void> flushPersistentStores() =>
     Future.wait(persistenceFlushers.map((flush) => flush()));
 
@@ -16,10 +23,15 @@ mixin ReliablePersistence {
   bool _loadFailed = false;
   Object? lastPersistenceError;
 
-  Future<dynamic> readJson(File file) async {
+  Future<dynamic> readJson(
+    File file, {
+    int isolateThresholdBytes = 32768,
+  }) async {
     try {
-      final value = jsonDecode(await file.readAsString());
-      if (value is! Map) throw const FormatException('Expected a JSON object');
+      final raw = await file.readAsString();
+      final value = raw.length > isolateThresholdBytes
+          ? await compute(_decodeJsonObject, raw)
+          : _decodeJsonObject(raw);
       _loadFailed = false;
       return value;
     } catch (error) {

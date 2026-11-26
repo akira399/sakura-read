@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
 plugins {
@@ -81,16 +82,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
-
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.operit.sakuraread"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -164,6 +161,12 @@ androidComponents {
 // 但这几个库本来就大（onnxruntime 22 MB），不压缩会让安装包白白多出十几 MB。
 // 上面 buildTypes 里的 packaging.jniLibs.useLegacyPackaging = true 就是干这个的。
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
 flutter {
     source = "../.."
 }
@@ -171,14 +174,13 @@ flutter {
 // ---------------------------------------------------------------------------
 // 内置本地小模型（离线 AI 助手）
 //
-// MediaPipe LLM Inference（Apache-2.0）提供 .task 格式模型的端侧推理：
-// 一个 521 MB 的 Qwen2.5-0.5B 就能在手机上跑出可用的小助手，不需要联网、
-// 不需要 API Key。AAR 自带每条 ABI 的 libllm_inference_engine_jni.so
-// （arm64-v8a 11.9 MB / x86_64 13.5 MB），上面的 abiFilters 会保证只有目标
-// ABI 的那一份被打进包，不会三份全带。
+// Google LiteRT-LM（Apache-2.0）提供 .litertlm 格式模型的端侧推理：
+// 支持 Qwen3 / Qwen3.5 / LFM2.5 / Gemma 4 等新一代端侧模型，不需要联网、
+// 不需要 API Key。AAR 自带 arm64-v8a / x86_64 的 liblitertlm_jni.so，
+// 上面的 androidComponents excludes 会保证只有目标 ABI 的那一份被打进包。
 //
-// 引擎与模型解耦：想换 1.5B / 3B 只需要在 Dart 侧 localModelCatalog 里加一条。
+// 引擎与模型解耦：想换模型只需要在 Dart 侧 localModelCatalog 里加一条。
 // ---------------------------------------------------------------------------
 dependencies {
-    implementation("com.google.mediapipe:tasks-genai:0.10.24")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.20.0")
 }

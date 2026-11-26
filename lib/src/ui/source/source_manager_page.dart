@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../features/book_source/replace_rules_page.dart';
+import '../../features/book_source/source_debugger_page.dart';
 import '../../source/http_client.dart';
 import 'source_health_page.dart';
 import '../../source/subscription_link.dart';
@@ -38,7 +40,15 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         builder: (context, _) {
           final sources = store.sources;
           if (sources.isEmpty) {
-            return _EmptyView(onImport: () => _showImportSheet(context));
+            return _EmptyView(
+              onImport: () => _showImportSheet(context),
+              onAiStudio: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      SourceDebuggerPage(store: store, initialTab: 1),
+                ),
+              ),
+            );
           }
           return ListView.separated(
             padding: EdgeInsets.fromLTRB(12, 8, 12, _bulkMode ? 100 : 40),
@@ -81,34 +91,70 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         ],
       );
     }
+    const compactConstraints = BoxConstraints(minWidth: 34, minHeight: 34);
+    const compactPadding = EdgeInsets.symmetric(horizontal: 5);
     return AppBar(
-      title: const Text('书源管理'),
+      titleSpacing: 0,
+      title: const Text('书源管理', maxLines: 1),
       actions: [
         IconButton(
+          tooltip: '正文净化规则',
+          visualDensity: VisualDensity.compact,
+          padding: compactPadding,
+          constraints: compactConstraints,
+          icon: const Icon(Icons.auto_fix_high_rounded, size: 21),
+          onPressed: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const ReplaceRulesPage())),
+        ),
+        IconButton(
+          tooltip: '书源调试 / AI 写源',
+          visualDensity: VisualDensity.compact,
+          padding: compactPadding,
+          constraints: compactConstraints,
+          icon: const Icon(Icons.bug_report_outlined, size: 21),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => SourceDebuggerPage(store: store)),
+          ),
+        ),
+        IconButton(
           tooltip: '书源体检',
-          icon: const Icon(Icons.health_and_safety_outlined),
+          visualDensity: VisualDensity.compact,
+          padding: compactPadding,
+          constraints: compactConstraints,
+          icon: const Icon(Icons.health_and_safety_outlined, size: 21),
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => SourceHealthPage(store: store)),
           ),
         ),
         IconButton(
           tooltip: '批量管理',
+          visualDensity: VisualDensity.compact,
+          padding: compactPadding,
+          constraints: compactConstraints,
           onPressed: () => setState(() {
             _bulkMode = true;
             _selected.clear();
           }),
-          icon: const Icon(Icons.checklist_rounded),
+          icon: const Icon(Icons.checklist_rounded, size: 21),
         ),
         IconButton(
           tooltip: '导出书源',
+          visualDensity: VisualDensity.compact,
+          padding: compactPadding,
+          constraints: compactConstraints,
           onPressed: () => _export(context),
-          icon: const Icon(Icons.ios_share_rounded),
+          icon: const Icon(Icons.ios_share_rounded, size: 21),
         ),
         IconButton(
           tooltip: '导入书源',
+          visualDensity: VisualDensity.compact,
+          padding: compactPadding,
+          constraints: compactConstraints,
           onPressed: () => _showImportSheet(context),
-          icon: const Icon(Icons.add_rounded),
+          icon: const Icon(Icons.add_rounded, size: 22),
         ),
+        const SizedBox(width: 4),
       ],
     );
   }
@@ -353,6 +399,21 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                     },
                     icon: const Icon(Icons.public_rounded, size: 18),
                     label: const Text('访问网站'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => SourceDebuggerPage(
+                            store: store,
+                            initialSource: s,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.bug_report_outlined, size: 18),
+                    label: const Text('调试此源'),
                   ),
                   OutlinedButton.icon(
                     onPressed: () {
@@ -630,9 +691,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
 }
 
 class _EmptyView extends StatelessWidget {
-  const _EmptyView({required this.onImport});
+  const _EmptyView({required this.onImport, required this.onAiStudio});
 
   final VoidCallback onImport;
+  final VoidCallback onAiStudio;
 
   @override
   Widget build(BuildContext context) {
@@ -651,7 +713,7 @@ class _EmptyView extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '导入「阅读 3.0」格式的书源后\n就能在这里一键搜索网络上的小说',
+              '导入「阅读 3.0」格式的书源，或使用 AI 工坊一键生成\n就能在这里搜索网络上的小说',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -660,10 +722,22 @@ class _EmptyView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: onImport,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('导入书源'),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton.icon(
+                  onPressed: onImport,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('导入书源'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onAiStudio,
+                  icon: const Icon(Icons.auto_awesome_outlined),
+                  label: const Text('AI 智能写源'),
+                ),
+              ],
             ),
           ],
         ),

@@ -10,6 +10,7 @@ import '../../data/epub_document.dart';
 import '../../data/models.dart';
 import '../../data/book_store.dart';
 import '../../data/prefs.dart';
+import '../../features/reader/reader_chrome.dart';
 
 /// Optional original layout, with script execution disabled and no external resources.
 class EpubDocumentPage extends StatefulWidget {
@@ -212,58 +213,74 @@ class _EpubDocumentPageState extends State<EpubDocumentPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('EPUB 原书排版'),
-      actions: [
-        IconButton(
-          tooltip: '目录',
-          icon: const Icon(Icons.list),
-          onPressed: () async {
-            final selected = await showModalBottomSheet<int>(
-              context: context,
-              showDragHandle: true,
-              builder: (ctx) => ListView.builder(
-                itemCount: widget.book.chapterCount,
-                itemBuilder: (_, i) => ListTile(
-                  title: Text(widget.book.chapters[i].title),
-                  selected: i == _chapter,
-                  onTap: () => Navigator.pop(ctx, i),
+  Widget build(BuildContext context) {
+    final bg = widget.prefs.readerBg;
+    final palette = ReaderChromePalette.from(bg, Theme.of(context).colorScheme);
+    return Scaffold(
+      backgroundColor: bg.color,
+      appBar: AppBar(
+        backgroundColor: palette.surface,
+        foregroundColor: palette.foreground,
+        surfaceTintColor: Colors.transparent,
+        title: const Text('EPUB 原书排版'),
+        actions: [
+          IconButton(
+            tooltip: '目录',
+            icon: const Icon(Icons.list),
+            onPressed: () async {
+              final selected = await showModalBottomSheet<int>(
+                context: context,
+                showDragHandle: true,
+                builder: (ctx) => ListView.builder(
+                  itemCount: widget.book.chapterCount,
+                  itemBuilder: (_, i) => ListTile(
+                    title: Text(widget.book.chapters[i].title),
+                    selected: i == _chapter,
+                    onTap: () => Navigator.pop(ctx, i),
+                  ),
                 ),
-              ),
-            );
-            if (selected != null && mounted) _open(selected);
-          },
-        ),
-      ],
-    ),
-    body: _error != null
-        ? Center(child: Text(_error!))
-        : _controller == null
-        ? const Center(child: CircularProgressIndicator())
-        : WebViewWidget(controller: _controller!),
-    bottomNavigationBar: SafeArea(
-      child: Row(
-        children: [
-          TextButton(
-            onPressed: _chapter > 0 ? () => _open(_chapter - 1) : null,
-            child: const Text('上一章'),
-          ),
-          Expanded(
-            child: Text(
-              '${_chapter + 1}/${widget.book.chapterCount} · ${widget.book.chapters[_chapter].title}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          TextButton(
-            onPressed: _chapter + 1 < widget.book.chapterCount
-                ? () => _open(_chapter + 1)
-                : null,
-            child: const Text('下一章'),
+              );
+              if (selected != null && mounted) _open(selected);
+            },
           ),
         ],
       ),
-    ),
-  );
+      body: _error != null
+          ? Center(child: Text(_error!))
+          : _controller == null
+          ? const Center(child: CircularProgressIndicator())
+          : WebViewWidget(controller: _controller!),
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(
+          color: palette.surface,
+          border: Border(top: BorderSide(color: palette.border, width: 0.75)),
+        ),
+        child: SafeArea(
+          child: Row(
+            children: [
+              TextButton(
+                onPressed: _chapter > 0 ? () => _open(_chapter - 1) : null,
+                child: const Text('上一章'),
+              ),
+              Expanded(
+                child: Text(
+                  '${_chapter + 1}/${widget.book.chapterCount} · ${widget.book.chapters[_chapter].title}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: palette.secondary, fontSize: 12.5),
+                ),
+              ),
+              TextButton(
+                onPressed: _chapter + 1 < widget.book.chapterCount
+                    ? () => _open(_chapter + 1)
+                    : null,
+                child: const Text('下一章'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

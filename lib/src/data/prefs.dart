@@ -8,13 +8,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/theme/sakura_tokens.dart';
+import '../core/theme/visual_style_preset.dart';
 import '../platform/native_bridge.dart';
 import '../source/online_repo.dart';
 import 'shelf_sort.dart';
 import '../platform/credential_store.dart';
 
+export '../core/theme/visual_style_preset.dart';
+
 /// 翻页方式。
-enum PageTurnMode { slide, cover, fade, scroll }
+enum PageTurnMode { slide, cover, fade, simulation, scroll }
 
 /// 阅读背景预设。
 class ReaderBg {
@@ -50,15 +53,24 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
 
   final CredentialStore _credentials;
   bool _credentialsReady = false;
+  bool _hadLegacyPlaintextSecrets = false;
+  Future<void>? _deferredLoadFuture;
 
   final AppDirs? _dirsOverride;
   File? _file;
   Timer? _saveTimer;
 
-  // ---- 外观 ----
+  // ---- 外观与 2.5 书房风格 ----
   ThemeMode themeMode = ThemeMode.system;
   int accentIndex = 0;
   bool showSplashAnimation = true;
+  VisualStylePreset visualStyle = VisualStylePreset.sakuraAtelier;
+  ShelfPlankStyle shelfPlankStyle = ShelfPlankStyle.frostedGlass;
+  bool ambientCoverAura = true;
+  bool floatingGlassDock = true;
+  bool shelfSakuraPetals = true;
+  bool silkBookmarkAndStamp = true;
+  bool bookUnfoldTransition = true;
 
   // ---- 书架排列 ----
   ShelfSortMode shelfSort = ShelfSortMode.recentRead;
@@ -86,9 +98,9 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
 
   /// 「人物」X-Ray：正文里的人名是否高亮。
   ///
-  /// 只在阅读器内生效；识别结果为空时自然不高亮。默认开启，
-  /// 不喜欢的用户在「人物」面板里一键关掉。
-  bool xrayHighlight = true;
+  /// 只在阅读器内生效；识别结果为空时自然不高亮。默认关闭（按需在「人物」面板开启），
+  /// 保持干净纯粹的正文阅读体验。
+  bool xrayHighlight = false;
 
   /// 顶部 / 底部工具条是否用「磨砂玻璃」（实时模糊）观感。
   ///
@@ -290,21 +302,35 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   ReaderBg get readerBg =>
       kReaderBgs[readerBgIndex.clamp(0, kReaderBgs.length - 1)];
 
-  Future<void> load() async {
+  Future<void> load({bool deferHeavyInit = false}) async {
+    _credentialsReady = false;
+    _hadLegacyPlaintextSecrets = false;
+    _deferredLoadFuture = null;
     final dirs = _dirsOverride ?? await NativeBridge.appDirs();
     _file = File('${dirs.files}/settings.json');
     try {
       if (await _file!.exists()) {
         final data = await readJson(_file!);
         if (data is Map) {
+          _hadLegacyPlaintextSecrets =
+              data.containsKey('aiApiKey') || data.containsKey('webdavPass');
           themeMode = _themeModeFrom(data['themeMode'] as String?);
           accentIndex = (data['accentIndex'] as num?)?.toInt() ?? 0;
           showSplashAnimation = data['showSplashAnimation'] as bool? ?? true;
+          visualStyle = visualStylePresetFrom(data['visualStyle'] as String?);
+          shelfPlankStyle = shelfPlankStyleFrom(
+            data['shelfPlankStyle'] as String?,
+          );
+          ambientCoverAura = data['ambientCoverAura'] as bool? ?? true;
+          floatingGlassDock = data['floatingGlassDock'] as bool? ?? true;
+          shelfSakuraPetals = data['shelfSakuraPetals'] as bool? ?? true;
+          silkBookmarkAndStamp = data['silkBookmarkAndStamp'] as bool? ?? true;
+          bookUnfoldTransition = data['bookUnfoldTransition'] as bool? ?? true;
           fontSize = (data['fontSize'] as num?)?.toDouble() ?? 18;
           lineHeight = (data['lineHeight'] as num?)?.toDouble() ?? 1.75;
           letterSpacing = (data['letterSpacing'] as num?)?.toDouble() ?? 0;
           readerMarginH = (data['readerMarginH'] as num?)?.toDouble() ?? 20;
-          xrayHighlight = data['xrayHighlight'] as bool? ?? true;
+          xrayHighlight = data['xrayHighlight'] as bool? ?? false;
           // v10：段间距可调（用户反馈：段与段之间的空隙太大）
           paragraphSpacing =
               ((data['paragraphSpacing'] as num?)?.toDouble() ?? 12).clamp(
@@ -394,6 +420,17 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
     } catch (_) {
       // 读取失败时使用默认设置
     }
+    notifyListeners();
+    if (!deferHeavyInit) {
+      await completeDeferredLoad();
+    }
+  }
+
+  /// 完成启动后延后执行的重初始化：安全凭据读取/旧明文迁移与自定义字体加载。
+  Future<void> completeDeferredLoad() =>
+      _deferredLoadFuture ??= _runDeferredLoad();
+
+  Future<void> _runDeferredLoad() async {
     try {
       final stored = await _credentials.read();
       _credentialsReady = true;
@@ -420,11 +457,18 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
           }),
         );
       }
-      // Secure write must succeed before removing a legacy plaintext key.
-      if (await _file!.exists()) await flush();
+      // 仅当 settings.json 仍包含旧明文密钥时才重写 strip，避免每次冷启动无意义 fsync
+      if (_hadLegacyPlaintextSecrets &&
+          _file != null &&
+          await _file!.exists()) {
+        await flush();
+        _hadLegacyPlaintextSecrets = false;
+      }
     } catch (error) {
       lastPersistenceError = error;
-      persistenceFailures.value = {...persistenceFailures.value, _file!.path};
+      if (_file != null) {
+        persistenceFailures.value = {...persistenceFailures.value, _file!.path};
+      }
     }
     try {
       await _loadUserFont();
@@ -450,6 +494,7 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   PageTurnMode _pageModeFrom(String? value) => switch (value) {
     'cover' => PageTurnMode.cover,
     'fade' => PageTurnMode.fade,
+    'simulation' => PageTurnMode.simulation,
     'scroll' => PageTurnMode.scroll,
     _ => PageTurnMode.slide,
   };
@@ -601,6 +646,88 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   void setAccentIndex(int v) {
     if (accentIndex == v) return;
     accentIndex = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  /// 切换视觉风格预设，同时同步该预设推荐的层板与氛围开关（之后仍可单项微调）。
+  void applyVisualStylePreset(VisualStylePreset preset) {
+    visualStyle = preset;
+    switch (preset) {
+      case VisualStylePreset.sakuraAtelier:
+        shelfPlankStyle = ShelfPlankStyle.frostedGlass;
+        ambientCoverAura = true;
+        floatingGlassDock = true;
+        shelfSakuraPetals = true;
+        silkBookmarkAndStamp = true;
+      case VisualStylePreset.liquidGlass:
+        shelfPlankStyle = ShelfPlankStyle.minimal;
+        ambientCoverAura = true;
+        floatingGlassDock = true;
+        shelfSakuraPetals = false;
+        silkBookmarkAndStamp = false;
+      case VisualStylePreset.kyotoWashi:
+        shelfPlankStyle = ShelfPlankStyle.warmWood;
+        ambientCoverAura = true;
+        floatingGlassDock = false;
+        shelfSakuraPetals = true;
+        silkBookmarkAndStamp = true;
+      case VisualStylePreset.animePop:
+        shelfPlankStyle = ShelfPlankStyle.obiBand;
+        ambientCoverAura = false;
+        floatingGlassDock = true;
+        shelfSakuraPetals = false;
+        silkBookmarkAndStamp = false;
+    }
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setVisualStyle(VisualStylePreset v) {
+    if (visualStyle == v) return;
+    visualStyle = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setShelfPlankStyle(ShelfPlankStyle v) {
+    if (shelfPlankStyle == v) return;
+    shelfPlankStyle = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setAmbientCoverAura(bool v) {
+    if (ambientCoverAura == v) return;
+    ambientCoverAura = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setFloatingGlassDock(bool v) {
+    if (floatingGlassDock == v) return;
+    floatingGlassDock = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setShelfSakuraPetals(bool v) {
+    if (shelfSakuraPetals == v) return;
+    shelfSakuraPetals = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setSilkBookmarkAndStamp(bool v) {
+    if (silkBookmarkAndStamp == v) return;
+    silkBookmarkAndStamp = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setBookUnfoldTransition(bool v) {
+    if (bookUnfoldTransition == v) return;
+    bookUnfoldTransition = v;
     _saveSoon();
     notifyListeners();
   }
@@ -864,9 +991,13 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
     return _save();
   }
 
-  Future<void> _save() {
+  Future<void> _save() async {
+    final deferred = _deferredLoadFuture;
+    if (deferred != null && !_credentialsReady) {
+      await deferred;
+    }
     final file = _file;
-    if (file == null) return Future.value();
+    if (file == null) return;
     final key = jsonEncode({
       "credentialVersion": 1,
       "aiApiKey": aiApiKey,
@@ -879,6 +1010,13 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
         'themeMode': themeModeName,
         'accentIndex': accentIndex,
         'showSplashAnimation': showSplashAnimation,
+        'visualStyle': visualStyle.name,
+        'shelfPlankStyle': shelfPlankStyle.name,
+        'ambientCoverAura': ambientCoverAura,
+        'floatingGlassDock': floatingGlassDock,
+        'shelfSakuraPetals': shelfSakuraPetals,
+        'silkBookmarkAndStamp': silkBookmarkAndStamp,
+        'bookUnfoldTransition': bookUnfoldTransition,
         'fontSize': fontSize,
         'lineHeight': lineHeight,
         'letterSpacing': letterSpacing,

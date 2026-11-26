@@ -178,3 +178,56 @@ class SakuraPageRoute<T> extends PageRouteBuilder<T> {
 
   final bool slideHorizontal;
 }
+
+/// 3D 翻书展开路由转场：从书架进入阅读页时模拟实体书从左书脊缓缓翻开的透视效果。
+///
+/// 由 `prefs.bookUnfoldTransition` 控制开关，并在系统开启「减弱动态效果」时自动跳过。
+class SakuraBookUnfoldRoute<T> extends PageRouteBuilder<T> {
+  SakuraBookUnfoldRoute({required WidgetBuilder builder, this.enabled = true})
+    : super(
+        transitionDuration: const Duration(milliseconds: 420),
+        reverseTransitionDuration: const Duration(milliseconds: 300),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            builder(context),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          if (MediaQuery.disableAnimationsOf(context)) return child;
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: SakuraCurves.emphasized,
+            reverseCurve: SakuraCurves.standard,
+          );
+          if (!enabled) {
+            return FadeTransition(
+              opacity: curved,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.96, end: 1.0).animate(curved),
+                child: child,
+              ),
+            );
+          }
+          return AnimatedBuilder(
+            animation: curved,
+            child: child,
+            builder: (context, pageChild) {
+              final t = curved.value.clamp(0.0, 1.0);
+              final angle = (1.0 - t) * -0.38;
+              final scale = 0.93 + 0.07 * t;
+              final matrix = Matrix4.identity()
+                ..setEntry(3, 2, 0.0014)
+                ..scaleByDouble(scale, scale, 1.0, 1.0)
+                ..rotateY(angle);
+              return Opacity(
+                opacity: t,
+                child: Transform(
+                  alignment: Alignment.centerLeft,
+                  transform: matrix,
+                  child: pageChild,
+                ),
+              );
+            },
+          );
+        },
+      );
+
+  final bool enabled;
+}

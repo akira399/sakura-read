@@ -32,12 +32,24 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
   BookStore({this._dirsOverride, this.database});
 
   final AppDirs? _dirsOverride;
-  final SakuraDatabase? database;
+  SakuraDatabase? database;
   final List<Book> _books = [];
   AppDirs? _dirs;
   File? _file;
   Timer? _saveTimer;
   Future<void> _dbQueue = Future.value();
+  bool _isLoading = false;
+
+  bool get isLoading => _isLoading;
+
+  void attachDatabase(SakuraDatabase db) {
+    database = db;
+  }
+
+  /// 在后台异步水合完成前标记处于加载中，避免首帧闪出空书架插画。
+  void markLoadingPending() {
+    _isLoading = true;
+  }
 
   List<Book> get books => List.unmodifiable(_books);
 
@@ -51,36 +63,40 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
       Directory('${chapterCacheRoot.path}/$bookId');
 
   Future<void> load() async {
-    _dirs = _dirsOverride ?? await NativeBridge.appDirs();
-    _file = File('${_dirs!.files}/library.json');
-    final db = database;
-    if (db != null) {
-      await LegacyMigrator.migrateIfNeeded(db: db, filesDir: _dirs!.files);
-      _books
-        ..clear()
-        ..addAll(await db.loadAllBooks());
-      notifyListeners();
-      return;
-    }
+    _isLoading = true;
     try {
-      if (await _file!.exists()) {
-        final data = await readJson(_file!);
-        if (data is Map && data['books'] is List) {
-          for (final item in data['books'] as List) {
-            if (item is Map) {
-              try {
-                _books.add(Book.fromJson(Map<String, dynamic>.from(item)));
-              } catch (_) {
-                // 跳过坏数据
+      _dirs = _dirsOverride ?? await NativeBridge.appDirs();
+      _file = File('${_dirs!.files}/library.json');
+      final db = database;
+      if (db != null) {
+        await LegacyMigrator.migrateIfNeeded(db: db, filesDir: _dirs!.files);
+        _books
+          ..clear()
+          ..addAll(await db.loadAllBooks());
+        return;
+      }
+      try {
+        if (await _file!.exists()) {
+          final data = await readJson(_file!);
+          if (data is Map && data['books'] is List) {
+            for (final item in data['books'] as List) {
+              if (item is Map) {
+                try {
+                  _books.add(Book.fromJson(Map<String, dynamic>.from(item)));
+                } catch (_) {
+                  // 跳过坏数据
+                }
               }
             }
           }
         }
+      } catch (_) {
+        // 读取失败时以空书架启动
       }
-    } catch (_) {
-      // 读取失败时以空书架启动
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   Book? byId(String id) {

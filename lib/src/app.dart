@@ -30,6 +30,8 @@ class SakuraApp extends StatelessWidget {
     required this.statsStore,
     required this.petStore,
     this.database,
+    this.initialStorageGranted,
+    this.storagePermissionFuture,
   });
 
   final AppPrefs prefs;
@@ -38,12 +40,15 @@ class SakuraApp extends StatelessWidget {
   final StatsStore statsStore;
   final PetStore petStore;
   final SakuraDatabase? database;
+  final bool? initialStorageGranted;
+  final Future<bool>? storagePermissionFuture;
 
   @override
   Widget build(BuildContext context) {
     return ProviderScope(
       overrides: [
-        sakuraDatabaseProvider.overrideWithValue(database),
+        if (database != null)
+          sakuraDatabaseProvider.overrideWithValue(database),
         bookStoreProvider.overrideWith((_) => store),
         prefsProvider.overrideWith((_) => prefs),
         sourceStoreProvider.overrideWith((_) => sourceStore),
@@ -153,11 +158,14 @@ class SakuraApp extends StatelessWidget {
               prefs: prefs,
               child: SplashGate(
                 enabled: prefs.showSplashAnimation,
+                duration: const Duration(milliseconds: 950),
                 child: HomePage(
                   store: store,
                   prefs: prefs,
                   sourceStore: sourceStore,
                   statsStore: statsStore,
+                  initialStorageGranted: initialStorageGranted,
+                  storagePermissionFuture: storagePermissionFuture,
                 ),
               ),
             ),

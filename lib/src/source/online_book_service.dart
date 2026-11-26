@@ -58,29 +58,62 @@ class OnlineBookService {
 
   /// 抓取详情页并解析（含目录；目录为空且有 tocUrl 规则时单独请求）。
   Future<OnlineBookInfo> fetchInfo(BookSource source, String bookUrl) async {
-    final html = await _getHtml(source, bookUrl);
-    final engine = AnalyzeRule(html, baseUrl: bookUrl);
+    var html = await _getHtml(source, bookUrl);
+    final httpCb = _client.asJsAsyncHttpCallback(timeout: _httpTimeout);
+    var engine = AnalyzeRule(
+      html,
+      baseUrl: bookUrl,
+      sourceKey: source.bookSourceUrl,
+      cookieBridge: _client,
+      httpAsync: httpCb,
+    );
     final info = source.bookInfoRule;
 
-    String? g(String? rule) {
+    // 兼容 Legado `ruleBookInfo.init` 预处理规则
+    final initRule = info?.init?.trim();
+    if (initRule != null && initRule.isNotEmpty) {
+      final transformed = await engine.getStringAsync(initRule);
+      if (transformed != null && transformed.isNotEmpty) {
+        html = transformed;
+        engine = AnalyzeRule(
+          html,
+          baseUrl: bookUrl,
+          sourceKey: source.bookSourceUrl,
+          cookieBridge: _client,
+          httpAsync: httpCb,
+        );
+      }
+    }
+
+    Future<String?> g(String? rule) async {
       final r = rule?.trim();
       if (r == null || r.isEmpty) return null;
-      final v = engine.getString(r);
+      final v = await engine.getStringAsync(r);
       return (v == null || v.isEmpty) ? null : v;
     }
 
     var chapters = source.tocRule == null
         ? const <ChapterRef>[]
-        : parseChapters(engine, source.tocRule!, bookUrl);
+        : await parseChaptersAsync(engine, source.tocRule!, bookUrl);
 
     if (chapters.isEmpty) {
-      final tocUrlRule = g(info?.tocUrl);
+      final tocUrlRule = await g(info?.tocUrl);
       if (tocUrlRule != null) {
         final tocUrl = resolveUrl(tocUrlRule, bookUrl);
         if (tocUrl.isNotEmpty && tocUrl != bookUrl) {
           final tocHtml = await _getHtml(source, tocUrl);
-          final tocEngine = AnalyzeRule(tocHtml, baseUrl: source.bookSourceUrl);
-          chapters = parseChapters(tocEngine, source.tocRule!, tocUrl);
+          final tocEngine = AnalyzeRule(
+            tocHtml,
+            baseUrl: tocUrl,
+            sourceKey: source.bookSourceUrl,
+            cookieBridge: _client,
+            httpAsync: httpCb,
+          );
+          chapters = await parseChaptersAsync(
+            tocEngine,
+            source.tocRule!,
+            tocUrl,
+          );
           // 目录分页（`nextTocUrl`）：不少站点目录被拆成 index_1 / index_2 …
           chapters = await _followTocPages(source, tocEngine, tocUrl, chapters);
         }
@@ -89,25 +122,26 @@ class OnlineBookService {
       chapters = await _followTocPages(source, engine, bookUrl, chapters);
     }
 
+    final rawIntro = await g(info?.intro);
+    final rawCover = await g(info?.coverUrl);
+
     return OnlineBookInfo(
-      name: g(info?.name),
-      author: g(info?.author),
-      intro: g(info?.intro) == null
+      name: await g(info?.name),
+      author: await g(info?.author),
+      intro: rawIntro == null
           ? null
           : html_parser
                 .parseFragment(
-                  g(info?.intro)!.replaceAll(
+                  rawIntro.replaceAll(
                     RegExp(r'<br\s*/?>', caseSensitive: false),
                     '\n',
                   ),
                 )
                 .text,
-      coverUrl: g(info?.coverUrl) == null
-          ? null
-          : resolveUrl(g(info?.coverUrl)!, bookUrl),
-      kind: g(info?.kind),
-      lastChapter: g(info?.lastChapter),
-      updateTime: g(info?.updateTime),
+      coverUrl: rawCover == null ? null : resolveUrl(rawCover, bookUrl),
+      kind: await g(info?.kind),
+      lastChapter: await g(info?.lastChapter),
+      updateTime: await g(info?.updateTime),
       chapters: chapters,
     );
   }
@@ -141,6 +175,67 @@ class OnlineBookService {
         final rawHref = hrefs[i].trim();
         if (title.isEmpty || rawHref.isEmpty) continue;
         // 跳过「展开全部章节」等 JS 伪链接
+        final lower = rawHref.toLowerCase();
+        if (lower.startsWith('javascript:') ||
+            lower.startsWith('mailto:') ||
+            lower.startsWith('tel:')) {
+          continue;
+        }
+        final href = resolveUrl(rawHref, baseUrl);
+        if (href.isEmpty) continue;
+        if (!seen.add(href)) continue;
+        out.add(ChapterRef(title: title, href: href));
+      }
+    }
+    return out;
+  }
+
+  /// 异步目录解析（支持 `chapterList` / `chapterName` / `chapterUrl` 内的异步 JS 与 `java.ajax`）。
+  static Future<List<ChapterRef>> parseChaptersAsync(
+    AnalyzeRule engine,
+    TocRule rule,
+    String baseUrl,
+  ) async {
+    var activeEngine = engine;
+    final preJs = rule.preUpdateJs?.trim();
+    if (preJs != null && preJs.isNotEmpty) {
+      final preOut = await activeEngine.getStringAsync(
+        preJs.startsWith('@js:') || preJs.startsWith('<js>')
+            ? preJs
+            : '@js:$preJs',
+      );
+      if (preOut != null && preOut.isNotEmpty) {
+        activeEngine = AnalyzeRule(
+          preOut,
+          baseUrl: baseUrl,
+          sourceKey: engine.sourceKey,
+          cookieBridge: engine.cookieBridge,
+          httpAsync: engine.httpAsync,
+          jsLogs: engine.jsLogs,
+        );
+      }
+    }
+
+    final listRule = rule.chapterList?.trim() ?? '';
+    if (listRule.isEmpty) return const [];
+    final nameRule = rule.chapterName?.trim() ?? '';
+    final urlRule = (rule.chapterUrl?.trim().isNotEmpty ?? false)
+        ? rule.chapterUrl!.trim()
+        : 'tag.a@href';
+
+    final out = <ChapterRef>[];
+    final seen = <String>{};
+    final items = await activeEngine.getRawListAsync(listRule);
+    for (final item in items) {
+      final titles = nameRule.isEmpty
+          ? const <String>[]
+          : await activeEngine.getStringsAsync(nameRule, ctx: item);
+      final hrefs = await activeEngine.getStringsAsync(urlRule, ctx: item);
+      final n = titles.length < hrefs.length ? titles.length : hrefs.length;
+      for (var i = 0; i < n; i++) {
+        final title = titles[i].trim();
+        final rawHref = hrefs[i].trim();
+        if (title.isEmpty || rawHref.isEmpty) continue;
         final lower = rawHref.toLowerCase();
         if (lower.startsWith('javascript:') ||
             lower.startsWith('mailto:') ||
@@ -223,11 +318,18 @@ class OnlineBookService {
     }
 
     final html = await _getHtml(source, chapterUrl);
-    var engine = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
+    final httpCb = _client.asJsAsyncHttpCallback(timeout: _httpTimeout);
+    var engine = AnalyzeRule(
+      html,
+      baseUrl: chapterUrl,
+      sourceKey: source.bookSourceUrl,
+      cookieBridge: _client,
+      httpAsync: httpCb,
+    );
     final raw = source.contentRule?.content ?? '';
     if (raw.trim().isEmpty) return '';
     // 正文通常是多段：取规则命中的**全部**结果并按段拼回（getString 只会取第一段）
-    final buf = <String>[engine.getStrings(raw).join('\n')];
+    final buf = <String>[(await engine.getStringsAsync(raw)).join('\n')];
 
     // 分页正文（`nextContentUrl`）：一章被站点拆成多页时必须继续抓。
     // 典型写法 `text.下一页@href` / `#linkNext@href` / `a#next:contains(下一页)@href`。
@@ -236,7 +338,7 @@ class OnlineBookService {
       var url = chapterUrl;
       final visited = <String>{chapterUrl};
       for (var page = 0; page < 5; page++) {
-        final rawNext = engine.getString(nextRule);
+        final rawNext = await engine.getStringAsync(nextRule);
         if (rawNext == null || rawNext.isEmpty) break;
         final next = resolveUrl(rawNext, url);
         if (next.isEmpty || !visited.add(next) || next == url) break;
@@ -246,15 +348,49 @@ class OnlineBookService {
         } catch (_) {
           break;
         }
-        final e = AnalyzeRule(nextHtml, baseUrl: source.bookSourceUrl);
-        final part = e.getStrings(raw).join('\n');
+        final e = AnalyzeRule(
+          nextHtml,
+          baseUrl: next,
+          sourceKey: source.bookSourceUrl,
+          cookieBridge: _client,
+          httpAsync: httpCb,
+        );
+        final part = (await e.getStringsAsync(raw)).join('\n');
         if (part.trim().isEmpty) break;
         buf.add(part);
         engine = e;
         url = next;
       }
     }
-    return cleanChapterText(buf.join('\n'));
+    var cleaned = cleanChapterText(buf.join('\n'));
+    final repRule = source.contentRule?.replaceRegex?.trim() ?? '';
+    if (repRule.isNotEmpty) {
+      cleaned = _applyContentReplaceRegex(cleaned, repRule);
+    }
+    return cleaned;
+  }
+
+  /// 应用书源 `ruleContent.replaceRegex`（兼容 `##pattern##replacement` 或纯正则删除）。
+  static String _applyContentReplaceRegex(String text, String rule) {
+    if (text.isEmpty || rule.isEmpty) return text;
+    if (rule.startsWith('##')) {
+      final parts = rule.split('##').skip(1).toList();
+      var out = text;
+      for (var i = 0; i < parts.length; i += 2) {
+        final pat = parts[i];
+        final rep = i + 1 < parts.length ? parts[i + 1] : '';
+        if (pat.isEmpty) continue;
+        try {
+          out = out.replaceAll(RegExp(pat, multiLine: true), rep);
+        } catch (_) {}
+      }
+      return out;
+    }
+    try {
+      return text.replaceAll(RegExp(rule, multiLine: true), '');
+    } catch (_) {
+      return text;
+    }
   }
 
   /// 章节页在隐藏 WebView 中打开的地址（应用 gatewayPath 网关重写）。

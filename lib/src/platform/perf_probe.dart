@@ -18,6 +18,7 @@ class PerfProbe {
 
   static final List<FrameTiming> _window = <FrameTiming>[];
   static Duration _windowStart = Duration.zero;
+  static final Stopwatch _bootWatch = Stopwatch();
 
   /// 冷启动前若干帧逐帧打点：开屏这类首屏动画的卡顿要靠这一小段数据定位。
   static const int _traceFrameLimit = 200;
@@ -27,9 +28,19 @@ class PerfProbe {
   /// 在 runApp 之前调用；未启用时什么都不做。
   static void start() {
     if (!enabled) return;
+    _bootWatch
+      ..reset()
+      ..start();
     _windowStart = Duration.zero;
     SchedulerBinding.instance.addTimingsCallback(_onTimings);
     dev.log('PERF probe started', name: 'PERF');
+  }
+
+  /// 记录冷启动各关键阶段耗时（仅在 `--dart-define=PERF_PROBE=true` 时输出）。
+  static void mark(String stage) {
+    if (!enabled) return;
+    // ignore: avoid_print
+    print('PERF boot $stage=${_bootWatch.elapsedMilliseconds}ms');
   }
 
   static void _onTimings(List<FrameTiming> timings) {

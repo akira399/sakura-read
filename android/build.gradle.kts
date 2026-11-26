@@ -22,6 +22,19 @@ subprojects {
 subprojects {
     project.evaluationDependsOn(":app")
 }
+subprojects {
+    plugins.withId("com.android.library") {
+        val appAndroid = rootProject.findProject(":app")?.extensions?.findByName("android")
+        val appNdkVersion = appAndroid?.javaClass?.methods
+            ?.firstOrNull { it.name == "getNdkVersion" && it.parameterCount == 0 }
+            ?.invoke(appAndroid) as? String
+        val targetNdk = appNdkVersion?.takeIf { it.isNotBlank() } ?: "28.2.13676358"
+        val libAndroid = extensions.findByName("android")
+        libAndroid?.javaClass?.methods
+            ?.firstOrNull { it.name == "setNdkVersion" && it.parameterCount == 1 }
+            ?.invoke(libAndroid, targetNdk)
+    }
+}
 
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)

@@ -25,10 +25,12 @@ class SplashGate extends StatefulWidget {
     required this.child,
     this.forcePlay = false,
     this.enabled = true,
+    this.duration = const Duration(milliseconds: 1500),
   });
 
   final Widget child;
   final bool enabled;
+  final Duration duration;
 
   /// 忽略「进程内只播一次」的限制，强制播一遍（测试 / 调试用）。
   @visibleForTesting
@@ -42,9 +44,6 @@ class _SplashGateState extends State<SplashGate>
     with SingleTickerProviderStateMixin {
   /// 每个进程只播放一次。
   static bool _played = false;
-
-  /// 开屏总时长。
-  static const int _durationMs = 1500;
 
   /// 单帧最多推进多少毫秒。
   ///
@@ -93,6 +92,8 @@ class _SplashGateState extends State<SplashGate>
     }
   }
 
+  int get _durationMs => math.max(1, widget.duration.inMilliseconds);
+
   void _onTick(Duration elapsed) {
     final delta = (elapsed - _lastElapsed).inMilliseconds;
     _lastElapsed = elapsed;
@@ -124,6 +125,15 @@ class _SplashGateState extends State<SplashGate>
     }
   }
 
+  void _skip() {
+    if (!_show) return;
+    _childMounted = true;
+    _bloom.value = 1;
+    final targetMs = (_durationMs * 0.82).round();
+    if (_accMs < targetMs) _accMs = targetMs;
+    if (mounted) setState(() {});
+  }
+
   void _finish() {
     if (mounted) {
       setState(() => _show = false);
@@ -152,9 +162,13 @@ class _SplashGateState extends State<SplashGate>
             // 开屏文字必须处于 Material 内：否则会继承 MaterialApp 的兜底文本
             // 样式（该样式自带黄色双下划线，用于提示“文字未包在 Material 中”），
             // 导致标题与副标题下方出现突兀的“双黄线”。透明 Material 不绘制内容。
-            child: Material(
-              type: MaterialType.transparency,
-              child: _SplashView(bloom: _bloom, text: _text, fade: _fade),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _skip,
+              child: Material(
+                type: MaterialType.transparency,
+                child: _SplashView(bloom: _bloom, text: _text, fade: _fade),
+              ),
             ),
           ),
       ],
@@ -177,9 +191,11 @@ class _SplashView extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mq = MediaQuery.of(context);
+    final isLandscape = mq.size.width > mq.size.height;
     // 立绘按屏幕像素宽解码即可：整张 900x1600 的原图解码更久、占内存更多。
     final cacheWidth = math.min(
-      (mq.size.width * mq.devicePixelRatio).round(),
+      ((isLandscape ? mq.size.height : mq.size.width) * mq.devicePixelRatio)
+          .round(),
       1600,
     );
 
@@ -197,6 +213,7 @@ class _SplashView extends StatelessWidget {
               bloom: bloom,
               cacheWidth: cacheWidth,
               isDark: isDark,
+              isLandscape: isLandscape,
             ),
           ),
           // 两页向两侧轻轻展开，露出阅读场景。
@@ -222,7 +239,9 @@ class _SplashView extends StatelessWidget {
             child: IgnorePointer(child: SakuraPetals(count: 12, opacity: .5)),
           ),
           Align(
-            alignment: const Alignment(0, -0.62),
+            alignment: isLandscape
+                ? const Alignment(-0.58, 0)
+                : const Alignment(0, -0.62),
             child: _SplashText(text: text, isDark: isDark),
           ),
         ],
@@ -261,11 +280,13 @@ class _SplashPhoto extends StatelessWidget {
     required this.bloom,
     required this.cacheWidth,
     required this.isDark,
+    required this.isLandscape,
   });
 
   final ValueListenable<double> bloom;
   final int cacheWidth;
   final bool isDark;
+  final bool isLandscape;
 
   @override
   Widget build(BuildContext context) {
@@ -282,7 +303,10 @@ class _SplashPhoto extends StatelessWidget {
           child: RepaintBoundary(
             child: Image.asset(
               'assets/images/splash_reading_v2.jpg',
-              fit: BoxFit.cover,
+              fit: isLandscape ? BoxFit.contain : BoxFit.cover,
+              alignment: isLandscape
+                  ? const Alignment(0.45, 0)
+                  : Alignment.center,
               cacheWidth: cacheWidth,
               filterQuality: FilterQuality.low,
               gaplessPlayback: true,

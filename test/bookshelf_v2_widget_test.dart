@@ -165,4 +165,76 @@ void main() {
     // 排空 AppPrefs 防抖写盘定时器
     await tester.pump(const Duration(milliseconds: 400));
   });
+
+  testWidgets('单本书去重：仅显示继续阅读焦点卡与迎新架位，不重复平铺', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
+
+    final singleDir = Directory.systemTemp.createTempSync('sakura_single_');
+    addTearDown(() {
+      if (singleDir.existsSync()) singleDir.deleteSync(recursive: true);
+    });
+    final sDirs = AppDirs(files: singleDir.path, cache: singleDir.path);
+    final sPrefs = AppPrefs(dirsOverride: sDirs);
+    final sStore = BookStore(dirsOverride: sDirs);
+    await tester.runAsync(() async {
+      await sPrefs.load();
+      await sStore.load();
+    });
+    sStore.addOnline(
+      Book(
+        id: 'only-one',
+        title: '雪国',
+        author: '川端康成',
+        format: BookFormat.txt,
+        path: '/tmp/snow.txt',
+        lastReadAt: 1700000009000,
+        chapters: [ChapterRef(title: '第一章 穿过县界长长的隧道', charCount: 800)],
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: SakuraTheme.build(sPrefs.accent, Brightness.light),
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(390, 844),
+            padding: EdgeInsets.only(top: 32),
+            disableAnimations: true,
+          ),
+          child: Scaffold(
+            body: ShelfPage(
+              store: sStore,
+              prefs: sPrefs,
+              sourceStore: sourceStore,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ContinueReadingCard), findsOneWidget);
+    expect(find.byType(BookGridCard), findsNothing);
+    expect(find.text('书架还有充裕的藏书空间'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 400));
+  });
+
+  testWidgets('切换 4 套书房视觉风格预设均能无异常渲染', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(buildShelf());
+    await tester.pumpAndSettle();
+
+    for (final preset in VisualStylePreset.values) {
+      prefs.applyVisualStylePreset(preset);
+      await tester.pumpAndSettle();
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(find.byType(BookGridCard), findsNWidgets(3));
+    }
+    await tester.pump(const Duration(milliseconds: 400));
+  });
 }

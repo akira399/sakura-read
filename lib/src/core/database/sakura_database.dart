@@ -12,6 +12,9 @@ import '../../data/models.dart';
 class SakuraDatabase {
   SakuraDatabase._(this._db);
 
+  /// 进程内共享数据库实例（后台水合完成后赋值）。
+  static SakuraDatabase? shared;
+
   final Database _db;
 
   Database get raw => _db;
@@ -376,6 +379,116 @@ class SakuraDatabase {
             [bookId],
           );
     return (rows.first['c'] as num?)?.toInt() ?? 0;
+  }
+
+  /// 读取全部正文净化/替换规则（按 `sort_order` 升序）。
+  Future<List<Map<String, Object?>>> loadReplaceRules() async {
+    final rows = await _db.query(
+      'replace_rules',
+      orderBy: 'sort_order ASC, id ASC',
+    );
+    return [for (final row in rows) Map<String, Object?>.of(row)];
+  }
+
+  /// 插入或替换一条正文净化/替换规则。
+  Future<void> upsertReplaceRule(Map<String, Object?> row) async {
+    await _db.insert(
+      'replace_rules',
+      Map<String, Object?>.of(row),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// 删除指定 id 的正文净化/替换规则。
+  Future<void> deleteReplaceRule(String id) async {
+    await _db.delete('replace_rules', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// 切换指定正文净化/替换规则的启用状态。
+  Future<void> setReplaceRuleEnabled(String id, bool enabled) async {
+    await _db.update(
+      'replace_rules',
+      {'enabled': enabled ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// 按书籍（及可选章节索引）读取划线/批注/书签记录。
+  Future<List<Map<String, Object?>>> loadAnnotationsForBook(
+    String bookId, {
+    int? chapterIndex,
+  }) async {
+    final rows = chapterIndex == null
+        ? await _db.query(
+            'annotations',
+            where: 'book_id = ?',
+            whereArgs: [bookId],
+            orderBy: 'chapter_index ASC, start_offset ASC, created_at ASC',
+          )
+        : await _db.query(
+            'annotations',
+            where: 'book_id = ? AND chapter_index = ?',
+            whereArgs: [bookId, chapterIndex],
+            orderBy: 'start_offset ASC, created_at ASC',
+          );
+    return [for (final row in rows) Map<String, Object?>.of(row)];
+  }
+
+  /// 插入或更新一条划线/批注/书签记录。
+  Future<void> upsertAnnotation(Map<String, Object?> row) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final values = Map<String, Object?>.of(row);
+    values.putIfAbsent('created_at', () => now);
+    values.putIfAbsent('updated_at', () => now);
+    await _db.insert(
+      'annotations',
+      values,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// 删除指定 id 的划线/批注/书签记录。
+  Future<void> deleteAnnotation(String id) async {
+    await _db.delete('annotations', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// 读取指定书籍和类型的防剧透 AI 记忆记录（不存在时返回 null）。
+  Future<Map<String, Object?>?> getAiMemory(String bookId, String kind) async {
+    final rows = await _db.query(
+      'ai_book_memory',
+      where: 'book_id = ? AND kind = ?',
+      whereArgs: [bookId, kind],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return Map<String, Object?>.of(rows.first);
+  }
+
+  /// 插入或更新指定书籍的防剧透 AI 记忆记录。
+  Future<void> upsertAiMemory({
+    required String bookId,
+    required int maxChapterIndex,
+    required String kind,
+    required String contentJson,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _db.insert('ai_book_memory', {
+      'book_id': bookId,
+      'max_chapter_index': maxChapterIndex,
+      'kind': kind,
+      'content_json': contentJson,
+      'updated_at': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// 删除指定书籍的全部 AI 记忆记录。
+  Future<void> deleteAiMemoryForBook(String bookId) async {
+    await _db.delete(
+      'ai_book_memory',
+      where: 'book_id = ?',
+      whereArgs: [bookId],
+    );
   }
 
   Future<void> close() => _db.close();

@@ -11,6 +11,7 @@
 //   行格式 `标题::地址`（316 个）、JSON 数组（318 个）、JS 脚本（168 个，不支持）
 import 'package:flutter/material.dart';
 
+import '../../core/theme/sakura_layout.dart';
 import '../../data/book_store.dart';
 import '../../data/prefs.dart';
 import '../../source/models.dart';
@@ -189,8 +190,10 @@ class _DiscoverPageState extends State<DiscoverPage> {
   @override
   Widget build(BuildContext context) {
     if (_sources.isEmpty) return _buildEmpty();
+    final shortLandscape = SakuraLayout.isShortLandscape(context);
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: shortLandscape ? 46 : null,
         title: const Text('发现'),
         actions: [
           IconButton(
@@ -205,13 +208,24 @@ class _DiscoverPageState extends State<DiscoverPage> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildSourceSelector(),
-          if (_categories.isNotEmpty) _buildCategoryBar(),
-          const Divider(height: 1),
-          Expanded(child: _buildList()),
-        ],
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: SakuraLayout.contentMaxWidth,
+            ),
+            child: Column(
+              children: [
+                _buildSourceSelector(),
+                if (_categories.isNotEmpty) _buildCategoryBar(),
+                const Divider(height: 1),
+                Expanded(child: _buildList()),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -263,32 +277,43 @@ class _DiscoverPageState extends State<DiscoverPage> {
   Widget _buildEmpty() {
     final s = _stats;
     final js = s?.jsOnly ?? 0;
+    final shortLandscape = SakuraLayout.isShortLandscape(context);
+    final bottomClearance =
+        MediaQuery.paddingOf(context).bottom + (shortLandscape ? 84 : 104);
     return Scaffold(
-      appBar: AppBar(title: const Text('发现')),
-      body: EmptyState(
-        icon: Icons.explore_outlined,
-        title: '没有可用的发现页书源',
-        subtitle:
-            '共启用 ${s?.total ?? 0} 个书源，其中没有一个能被静态解析\n'
-            '${js > 0 ? '（另有 $js 个书源使用 JS 脚本生成分类，暂不支持）\n' : ''}'
-            '\n'
-            '发现页需要书源里的 exploreUrl 是「行格式」或「JSON 数组」：\n'
-            '· 行格式：玄幻::https://站点/list/{{page}}.html\n'
-            '· JSON：[{"title":"玄幻","url":"https://..."}]\n'
-            '\n'
-            '可在「设置 → 书源管理」导入带此类规则的书源',
-        actions: [
-          IconButton(
-            tooltip: '查找书源',
-            icon: const Icon(Icons.search),
-            onPressed: _findSource,
-          ),
-          FilledButton.icon(
-            onPressed: () => _reloadSources(),
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('重新检测'),
-          ),
-        ],
+      appBar: AppBar(
+        toolbarHeight: shortLandscape ? 46 : null,
+        title: const Text('发现'),
+      ),
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: EmptyState(
+          icon: Icons.explore_outlined,
+          title: '没有可用的发现页书源',
+          subtitle:
+              '共启用 ${s?.total ?? 0} 个书源，其中没有一个能被静态解析\n'
+              '${js > 0 ? '（另有 $js 个书源使用 JS 脚本生成分类，暂不支持）\n' : ''}'
+              '\n'
+              '发现页需要书源里的 exploreUrl 是「行格式」或「JSON 数组」：\n'
+              '· 行格式：玄幻::https://站点/list/{{page}}.html\n'
+              '· JSON：[{"title":"玄幻","url":"https://..."}]\n'
+              '\n'
+              '可在「设置 → 书源管理」导入带此类规则的书源',
+          bottomClearance: bottomClearance,
+          actions: [
+            IconButton(
+              tooltip: '查找书源',
+              icon: const Icon(Icons.search),
+              onPressed: _findSource,
+            ),
+            FilledButton.icon(
+              onPressed: () => _reloadSources(),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('重新检测'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -382,12 +407,16 @@ class _DiscoverPageState extends State<DiscoverPage> {
 
   Widget _buildList() {
     if (_loading) return const Center(child: CircularProgressIndicator());
+    final shortLandscape = SakuraLayout.isShortLandscape(context);
+    final bottomClearance =
+        MediaQuery.paddingOf(context).bottom + (shortLandscape ? 84 : 104);
     final error = _error;
     if (error != null) {
       return EmptyState(
         icon: Icons.cloud_off_rounded,
         title: '没有拿到书单',
         subtitle: error,
+        bottomClearance: bottomClearance,
         actions: [
           IconButton(
             tooltip: '查找书源',
@@ -402,14 +431,28 @@ class _DiscoverPageState extends State<DiscoverPage> {
         ],
       );
     }
+    final isWide = SakuraLayout.isWide(context);
+    final bottomPad = MediaQuery.paddingOf(context).bottom + 100;
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-        itemCount: _books.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 6),
-        itemBuilder: (context, i) => _buildTile(context, _books[i]),
-      ),
+      child: isWide
+          ? GridView.builder(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, bottomPad),
+              itemCount: _books.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 12,
+                mainAxisExtent: 92,
+              ),
+              itemBuilder: (context, i) => _buildTile(context, _books[i]),
+            )
+          : ListView.separated(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, bottomPad),
+              itemCount: _books.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 6),
+              itemBuilder: (context, i) => _buildTile(context, _books[i]),
+            ),
     );
   }
 

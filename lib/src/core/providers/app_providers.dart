@@ -8,8 +8,10 @@ import '../../data/stats_store.dart';
 import '../../source/source_store.dart';
 import '../database/sakura_database.dart';
 
-/// 全局 SQLite 数据库（测试未注入时可为 null）。
-final sakuraDatabaseProvider = Provider<SakuraDatabase?>((_) => null);
+/// 全局 SQLite 数据库（后台打开后通过 [SakuraDatabase.shared] 获取；测试未注入时可为 null）。
+final sakuraDatabaseProvider = Provider<SakuraDatabase?>(
+  (_) => SakuraDatabase.shared,
+);
 
 /// 书架状态仓库（由 SakuraApp 在根部 override 注入）。
 final bookStoreProvider = ChangeNotifierProvider<BookStore>((_) {

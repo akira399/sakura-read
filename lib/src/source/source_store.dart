@@ -229,42 +229,68 @@ class SourceStore extends ChangeNotifier with ReliablePersistence {
   /// 导入 / 更新内置书源（App 启动时调用）。
   ///
   /// - 首次启动（书源为空）：全量导入；
-  /// - 已有书源：同地址的源以版本内置内容为准更新（保留用户启停状态），
-  ///   并补齐版本升级新增的内置源；
-  /// - 版本升级时，可清理「历史内置、现已下线」的源（见内置资产的
-  ///   `legacyBuiltinUrls` 元数据；当前资产未登记任何地址）。
+  /// - 已有书源：单次 JSON 解析并对比差异，完全一致时零写入、零通知；
+  ///   有新增/变更或移除历史下线源时才增量更新并落盘。
   Future<int> ensureBuiltinSources() async {
     try {
       final text = await rootBundle.loadString(
         'assets/sources/builtin_sources.json',
       );
-      final removed = _dropLegacyBuiltinSources(text);
-      final report = importFromText(text);
-      await flush();
-      return report.added + report.updated + removed;
+      final trimmed = text.trim().replaceFirst('\uFEFF', '');
+      if (trimmed.isEmpty) return 0;
+      final decoded = jsonDecode(trimmed);
+      final removed = _dropLegacyBuiltinSourcesDecoded(decoded);
+      final items = BookSource.listFromJson(decoded);
+      var changed = 0;
+      if (items.isNotEmpty) {
+        final indexByUrl = <String, int>{
+          for (var i = 0; i < _sources.length; i++)
+            _sources[i].bookSourceUrl: i,
+        };
+        for (final s in items) {
+          final i = indexByUrl[s.bookSourceUrl];
+          if (i == null) {
+            _sources.add(s);
+            indexByUrl[s.bookSourceUrl] = _sources.length - 1;
+            changed++;
+          } else {
+            final existing = _sources[i];
+            final candidate = s.enabled == existing.enabled
+                ? s
+                : s.copyWith(enabled: existing.enabled);
+            if (jsonEncode(existing.toJson()) !=
+                jsonEncode(candidate.toJson())) {
+              _sources[i] = candidate;
+              changed++;
+            }
+          }
+        }
+      }
+      final totalChanged = changed + removed;
+      if (totalChanged > 0) {
+        _saveSoon();
+        notifyListeners();
+        await flush();
+      }
+      return totalChanged;
     } catch (_) {
       return 0;
     }
   }
 
-  /// 按内置资产里的 `legacyBuiltinUrls` 清单移除历史内置源。
+  /// 按内置资产里的 `legacyBuiltinUrls` 清单移除历史内置源（复用已解码对象）。
   ///
   /// 只删「书源地址完全一致」的条目：用户自己导入的同名站点不受影响。
-  int _dropLegacyBuiltinSources(String builtinJson) {
+  int _dropLegacyBuiltinSourcesDecoded(dynamic decoded) {
     final legacy = <String>{};
-    try {
-      final decoded = jsonDecode(builtinJson);
-      if (decoded is List) {
-        for (final item in decoded) {
-          if (item is! Map) continue;
-          final urls = item['legacyBuiltinUrls'];
-          if (urls is List) {
-            legacy.addAll(urls.map((u) => u.toString().trim()));
-          }
+    if (decoded is List) {
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final urls = item['legacyBuiltinUrls'];
+        if (urls is List) {
+          legacy.addAll(urls.map((u) => u.toString().trim()));
         }
       }
-    } catch (_) {
-      return 0;
     }
     legacy.removeWhere((u) => u.isEmpty);
     if (legacy.isEmpty) return 0;

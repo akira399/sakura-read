@@ -1,6 +1,8 @@
 // 规则求值引擎：把「规则字符串 + 文档」的完整求值流程串起来。
 //
-// 求值顺序（对照 Legado 的公开行为，独立实现）：
+// 求值顺序（对照 Legado 3.0 的公开行为，独立实现）：
+//   0. 若规则含 `@js:` / `<js>...</js>`，按段顺序串行执行（前段输出作为下段 `result`）；
+//      若基础规则含内联 `{{...}}` 模板，逐个展开为 JS / 子规则求值结果；
 //   1. `||` 拆分备选：从左到右求值，取第一个非空结果（兜底）；
 //   2. 每条备选内 `&&` 串联：各段结果用换行拼接；
 //   3. 每段规则先拆 `##` 替换链（只作用于字符串结果）；
@@ -17,6 +19,7 @@ import 'analyze_css.dart';
 import 'analyze_json.dart';
 import 'analyze_regex.dart';
 import 'analyze_xpath.dart';
+import 'js_engine.dart';
 import 'rule_analyzer.dart';
 
 /// HTML → XML 宽松解析（容错常见的不合法写法，供 XPath 使用）。
@@ -51,18 +54,50 @@ xml.XmlDocument? parseXmlLoose(String html) {
   }
 }
 
-/// 规则求值器。
+/// 规则求值器（支持 CSS / JSONPath / XPath / Regex / Legado 3.0 JS）。
 class AnalyzeRule {
-  AnalyzeRule(this.document, {this.baseUrl = '', this.vars = const {}});
+  AnalyzeRule(
+    this.document, {
+    this.baseUrl = '',
+    this.vars = const {},
+    this.sourceKey = '',
+    this.key = '',
+    this.page = 1,
+    LegadoJsEngine? jsEngine,
+    this.cookieBridge,
+    this.variableStore,
+    this.httpSync,
+    this.httpAsync,
+    List<String>? jsLogs,
+  }) : _jsEngine = jsEngine ?? LegadoJsEngine.shared,
+       jsLogs = jsLogs ?? <String>[];
 
   /// 文档文本（HTML 或 JSON；也可为普通文本）。
   final String? document;
 
-  /// 书源主地址（补全相对链接用，引擎内部暂不消费，M2 使用）。
+  /// 书源主地址或当前页 URL（补全相对链接与 JS `baseUrl` 用）。
   final String baseUrl;
 
-  /// 替换串里的变量（`{{chapter.title}}` 这类）：规则层只做纯文本替换。
+  /// 替换串里的变量（`{{chapter.title}}` 这类）。
   final Map<String, String> vars;
+
+  /// 书源唯一标识（通常为 `bookSourceUrl`，用于 `source.getVariable()`）。
+  final String sourceKey;
+
+  /// 搜索关键词（JS 全局 `key`）。
+  final String key;
+
+  /// 当前页码（JS 全局 `page`）。
+  final int page;
+
+  final LegadoJsEngine _jsEngine;
+  final JsCookieBridge? cookieBridge;
+  final SourceVariableStore? variableStore;
+  final JsSyncHttpCallback? httpSync;
+  final JsAsyncHttpCallback? httpAsync;
+
+  /// 执行 JS 过程中收集的 `console.log` / `java.log` 输出（供调试器展示）。
+  final List<String> jsLogs;
 
   dom.Document? _htmlDoc;
   bool _jsonTried = false;
@@ -98,15 +133,35 @@ class AnalyzeRule {
     return _xmlDoc;
   }
 
-  // ---------- 对外 API ----------
+  AnalyzeRule _childWithDoc(String nextDoc) => AnalyzeRule(
+    nextDoc,
+    baseUrl: baseUrl,
+    vars: vars,
+    sourceKey: sourceKey,
+    key: key,
+    page: page,
+    jsEngine: _jsEngine,
+    cookieBridge: cookieBridge,
+    variableStore: variableStore,
+    httpSync: httpSync,
+    httpAsync: httpAsync,
+    jsLogs: jsLogs,
+  );
+
+  // ---------- 对外同步 API ----------
 
   /// 取单个字符串结果（`||` 兜底取第一个非空）。
   String? getString(String rule, {Object? ctx}) {
-    final jsRemainder = _jsRemainder(rule);
-    if (jsRemainder != null) {
-      return jsRemainder.isEmpty ? null : getString(jsRemainder, ctx: ctx);
+    final trimmed = rule.trim();
+    if (trimmed.isEmpty) return null;
+    if (LegadoJsEngine.containsJs(trimmed)) {
+      final val = _evalJsPipelineSync(trimmed, ctx: ctx, asList: false);
+      return _dynamicToString(val);
     }
-    for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
+    if (_hasInlineTemplateOutsideReplace(trimmed)) {
+      return _evalInlineTemplateSync(trimmed, ctx: ctx);
+    }
+    for (final alt in RuleAnalyzer.splitAlternatives(trimmed)) {
       final parts = RuleAnalyzer.splitConcat(alt);
       final buf = <String>[];
       for (final piece in parts) {
@@ -120,11 +175,17 @@ class AnalyzeRule {
 
   /// 取字符串列表（`||` 兜底取第一个非空列表）。
   List<String> getStrings(String rule, {Object? ctx}) {
-    final jsRemainder = _jsRemainder(rule);
-    if (jsRemainder != null) {
-      return jsRemainder.isEmpty ? const [] : getStrings(jsRemainder, ctx: ctx);
+    final trimmed = rule.trim();
+    if (trimmed.isEmpty) return const [];
+    if (LegadoJsEngine.containsJs(trimmed)) {
+      final val = _evalJsPipelineSync(trimmed, ctx: ctx, asList: true);
+      return _dynamicToStringList(val);
     }
-    for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
+    if (_hasInlineTemplateOutsideReplace(trimmed)) {
+      final s = _evalInlineTemplateSync(trimmed, ctx: ctx);
+      return (s == null || s.isEmpty) ? const [] : [s];
+    }
+    for (final alt in RuleAnalyzer.splitAlternatives(trimmed)) {
       final parts = RuleAnalyzer.splitConcat(alt);
       final out = <String>[];
       for (final piece in parts) {
@@ -135,15 +196,15 @@ class AnalyzeRule {
     return const [];
   }
 
-  /// 取元素列表（用于 bookList 这类“再迭代”的规则；CSS / XPath 皆可）。
+  /// 取元素列表（用于 bookList 这类“再迭代”的规则；CSS / XPath / JS 皆可）。
   List<Object> getElements(String rule, {Object? ctx}) {
-    final jsRemainder = _jsRemainder(rule);
-    if (jsRemainder != null) {
-      return jsRemainder.isEmpty
-          ? const []
-          : getElements(jsRemainder, ctx: ctx);
+    final trimmed = rule.trim();
+    if (trimmed.isEmpty) return const [];
+    if (LegadoJsEngine.containsJs(trimmed)) {
+      final raw = _evalJsPipelineSync(trimmed, ctx: ctx, asList: true);
+      return _dynamicToElements(raw);
     }
-    for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
+    for (final alt in RuleAnalyzer.splitAlternatives(trimmed)) {
       final raw = _evalPiece(alt, ctx);
       final els = raw
           .where((o) => o is dom.Element || o is xml.XmlElement)
@@ -155,47 +216,345 @@ class AnalyzeRule {
 
   /// 取原始结果列表（保留原型：DOM 元素 / XML 节点 / JSON 值 / 字符串）。
   List<Object> getRawList(String rule, {Object? ctx}) {
-    final jsRemainder = _jsRemainder(rule);
-    if (jsRemainder != null) {
-      return jsRemainder.isEmpty ? const [] : getRawList(jsRemainder, ctx: ctx);
+    final trimmed = rule.trim();
+    if (trimmed.isEmpty) return const [];
+    if (LegadoJsEngine.containsJs(trimmed)) {
+      final val = _evalJsPipelineSync(trimmed, ctx: ctx, asList: true);
+      return _dynamicToRawList(val);
     }
-    for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
+    for (final alt in RuleAnalyzer.splitAlternatives(trimmed)) {
       final raw = _evalPiece(alt, ctx);
       if (raw.isNotEmpty) return raw;
     }
     return const [];
   }
 
-  /// 判断规则是否是 JS 规则，并返回可继续求值的剩余部分。
-  ///
-  /// - 非 JS 规则 → `null`
-  /// - 纯 JS（`<js>…</js>` / `@js:…`）→ 空串（当前引擎不执行 JS，交由上层
-  ///   的 JS 桥解析；这里返回空避免把 JS 源码当选择器求出垃圾结果）
-  /// - `<js>…</js>CSS` 混合写法 → 返回尾部的 CSS 规则
-  ///
-  /// 注意：不能在 JS 源码上直接 split `||` / `&&`（JS 里全是这两个符号），
-  /// 所以判断必须发生在拆分之前。
-  static String? _jsRemainder(String rule) {
-    final t = rule.trim();
-    final lower = t.toLowerCase();
-    if (lower.startsWith('<js>')) {
-      final end = lower.indexOf('</js>');
-      if (end < 0) return '';
-      final rest = t.substring(end + 5).trim();
-      return rest.isEmpty ? '' : rest;
+  // ---------- 对外异步 API（支持 JS 内调用 `java.ajax` / `java.get` / `java.post`） ----------
+
+  Future<String?> getStringAsync(String rule, {Object? ctx}) async {
+    final trimmed = rule.trim();
+    if (trimmed.isEmpty) return null;
+    if (LegadoJsEngine.containsJs(trimmed)) {
+      final val = await _evalJsPipelineAsync(trimmed, ctx: ctx, asList: false);
+      return _dynamicToString(val);
     }
-    if (lower.startsWith('@js:')) {
-      return '';
+    if (_hasInlineTemplateOutsideReplace(trimmed)) {
+      return _evalInlineTemplateAsync(trimmed, ctx: ctx);
     }
-    return null;
+    return getString(trimmed, ctx: ctx);
+  }
+
+  Future<List<String>> getStringsAsync(String rule, {Object? ctx}) async {
+    final trimmed = rule.trim();
+    if (trimmed.isEmpty) return const [];
+    if (LegadoJsEngine.containsJs(trimmed)) {
+      final val = await _evalJsPipelineAsync(trimmed, ctx: ctx, asList: true);
+      return _dynamicToStringList(val);
+    }
+    if (_hasInlineTemplateOutsideReplace(trimmed)) {
+      final s = await _evalInlineTemplateAsync(trimmed, ctx: ctx);
+      return (s == null || s.isEmpty) ? const [] : [s];
+    }
+    return getStrings(trimmed, ctx: ctx);
+  }
+
+  Future<List<Object>> getRawListAsync(String rule, {Object? ctx}) async {
+    final trimmed = rule.trim();
+    if (trimmed.isEmpty) return const [];
+    if (LegadoJsEngine.containsJs(trimmed)) {
+      final val = await _evalJsPipelineAsync(trimmed, ctx: ctx, asList: true);
+      return _dynamicToRawList(val);
+    }
+    return getRawList(trimmed, ctx: ctx);
+  }
+
+  // ---------- JS 管线求值 ----------
+
+  JsEvalContext _buildJsContext(dynamic currentResult, {Object? ctx}) {
+    final activeEngine = currentResult is String && currentResult != document
+        ? _childWithDoc(currentResult)
+        : this;
+    final activeCtx = currentResult is String && currentResult != document
+        ? null
+        : ctx;
+    return JsEvalContext(
+      result: currentResult,
+      baseUrl: baseUrl,
+      src: document ?? '',
+      key: key,
+      page: page,
+      sourceKey: sourceKey.isNotEmpty ? sourceKey : baseUrl,
+      getStringCallback: (r) => activeEngine.getString(r, ctx: activeCtx) ?? '',
+      getElementsCallback: (r) => activeEngine.getRawList(r, ctx: activeCtx),
+      cookieBridge: cookieBridge,
+      variableStore: variableStore,
+      httpSync: httpSync,
+      httpAsync: httpAsync,
+      logs: jsLogs,
+    );
+  }
+
+  dynamic _evalJsPipelineSync(
+    String rule, {
+    Object? ctx,
+    required bool asList,
+  }) {
+    final segments = LegadoJsEngine.splitRuleSegments(rule);
+    if (segments.isEmpty) return null;
+
+    dynamic current = _initialJsInput(ctx);
+    var hasTransformed = false;
+
+    for (var i = 0; i < segments.length; i++) {
+      final seg = segments[i];
+      if (!seg.isJs) {
+        final target = hasTransformed && current is String
+            ? _childWithDoc(current)
+            : this;
+        final targetCtx = hasTransformed && current is String ? null : ctx;
+        final isLast = i == segments.length - 1;
+        if (asList && isLast) {
+          current = target.getRawList(seg.content, ctx: targetCtx);
+        } else if (asList) {
+          final list = target.getStrings(seg.content, ctx: targetCtx);
+          current = list.length == 1 ? list.first : list.join('\n');
+        } else {
+          current = target.getString(seg.content, ctx: targetCtx) ?? '';
+        }
+        hasTransformed = true;
+      } else {
+        final jsCtx = _buildJsContext(current, ctx: ctx);
+        final res = _jsEngine.eval(seg.content, context: jsCtx);
+        if (!res.ok) {
+          jsLogs.add('[js error] ${res.error}');
+          return null;
+        }
+        current = res.value;
+        hasTransformed = true;
+      }
+    }
+    return current;
+  }
+
+  Future<dynamic> _evalJsPipelineAsync(
+    String rule, {
+    Object? ctx,
+    required bool asList,
+  }) async {
+    final segments = LegadoJsEngine.splitRuleSegments(rule);
+    if (segments.isEmpty) return null;
+
+    dynamic current = _initialJsInput(ctx);
+    var hasTransformed = false;
+
+    for (var i = 0; i < segments.length; i++) {
+      final seg = segments[i];
+      if (!seg.isJs) {
+        final target = hasTransformed && current is String
+            ? _childWithDoc(current)
+            : this;
+        final targetCtx = hasTransformed && current is String ? null : ctx;
+        final isLast = i == segments.length - 1;
+        if (asList && isLast) {
+          current = target.getRawList(seg.content, ctx: targetCtx);
+        } else if (asList) {
+          final list = target.getStrings(seg.content, ctx: targetCtx);
+          current = list.length == 1 ? list.first : list.join('\n');
+        } else {
+          current = target.getString(seg.content, ctx: targetCtx) ?? '';
+        }
+        hasTransformed = true;
+      } else {
+        final jsCtx = _buildJsContext(current, ctx: ctx);
+        final res = await _jsEngine.evalAsync(seg.content, context: jsCtx);
+        if (!res.ok) {
+          jsLogs.add('[js error] ${res.error}');
+          return null;
+        }
+        current = res.value;
+        hasTransformed = true;
+      }
+    }
+    return current;
+  }
+
+  dynamic _initialJsInput(Object? ctx) {
+    if (ctx == null) return document ?? '';
+    if (ctx is String ||
+        ctx is num ||
+        ctx is bool ||
+        ctx is Map ||
+        ctx is List) {
+      return ctx;
+    }
+    if (ctx is dom.Element) return ctx.outerHtml;
+    if (ctx is xml.XmlElement) return ctx.toXmlString();
+    return ctx.toString();
+  }
+
+  // ---------- 内联 `{{...}}` 模板求值 ----------
+
+  static final RegExp _inlineTplRe = RegExp(r'\{\{([\s\S]+?)\}\}');
+
+  /// 仅在基础规则段（`##` 替换链之前）包含 `{{...}}` 时走内联模板求值，
+  /// 避免影响 `##{{chapter.title}}` 这类替换链变量语法。
+  static bool _hasInlineTemplateOutsideReplace(String rule) {
+    if (!rule.contains('{{') || !rule.contains('}}')) return false;
+    final replaceIdx = rule.indexOf('##');
+    final basePart = replaceIdx >= 0 ? rule.substring(0, replaceIdx) : rule;
+    return _inlineTplRe.hasMatch(basePart);
+  }
+
+  String? _evalInlineTemplateSync(String rule, {Object? ctx}) {
+    final parts = RuleAnalyzer.splitReplaces(rule);
+    final rendered = parts.base.replaceAllMapped(_inlineTplRe, (m) {
+      final expr = m.group(1)!.trim();
+      return _evalSingleInlineExprSync(expr, ctx: ctx);
+    });
+    final applied = parts.chains.isEmpty
+        ? rendered
+        : RuleAnalyzer.applyReplaces(rendered, parts.chains, vars: vars);
+    final trimmed = applied.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  Future<String?> _evalInlineTemplateAsync(String rule, {Object? ctx}) async {
+    final parts = RuleAnalyzer.splitReplaces(rule);
+    final matches = _inlineTplRe.allMatches(parts.base).toList();
+    if (matches.isEmpty) return null;
+    final sb = StringBuffer();
+    var cursor = 0;
+    for (final m in matches) {
+      sb.write(parts.base.substring(cursor, m.start));
+      final expr = m.group(1)!.trim();
+      sb.write(await _evalSingleInlineExprAsync(expr, ctx: ctx));
+      cursor = m.end;
+    }
+    sb.write(parts.base.substring(cursor));
+    final rendered = sb.toString();
+    final applied = parts.chains.isEmpty
+        ? rendered
+        : RuleAnalyzer.applyReplaces(rendered, parts.chains, vars: vars);
+    final trimmed = applied.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  String _evalSingleInlineExprSync(String expr, {Object? ctx}) {
+    if (expr.isEmpty) return '';
+    if (vars.containsKey(expr)) return vars[expr] ?? '';
+    if (_looksLikeSelectorExpr(expr)) {
+      return getString(expr, ctx: ctx) ?? '';
+    }
+    final jsCtx = _buildJsContext(_initialJsInput(ctx), ctx: ctx);
+    final res = _jsEngine.eval(expr, context: jsCtx);
+    if (res.ok && res.value != null) {
+      return res.asString;
+    }
+    // JS 失败时尝试按普通规则求值（兼容 Legado `{{class.x@text}}` 写法）
+    return getString(expr, ctx: ctx) ?? '';
+  }
+
+  Future<String> _evalSingleInlineExprAsync(String expr, {Object? ctx}) async {
+    if (expr.isEmpty) return '';
+    if (vars.containsKey(expr)) return vars[expr] ?? '';
+    if (_looksLikeSelectorExpr(expr)) {
+      return getString(expr, ctx: ctx) ?? '';
+    }
+    final jsCtx = _buildJsContext(_initialJsInput(ctx), ctx: ctx);
+    final res = await _jsEngine.evalAsync(expr, context: jsCtx);
+    if (res.ok && res.value != null) {
+      return res.asString;
+    }
+    return getString(expr, ctx: ctx) ?? '';
+  }
+
+  static bool _looksLikeSelectorExpr(String expr) =>
+      expr.startsWith(r'$.') ||
+      expr.startsWith(r'$[') ||
+      expr.startsWith(r'$..') ||
+      expr.startsWith('@css:') ||
+      expr.startsWith('@xpath:') ||
+      expr.startsWith('@json:') ||
+      expr.startsWith('@regex:') ||
+      expr.startsWith('class.') ||
+      expr.startsWith('id.') ||
+      expr.startsWith('tag.');
+
+  // ---------- 动态结果转换 ----------
+
+  String? _dynamicToString(dynamic val) {
+    if (val == null) return null;
+    if (val is String) {
+      final t = val.trim();
+      return t.isEmpty ? null : t;
+    }
+    if (val is List) {
+      final strs = _dynamicToStringList(val);
+      return strs.isEmpty ? null : strs.join('\n');
+    }
+    if (val is dom.Element || val is xml.XmlElement) {
+      return _toStr(val);
+    }
+    if (val is Map) return jsonEncode(val);
+    final s = val.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  List<String> _dynamicToStringList(dynamic val) {
+    if (val == null) return const [];
+    if (val is List) {
+      final out = <String>[];
+      for (final item in val) {
+        if (item == null) continue;
+        final s = item is Object ? _toStr(item) : item.toString();
+        if (s != null && s.isNotEmpty) out.add(s);
+      }
+      return out;
+    }
+    final s = _dynamicToString(val);
+    return s == null ? const [] : [s];
+  }
+
+  List<Object> _dynamicToRawList(dynamic val) {
+    if (val == null) return const [];
+    if (val is List) {
+      return val.whereType<Object>().toList();
+    }
+    if (val is String) {
+      final t = val.trim();
+      if (t.isEmpty) return const [];
+      if (t.startsWith('[')) {
+        try {
+          final decoded = jsonDecode(t);
+          if (decoded is List) return decoded.whereType<Object>().toList();
+        } catch (_) {}
+      }
+      return [t];
+    }
+    return [val as Object];
+  }
+
+  List<Object> _dynamicToElements(dynamic val) {
+    final raw = _dynamicToRawList(val);
+    final els = raw
+        .where((o) => o is dom.Element || o is xml.XmlElement)
+        .toList();
+    if (els.isNotEmpty) return els;
+    // 若 JS 返回了 HTML 片段字符串，自动解析为其顶层元素
+    if (val is String && val.contains('<')) {
+      final doc = parseHtml(val);
+      return List<Object>.from(doc.body?.children ?? const []);
+    }
+    return raw;
   }
 
   // ---------- 内部求值 ----------
 
   List<Object> _evalPiece(String piece, Object? ctx) {
-    final jsRemainder = _jsRemainder(piece);
-    if (jsRemainder != null) {
-      return jsRemainder.isEmpty ? const [] : _evalPiece(jsRemainder, ctx);
+    if (LegadoJsEngine.containsJs(piece)) {
+      return _dynamicToRawList(
+        _evalJsPipelineSync(piece, ctx: ctx, asList: true),
+      );
     }
     final parts = RuleAnalyzer.splitReplaces(piece);
     var rawBase = parts.base.trim();

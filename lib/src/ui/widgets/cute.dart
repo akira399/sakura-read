@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/sakura_layout.dart';
+
 /// 樱花 logo（纯 Canvas 绘制）。
 class PetalLogo extends StatelessWidget {
   const PetalLogo({super.key, this.size = 64, this.color, this.centerColor});
@@ -117,6 +119,8 @@ class EmptyState extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.actions = const [],
+    this.scrollable = true,
+    this.bottomClearance = 0,
   });
 
   final IconData icon;
@@ -130,66 +134,101 @@ class EmptyState extends StatelessWidget {
   final String? subtitle;
   final List<Widget> actions;
 
+  /// 外层无滚动容器时启用防溢出滚动，保证横屏矮屏不出现裁剪条纹。
+  final bool scrollable;
+
+  /// 底部避让留白（用于让出悬浮底栏高度）。
+  final double bottomClearance;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Center(
+    final shortLandscape = SakuraLayout.isShortLandscape(context);
+    final pad = EdgeInsets.fromLTRB(
+      shortLandscape ? 24 : 32,
+      shortLandscape ? 12 : 32,
+      shortLandscape ? 24 : 32,
+      math.max(shortLandscape ? 16.0 : 32.0, bottomClearance),
+    );
+    final content = Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (illustration != null)
-              illustration!
-            else if (imageAsset != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                child: Image.asset(
-                  imageAsset!,
-                  width: 168,
-                  height: 168,
-                  fit: BoxFit.cover,
-                ),
-              )
-            else
-              Container(
-                padding: const EdgeInsets.all(22),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      scheme.primary.withValues(alpha: .25),
-                      scheme.secondary.withValues(alpha: .25),
-                    ],
+        padding: pad,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 540),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (illustration != null)
+                illustration!
+              else if (imageAsset != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
+                  child: Image.asset(
+                    imageAsset!,
+                    width: shortLandscape ? 116 : 168,
+                    height: shortLandscape ? 116 : 168,
+                    fit: BoxFit.cover,
                   ),
-                  shape: BoxShape.circle,
+                )
+              else
+                Container(
+                  padding: EdgeInsets.all(shortLandscape ? 14 : 22),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        scheme.primary.withValues(alpha: .25),
+                        scheme.secondary.withValues(alpha: .25),
+                      ],
+                    ),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    icon,
+                    size: shortLandscape ? 34 : 46,
+                    color: scheme.primary,
+                  ),
                 ),
-                child: Icon(icon, size: 46, color: scheme.primary),
-              ),
-            const SizedBox(height: 18),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(height: 8),
+              SizedBox(height: shortLandscape ? 10 : 18),
               Text(
-                subtitle!,
+                title,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.onSurfaceVariant, height: 1.5),
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w800),
               ),
+              if (subtitle != null) ...[
+                SizedBox(height: shortLandscape ? 6 : 8),
+                Text(
+                  subtitle!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontSize: shortLandscape ? 12.5 : null,
+                    height: shortLandscape ? 1.4 : 1.5,
+                  ),
+                ),
+              ],
+              if (actions.isNotEmpty) ...[
+                SizedBox(height: shortLandscape ? 14 : 20),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  alignment: WrapAlignment.center,
+                  children: actions,
+                ),
+              ],
             ],
-            if (actions.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                alignment: WrapAlignment.center,
-                children: actions,
-              ),
-            ],
-          ],
+          ),
+        ),
+      ),
+    );
+
+    if (!scrollable) return content;
+
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: content,
         ),
       ),
     );

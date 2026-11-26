@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 
 /// App 私有目录。
@@ -71,8 +72,17 @@ class NativeBridge {
     );
   }
 
-  /// App 私有 files / cache 目录。
-  static Future<AppDirs> appDirs() async {
+  static Future<AppDirs>? _cachedDirs;
+
+  @visibleForTesting
+  static void resetCache() {
+    _cachedDirs = null;
+  }
+
+  /// App 私有 files / cache 目录（首次读取后缓存）。
+  static Future<AppDirs> appDirs() => _cachedDirs ??= _fetchAppDirs();
+
+  static Future<AppDirs> _fetchAppDirs() async {
     final map = await _invoke<Map<Object?, Object?>>('getDirs');
     final files = map?['files'] as String?;
     final cache = map?['cache'] as String?;

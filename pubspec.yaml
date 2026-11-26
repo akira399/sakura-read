@@ -17,7 +17,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.3.0+70
+version: 2.0.0+71
 
 environment:
   sdk: ^3.13.0
@@ -52,6 +52,26 @@ dependencies:
   flutter_riverpod: ^2.6.1
   sqflite: ^2.4.1
   path: ^1.9.1
+
+  # Legado JS 引擎（QuickJS-NG 跨平台统一实现）
+  quickjs_engine: ^0.1.7
+
+  # HTTP / Cookie / SSE 增强请求层
+  dio: ^5.11.1
+  dio_cookie_manager: ^3.5.0
+  cookie_jar: ^4.0.9
+
+  # GPU 仿真 3D 翻页
+  paper_curl: ^0.1.0
+
+  # 流式 AI Markdown / 公式 / 代码渲染
+  gpt_markdown: ^1.4.1
+
+  # 流畅微交互与桌宠动画
+  flutter_animate: ^4.5.2
+
+  # 轻量 EPUB / 富文本 HTML 渲染
+  flutter_widget_from_html_core: ^0.17.4
 
 dev_dependencies:
   flutter_test:

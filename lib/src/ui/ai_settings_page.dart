@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/theme/sakura_tokens.dart';
 import '../data/ai_service.dart';
 import '../data/local_llm.dart';
 import '../data/prefs.dart';
@@ -24,13 +25,6 @@ class AiSettingsPage extends StatefulWidget {
 }
 
 class _AiSettingsPageState extends State<AiSettingsPage> {
-  static const _presets = <(String, String, String)>[
-    ('OpenAI', 'https://api.openai.com/v1', 'gpt-4o-mini'),
-    ('DeepSeek', 'https://api.deepseek.com/v1', 'deepseek-chat'),
-    ('Kimi', 'https://api.moonshot.cn/v1', 'moonshot-v1-8k'),
-    ('Ollama 本地', 'http://127.0.0.1:11434/v1', 'qwen2.5:7b'),
-  ];
-
   late final TextEditingController _baseUrl = TextEditingController(
     text: widget.prefs.aiBaseUrl,
   );
@@ -44,6 +38,14 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
   late bool _useLocal = widget.prefs.aiUseLocalModel;
   bool _showKey = false;
   bool _testing = false;
+
+  AiProviderPreset? get _activePreset {
+    final current = _baseUrl.text.trim().replaceFirst(RegExp(r'/+$'), '');
+    for (final preset in kAiProviderPresets) {
+      if (preset.baseUrl == current) return preset;
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -63,11 +65,16 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     super.dispose();
   }
 
-  void _applyPreset(String base, String model) {
+  void _applyPreset(AiProviderPreset preset) {
     setState(() {
-      _baseUrl.text = base;
-      _model.text = model;
+      _baseUrl.text = preset.baseUrl;
+      _model.text = preset.defaultModel;
     });
+    _toast(
+      preset.requiresKey
+          ? '已填入 ${preset.name} 预设（${preset.defaultModel}），填上 API Key 即可使用'
+          : '已填入 ${preset.name} 预设（${preset.defaultModel}），免 Key 直接连接',
+    );
   }
 
   void _toast(String message) {
@@ -187,29 +194,47 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                 children: [
                   const SectionTitle(
                     icon: Icons.auto_awesome_rounded,
-                    title: '接口预设',
+                    title: '一键接口预设（支持实时流式输出）',
                   ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      for (final p in _presets)
-                        ActionChip(
-                          label: Text(
-                            p.$1,
-                            style: const TextStyle(fontSize: 12),
+                      for (final preset in kAiProviderPresets)
+                        ChoiceChip(
+                          selected: _activePreset?.id == preset.id,
+                          selectedColor: context.sakura.accentSoft,
+                          side: BorderSide(
+                            color: _activePreset?.id == preset.id
+                                ? scheme.primary
+                                : context.sakura.hairline,
                           ),
-                          onPressed: () => _applyPreset(p.$2, p.$3),
+                          label: Text(
+                            preset.name,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: _activePreset?.id == preset.id
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: _activePreset?.id == preset.id
+                                  ? scheme.primary
+                                  : context.sakura.inkPrimary,
+                            ),
+                          ),
+                          onSelected: (_) => _applyPreset(preset),
                         ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   Text(
-                    '点一下自动填好地址和常见模型，Key 需要你自己填。',
+                    _activePreset != null
+                        ? '${_activePreset!.name} · ${_activePreset!.hint}（默认模型 ${_activePreset!.defaultModel}）'
+                        : '点一下自动填好 OpenAI / DeepSeek / Gemini / Kimi / Ollama 地址与推荐模型。',
                     style: TextStyle(
                       fontSize: 11.5,
-                      color: scheme.onSurfaceVariant,
+                      height: 1.45,
+                      color: context.sakura.inkSecondary,
                     ),
                   ),
                 ],
@@ -388,7 +413,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
             selected: !_useLocal,
             icon: Icons.cloud_outlined,
             title: '在线接口',
-            subtitle: 'OpenAI / DeepSeek / Kimi / 本地 Ollama，回答更聪明，需要 Key',
+            subtitle: 'OpenAI / DeepSeek / Gemini / Kimi / Ollama，支持 SSE 流式输出',
             onTap: () => _setMode(false),
           ),
           const SizedBox(height: 6),
@@ -678,7 +703,7 @@ class _LocalModelCardState extends State<_LocalModelCard> {
           const SectionTitle(icon: Icons.smart_toy_outlined, title: '模型选择'),
           const SizedBox(height: 8),
           Text(
-            '模型不打进安装包（最小的也有 500 MB）：先选一档，再点「下载」存到手机上，'
+            '模型不打进安装包（最小约 464 MB）：先选一档，再点「下载」存到手机上，'
             '下完就能离线聊，换模型不用重装 App。',
             style: TextStyle(
               fontSize: 11.5,
@@ -702,7 +727,7 @@ class _LocalModelCardState extends State<_LocalModelCard> {
           const SizedBox(height: 4),
           Text(
             '正在回答时换模型不影响这一条，下次提问才会用新模型。'
-            '模型由 MediaPipe LLM Inference（Apache-2.0）在端侧运行，'
+            '模型由 Google LiteRT-LM（Apache-2.0）在端侧运行，'
             '文件放在应用私有目录，卸载 App 会一起清掉。',
             style: TextStyle(
               fontSize: 10.5,

@@ -6,7 +6,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/icons/sakura_icons.dart';
 import '../core/motion/sakura_motion.dart';
+import '../core/theme/sakura_layout.dart';
+import '../core/theme/sakura_tokens.dart';
 import '../data/book_store.dart';
 import '../data/file_scan.dart';
 import '../data/models.dart';
@@ -17,8 +20,10 @@ import '../data/stats_store.dart';
 import '../features/bookshelf/widgets/book_grid_card.dart';
 import '../features/bookshelf/widgets/book_list_tile.dart';
 import '../features/bookshelf/widgets/continue_reading_card.dart';
+import '../features/bookshelf/widgets/shelf_backdrop.dart';
 import '../features/bookshelf/widgets/shelf_group_bar.dart';
 import '../features/bookshelf/widgets/shelf_header.dart';
+import '../features/bookshelf/widgets/shelf_plank.dart';
 import '../platform/native_bridge.dart';
 import '../source/source_store.dart';
 import '../util/format.dart';
@@ -120,12 +125,41 @@ class _ShelfPageState extends State<ShelfPage> {
         final continueBook = _groupFilter == null
             ? _latestReadBook(allBooks)
             : null;
+        final activeBook =
+            continueBook ?? (books.isNotEmpty ? books.first : null);
+        final singleBookSpotlight =
+            continueBook != null &&
+            books.length == 1 &&
+            _groupFilter == null &&
+            books.first.id == continueBook.id;
+        final prefs = widget.prefs;
+        final isWide = SakuraLayout.isWide(context);
+        final hInsets = SakuraLayout.horizontalInsets(context);
+        final screenWidth = MediaQuery.sizeOf(context).width;
+        final contentAvailWidth = min(
+          screenWidth - hInsets.horizontal,
+          SakuraLayout.contentMaxWidth,
+        ).clamp(240.0, SakuraLayout.contentMaxWidth);
+        final extraCenterPad = max(
+          0.0,
+          (screenWidth - hInsets.horizontal - SakuraLayout.contentMaxWidth) / 2,
+        );
+        final sliverHPadLeft = hInsets.left + extraCenterPad;
+        final sliverHPadRight = hInsets.right + extraCenterPad;
+        final bottomClearance = MediaQuery.paddingOf(context).bottom + 110;
+        final hasPlank =
+            prefs.shelfPlankStyle == ShelfPlankStyle.frostedGlass ||
+            prefs.shelfPlankStyle == ShelfPlankStyle.warmWood;
+
         return Scaffold(
           // 底栏用 extendBody 盖在正文上，Scaffold 感知不到它的高度：
           // 默认 endFloat 会把「＋」摆进底栏区域，正好压住最右侧的「设置」，
           // 导致点不到加号、还容易误跳设置（线上反馈）。这里显式抬高一段。
           floatingActionButton: Padding(
-            padding: const EdgeInsets.only(bottom: _navBarClearance),
+            padding: EdgeInsets.only(
+              bottom: _navBarClearance,
+              right: MediaQuery.paddingOf(context).right,
+            ),
             child: PetGuideTarget(
               id: 'shelf_add',
               child: FloatingActionButton(
@@ -134,68 +168,310 @@ class _ShelfPageState extends State<ShelfPage> {
                 heroTag: 'shelf-add-fab',
                 onPressed: () => _showAddSheet(context),
                 tooltip: '导入书籍',
-                child: const Icon(Icons.add_rounded, size: 28),
+                child: const SakuraIcon(
+                  glyph: SakuraGlyph.addBook,
+                  color: Colors.white,
+                  accent: Color(0xFFFFDCE8),
+                  size: 24,
+                ),
               ),
             ),
           ),
-          body: CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: ShelfHeader(
-                  greeting: _headerLine,
-                  bookCount: books.length,
-                  onAiTap: () => Navigator.of(context).push(
-                    SakuraPageRoute(
-                      slideHorizontal: true,
-                      builder: (_) => AiChatPage(
-                        store: widget.store,
-                        prefs: widget.prefs,
-                        statsStore: widget.statsStore,
+          body: ShelfBackdrop(
+            visualStyle: prefs.visualStyle,
+            ambientAura: prefs.ambientCoverAura,
+            showPetals: prefs.shelfSakuraPetals,
+            activeBook: activeBook,
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: ShelfHeader(
+                    greeting: _headerLine,
+                    bookCount: books.length,
+                    visualStyle: prefs.visualStyle,
+                    activeBook: activeBook,
+                    onAiTap: () => Navigator.of(context).push(
+                      SakuraPageRoute(
+                        slideHorizontal: true,
+                        builder: (_) => AiChatPage(
+                          store: widget.store,
+                          prefs: widget.prefs,
+                          statsStore: widget.statsStore,
+                        ),
+                      ),
+                    ),
+                    onSearchTap: () => _openSearch(context),
+                    onArrangeTap: _showArrangeSheet,
+                    onManageTap: _openManage,
+                  ),
+                ),
+                if (continueBook != null && !(singleBookSpotlight && isWide))
+                  SliverToBoxAdapter(
+                    child: Center(
+                      heightFactor: 1.0,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth:
+                              SakuraLayout.contentMaxWidth + hInsets.horizontal,
+                        ),
+                        child: ContinueReadingCard(
+                          book: continueBook,
+                          visualStyle: prefs.visualStyle,
+                          plankStyle: prefs.shelfPlankStyle,
+                          silkBookmarkAndStamp: prefs.silkBookmarkAndStamp,
+                          margin: EdgeInsets.fromLTRB(
+                            hInsets.left,
+                            14,
+                            hInsets.right,
+                            4,
+                          ),
+                          onContinue: () => _continueReading(continueBook),
+                          onOpenDetail: () => _openDetail(continueBook),
+                        ),
                       ),
                     ),
                   ),
-                  onSearchTap: () => _openSearch(context),
-                  onArrangeTap: _showArrangeSheet,
-                  onManageTap: _openManage,
-                ),
-              ),
-              if (continueBook != null)
                 SliverToBoxAdapter(
-                  child: ContinueReadingCard(
-                    book: continueBook,
-                    onContinue: () => _continueReading(continueBook),
-                    onOpenDetail: () => _openDetail(continueBook),
+                  child: Center(
+                    heightFactor: 1.0,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth:
+                            SakuraLayout.contentMaxWidth + hInsets.horizontal,
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          left: max(0.0, hInsets.left - 16),
+                          right: max(0.0, hInsets.right - 16),
+                        ),
+                        child: ShelfGroupBar(
+                          allBooks: allBooks,
+                          selectedGroup: _groupFilter,
+                          visualStyle: prefs.visualStyle,
+                          onSelectGroup: (group) =>
+                              setState(() => _groupFilter = group),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              SliverToBoxAdapter(
-                child: ShelfGroupBar(
-                  allBooks: allBooks,
-                  selectedGroup: _groupFilter,
-                  onSelectGroup: (group) =>
-                      setState(() => _groupFilter = group),
-                ),
-              ),
-              if (books.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _buildEmpty(context),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 114),
-                  sliver: _buildBooksSliver(books),
-                ),
-            ],
+                if (books.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: widget.store.isLoading
+                        ? const SizedBox.shrink()
+                        : _buildEmpty(context),
+                  )
+                else if (singleBookSpotlight && isWide)
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      sliverHPadLeft,
+                      14,
+                      sliverHPadRight,
+                      bottomClearance,
+                    ),
+                    sliver: SliverToBoxAdapter(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 11,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                ContinueReadingCard(
+                                  book: continueBook,
+                                  visualStyle: prefs.visualStyle,
+                                  plankStyle: prefs.shelfPlankStyle,
+                                  silkBookmarkAndStamp:
+                                      prefs.silkBookmarkAndStamp,
+                                  margin: EdgeInsets.zero,
+                                  onContinue: () =>
+                                      _continueReading(continueBook),
+                                  onOpenDetail: () => _openDetail(continueBook),
+                                ),
+                                if (hasPlank) ...[
+                                  const SizedBox(height: 10),
+                                  ShelfPlank(style: prefs.shelfPlankStyle),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            flex: 10,
+                            child: _buildSingleBookShelfInvitation(
+                              context,
+                              prefs,
+                              showPlank: false,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (singleBookSpotlight)
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      sliverHPadLeft,
+                      14,
+                      sliverHPadRight,
+                      bottomClearance,
+                    ),
+                    sliver: SliverToBoxAdapter(
+                      child: _buildSingleBookShelfInvitation(
+                        context,
+                        prefs,
+                        showPlank: hasPlank,
+                      ),
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      sliverHPadLeft,
+                      12,
+                      sliverHPadRight,
+                      bottomClearance,
+                    ),
+                    sliver: _buildBooksSliver(
+                      books,
+                      availWidth: contentAvailWidth,
+                      isWide: isWide,
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       },
     );
   }
 
+  Widget _buildSingleBookShelfInvitation(
+    BuildContext context,
+    AppPrefs prefs, {
+    required bool showPlank,
+  }) {
+    final sakura = context.sakura;
+    final accent = Theme.of(context).colorScheme.primary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (showPlank) ...[
+          ShelfPlank(style: prefs.shelfPlankStyle),
+          const SizedBox(height: 16),
+        ],
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: sakura.card.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: sakura.hairline),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  SakuraIconBadge(
+                    glyph: SakuraGlyph.addBook,
+                    color: accent,
+                    size: 36,
+                    iconSize: 18,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '书架还有充裕的藏书空间',
+                          style: TextStyle(
+                            color: sakura.inkPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '导入本地 TXT / EPUB，或通过阅读 3.0 书源在线淘书',
+                          style: TextStyle(
+                            color: sakura.inkSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _pickFiles(),
+                      icon: const Icon(Icons.upload_file_rounded, size: 17),
+                      label: const Text('导入新书'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        SakuraPageRoute(
+                          slideHorizontal: true,
+                          builder: (_) => SourceSearchPage(
+                            store: widget.sourceStore,
+                            bookStore: widget.store,
+                            prefs: widget.prefs,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.travel_explore_rounded, size: 17),
+                      label: const Text('在线搜书'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   /// 按当前「排列方式」渲染书架（网格 / 小图 / 列表 / 大封面）。
-  Widget _buildBooksSliver(List<Book> books) {
-    switch (widget.prefs.shelfView) {
+  Widget _buildBooksSliver(
+    List<Book> books, {
+    required double availWidth,
+    required bool isWide,
+  }) {
+    final prefs = widget.prefs;
+    final usePlankRows =
+        prefs.shelfPlankStyle == ShelfPlankStyle.frostedGlass ||
+        prefs.shelfPlankStyle == ShelfPlankStyle.warmWood;
+    final width = MediaQuery.sizeOf(context).width;
+
+    switch (prefs.shelfView) {
       case ShelfViewMode.grid:
+        final cols = width >= 900
+            ? 5
+            : width >= 620
+            ? 4
+            : 3;
+        if (usePlankRows) {
+          return _buildPlankedRowsSliver(
+            books: books,
+            columns: cols,
+            gap: 14,
+            aspectRatio: 0.52,
+            compact: false,
+            coverEmphasized: false,
+            availWidth: availWidth,
+          );
+        }
         return SliverGrid(
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: 156,
@@ -208,6 +484,8 @@ class _ShelfPageState extends State<ShelfPage> {
               index: index,
               child: BookGridCard(
                 book: books[index],
+                plankStyle: prefs.shelfPlankStyle,
+                visualStyle: prefs.visualStyle,
                 onOpen: () => _openDetail(books[index]),
                 onMenu: () => _showBookMenu(books[index]),
               ),
@@ -216,6 +494,22 @@ class _ShelfPageState extends State<ShelfPage> {
           ),
         );
       case ShelfViewMode.compact:
+        final cols = width >= 900
+            ? 6
+            : width >= 620
+            ? 5
+            : 3;
+        if (usePlankRows) {
+          return _buildPlankedRowsSliver(
+            books: books,
+            columns: cols,
+            gap: 12,
+            aspectRatio: 0.56,
+            compact: true,
+            coverEmphasized: false,
+            availWidth: availWidth,
+          );
+        }
         return SliverGrid(
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: 112,
@@ -229,6 +523,8 @@ class _ShelfPageState extends State<ShelfPage> {
               child: BookGridCard(
                 book: books[index],
                 compact: true,
+                plankStyle: prefs.shelfPlankStyle,
+                visualStyle: prefs.visualStyle,
                 onOpen: () => _openDetail(books[index]),
                 onMenu: () => _showBookMenu(books[index]),
               ),
@@ -237,6 +533,28 @@ class _ShelfPageState extends State<ShelfPage> {
           ),
         );
       case ShelfViewMode.list:
+        if (isWide) {
+          return SliverGrid(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 14,
+              mainAxisExtent: 104,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => StaggeredReveal(
+                index: index,
+                child: BookListTile(
+                  book: books[index],
+                  subtitle: _bookSubtitle(books[index]),
+                  onOpen: () => _openDetail(books[index]),
+                  onMenu: () => _showBookMenu(books[index]),
+                ),
+              ),
+              childCount: books.length,
+            ),
+          );
+        }
         return SliverList.separated(
           itemCount: books.length,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
@@ -251,7 +569,6 @@ class _ShelfPageState extends State<ShelfPage> {
           ),
         );
       case ShelfViewMode.cover:
-        final width = MediaQuery.sizeOf(context).width;
         final columns = width >= 1100
             ? 6
             : width >= 840
@@ -259,6 +576,17 @@ class _ShelfPageState extends State<ShelfPage> {
             : width >= 600
             ? 4
             : 3;
+        if (usePlankRows) {
+          return _buildPlankedRowsSliver(
+            books: books,
+            columns: columns,
+            gap: 16,
+            aspectRatio: 0.53,
+            compact: false,
+            coverEmphasized: true,
+            availWidth: availWidth,
+          );
+        }
         return SliverGrid(
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
@@ -272,6 +600,8 @@ class _ShelfPageState extends State<ShelfPage> {
               child: BookGridCard(
                 book: books[index],
                 coverEmphasized: true,
+                plankStyle: prefs.shelfPlankStyle,
+                visualStyle: prefs.visualStyle,
                 onOpen: () => _openDetail(books[index]),
                 onMenu: () => _showBookMenu(books[index]),
               ),
@@ -280,6 +610,63 @@ class _ShelfPageState extends State<ShelfPage> {
           ),
         );
     }
+  }
+
+  Widget _buildPlankedRowsSliver({
+    required List<Book> books,
+    required int columns,
+    required double gap,
+    required double aspectRatio,
+    required bool compact,
+    required bool coverEmphasized,
+    required double availWidth,
+  }) {
+    final rowCount = (books.length / columns).ceil();
+    final prefs = widget.prefs;
+    final colWidth = (availWidth - gap * (columns - 1)) / columns;
+    final cardHeight = colWidth / aspectRatio;
+
+    return SliverList.separated(
+      itemCount: rowCount,
+      separatorBuilder: (_, _) => const SizedBox(height: 16),
+      itemBuilder: (context, rowIndex) {
+        final start = rowIndex * columns;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var c = 0; c < columns; c++) ...[
+                  if (c > 0) SizedBox(width: gap),
+                  Expanded(
+                    child: start + c < books.length
+                        ? SizedBox(
+                            height: cardHeight,
+                            child: StaggeredReveal(
+                              index: start + c,
+                              child: BookGridCard(
+                                book: books[start + c],
+                                compact: compact,
+                                coverEmphasized: coverEmphasized,
+                                plankStyle: prefs.shelfPlankStyle,
+                                visualStyle: prefs.visualStyle,
+                                onOpen: () => _openDetail(books[start + c]),
+                                onMenu: () => _showBookMenu(books[start + c]),
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 6),
+            ShelfPlank(style: prefs.shelfPlankStyle),
+          ],
+        );
+      },
+    );
   }
 
   Book? _latestReadBook(List<Book> books) {
@@ -347,13 +734,20 @@ class _ShelfPageState extends State<ShelfPage> {
   }
 
   Widget _buildEmpty(BuildContext context) {
+    final shortLandscape = SakuraLayout.isShortLandscape(context);
+    final bottomClearance =
+        MediaQuery.paddingOf(context).bottom + (shortLandscape ? 84 : 104);
     return SakuraPetals(
       count: 16,
       child: EmptyState(
         icon: Icons.auto_stories_outlined,
-        illustration: const KanbanMascot(size: 168, lines: _emptyShelfLines),
+        illustration: KanbanMascot(
+          size: shortLandscape ? 108 : 168,
+          lines: _emptyShelfLines,
+        ),
         title: '书架还空着呢',
         subtitle: '点击右下角「+」\n导入本地 TXT / EPUB 小说吧',
+        bottomClearance: bottomClearance,
         actions: [
           FilledButton.icon(
             onPressed: () => _pickFiles(),
@@ -388,7 +782,8 @@ class _ShelfPageState extends State<ShelfPage> {
   void _continueReading(Book book) {
     widget.store.touch(book.id);
     Navigator.of(context).push(
-      SakuraPageRoute(
+      SakuraBookUnfoldRoute(
+        enabled: widget.prefs.bookUnfoldTransition,
         builder: (_) => ReaderPage(
           store: widget.store,
           prefs: widget.prefs,

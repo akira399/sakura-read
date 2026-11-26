@@ -9,7 +9,7 @@ import 'package:http/http.dart' as http;
 import '../platform/native_bridge.dart';
 import 'ai_service.dart';
 
-/// 一个可下载的本地小模型（MediaPipe LLM Inference 的 `.task` 包）。
+/// 一个可下载的本地小模型（Google LiteRT-LM 的 `.litertlm` 包）。
 ///
 /// 为什么要内置模型而不是只支持在线接口：用户反馈里最常出现的两条是
 /// 「不想再充钱买 API」和「不想让阅读数据上传」，本地跑就都解决了。
@@ -28,10 +28,10 @@ class LocalModelSpec {
   /// 稳定的 id，写进设置文件（换模型时只改 [localModelCatalog]）。
   final String id;
 
-  /// 展示名，如 `Qwen2.5-0.5B-Instruct`。
+  /// 展示名，如 `Qwen3-0.6B`。
   final String name;
 
-  /// 参数量描述，如 `0.5B`。
+  /// 参数量描述，如 `0.6B`。
   final String params;
 
   /// 许可证（做本地推理必须说清授权）。
@@ -56,74 +56,84 @@ class LocalModelSpec {
       : '${megabytes.toStringAsFixed(0)} MB';
 }
 
-/// 可选下载的模型目录。
+/// 可选下载的新一代开源小模型目录（基于 Google LiteRT-LM 0.20）。
 ///
-/// 为什么是一个「目录」而不是一档写死：手机差异太大，一档模型没法同时讨好
-/// 千元机和旗舰机。所以模型不进安装包（最小的也 521 MB，最大的 3 GB），
-/// 这里只登记「能下哪些」，设置页让用户按内存和耐心自己挑、自己下。
-/// 三档 Qwen2.5 是同家族，参数量越大回答越完整、也越吃内存与速度；
-/// DeepSeek-R1-Distill 会先把思考过程吐出来，给想看得见推理的人。
+/// 为什么是一个「目录」而不是一档写死：手机内存差异大，这里按体积与性能
+/// 提供从 0.6B 到 E2B 的多档模型；模型不进安装包（最小约 464 MB），
+/// 设置页让用户按硬件和需求自行选择并断点下载。
 ///
-/// 顺序 = 设置页的展示顺序，第一条是最轻的默认档。
+/// 顺序 = 设置页展示顺序，第一条是最轻巧稳妥的默认 0.6B 档（Qwen3-0.6B）。
 /// 每个模型给三个镜像：modelscope 国内直连最稳，后两个是备用，
 /// [LocalModelManager] 下载失败会自动按顺位换下一个。
 const List<LocalModelSpec> localModelCatalog = [
   LocalModelSpec(
-    id: 'qwen2.5-0.5b-instruct-q8',
-    name: 'Qwen2.5-0.5B-Instruct',
-    params: '0.5B',
+    id: 'qwen3-0.6b-int8',
+    name: 'Qwen3-0.6B',
+    params: '0.6B',
     license: 'Apache-2.0',
-    bytes: 546660344,
-    fileName: 'qwen2.5-0.5b-instruct-q8.task',
-    summary:
-        '机身存储约 521 MB，内存占用约 1 GB；闲聊、总结阅读习惯够用，'
-        '回答简单直接，不会编长篇大论。',
+    bytes: 613722264,
+    fileName: 'qwen3-0.6b-int8.litertlm',
+    summary: '默认轻量主力，约 585 MB（动态 INT8）；中文理解与指令遵循比老款 0.5B 明显提升，千元机也能流畅闲聊。',
     mirrors: [
-      'https://modelscope.cn/models/litert-community/Qwen2.5-0.5B-Instruct/resolve/master/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-      'https://hf-mirror.com/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-      'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+      'https://modelscope.cn/models/litert-community/Qwen3-0.6B/resolve/master/Qwen3-0.6B.litertlm',
+      'https://hf-mirror.com/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
+      'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
     ],
   ),
   LocalModelSpec(
-    id: 'qwen2.5-1.5b-instruct-q8',
-    name: 'Qwen2.5-1.5B-Instruct',
-    params: '1.5B',
+    id: 'qwen3.5-0.8b-mixed48',
+    name: 'Qwen3.5-0.8B',
+    params: '0.8B',
     license: 'Apache-2.0',
-    bytes: 1597913616,
-    fileName: 'qwen2.5-1.5b-instruct-q8.task',
-    summary: '约 1.5 GB，内存约 2 GB；回答更完整，适合写大纲和长问答。',
+    bytes: 486539264,
+    fileName: 'qwen3.5-0.8b-mixed48.litertlm',
+    summary: '新一代 Qwen3.5 混合线性注意力架构（4/8-bit Hadamard 量化），体积仅 464 MB，速度更快且内存更省。',
     mirrors: [
-      'https://modelscope.cn/models/litert-community/Qwen2.5-1.5B-Instruct/resolve/master/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-      'https://hf-mirror.com/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-      'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+      'https://modelscope.cn/models/litert-community/Qwen3.5-0.8B/resolve/master/Qwen3.5-0.8B_mixed48_h1024.litertlm',
+      'https://hf-mirror.com/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B_mixed48_h1024.litertlm',
+      'https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B_mixed48_h1024.litertlm',
     ],
   ),
   LocalModelSpec(
-    id: 'qwen2.5-3b-instruct-q8',
-    name: 'Qwen2.5-3B-Instruct',
-    params: '3B',
-    license: 'Apache-2.0',
-    bytes: 3202099100,
-    fileName: 'qwen2.5-3b-instruct-q8.task',
-    summary: '约 3 GB，内存约 5 GB；本机推理明显变慢，只推荐高配机上尝鲜。',
+    id: 'lfm2.5-1.2b-instruct-int4',
+    name: 'LFM2.5-1.2B-Instruct',
+    params: '1.2B',
+    license: 'LFM-Open-1.0',
+    bytes: 736015744,
+    fileName: 'lfm2.5-1.2b-instruct-int4.litertlm',
+    summary: 'Liquid AI 专为端侧设计的混合架构（约 702 MB），生成速度快、发热低，适合日常对话与摘录总结。',
     mirrors: [
-      'https://modelscope.cn/models/litert-community/Qwen2.5-3B-Instruct/resolve/master/Qwen2.5-3B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-      'https://hf-mirror.com/litert-community/Qwen2.5-3B-Instruct/resolve/main/Qwen2.5-3B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-      'https://huggingface.co/litert-community/Qwen2.5-3B-Instruct/resolve/main/Qwen2.5-3B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+      'https://modelscope.cn/models/litert-community/LFM2.5-1.2B-Instruct/resolve/master/LFM2.5-1.2B-Instruct_int4.litertlm',
+      'https://hf-mirror.com/litert-community/LFM2.5-1.2B-Instruct/resolve/main/LFM2.5-1.2B-Instruct_int4.litertlm',
+      'https://huggingface.co/litert-community/LFM2.5-1.2B-Instruct/resolve/main/LFM2.5-1.2B-Instruct_int4.litertlm',
     ],
   ),
   LocalModelSpec(
-    id: 'deepseek-r1-distill-qwen-1.5b-q8',
-    name: 'DeepSeek-R1-Distill-Qwen-1.5B',
-    params: '1.5B',
-    license: 'MIT',
-    bytes: 1861094737,
-    fileName: 'deepseek-r1-distill-qwen-1.5b-q8.task',
-    summary: '约 1.7 GB，会先输出思考过程；想了解推理过程可以选它。',
+    id: 'qwen3.5-2b-int8',
+    name: 'Qwen3.5-2B',
+    params: '2B',
+    license: 'Apache-2.0',
+    bytes: 2119843840,
+    fileName: 'qwen3.5-2b-int8.litertlm',
+    summary: '2.0 GB 进阶中文旗舰（INT8），GatedDeltaNet 长上下文显存占用平稳，适合长文总结与多轮深度问答。',
     mirrors: [
-      'https://modelscope.cn/models/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/master/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
-      'https://hf-mirror.com/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
-      'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
+      'https://modelscope.cn/models/litert-community/Qwen3.5-2B/resolve/master/Qwen3.5-2B_int8.litertlm',
+      'https://hf-mirror.com/litert-community/Qwen3.5-2B/resolve/main/Qwen3.5-2B_int8.litertlm',
+      'https://huggingface.co/litert-community/Qwen3.5-2B/resolve/main/Qwen3.5-2B_int8.litertlm',
+    ],
+  ),
+  LocalModelSpec(
+    id: 'gemma-4-e2b-it',
+    name: 'Gemma 4 E2B',
+    params: 'E2B',
+    license: 'Apache-2.0',
+    bytes: 2588147712,
+    fileName: 'gemma-4-e2b-it.litertlm',
+    summary: 'Google 2026 端侧强力小模型（约 2.4 GB，2/4/8-bit QAT 混合量化），综合推理与多语言表现优异，推荐大内存机型选用。',
+    mirrors: [
+      'https://modelscope.cn/models/litert-community/gemma-4-E2B-it-litert-lm/resolve/master/gemma-4-E2B-it.litertlm',
+      'https://hf-mirror.com/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm',
+      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm',
     ],
   ),
 ];
@@ -199,8 +209,8 @@ class LocalLlmEngine {
     }
   }
 
-  /// 加载模型（首次约 10~30 秒，成功后可反复生成）。
-  static Future<void> load(String path, {int maxTokens = 1280}) async {
+  /// 加载模型（首次约 5~25 秒，成功后可反复生成）。
+  static Future<void> load(String path, {int maxTokens = 2048}) async {
     _ensureHook();
     await _channel.invokeMethod<Map<Object?, Object?>>('load', {
       'path': path,
@@ -230,13 +240,26 @@ class LocalLlmEngine {
   }
 
   /// 开始一段流式生成；结束后流自动关闭。
-  static Future<Stream<LocalLlmEvent>> generate(String prompt) async {
+  ///
+  /// 当传入 [system] / [history] 时，原生 LiteRT-LM 会自动按各模型内置的
+  /// 对话模板（Qwen3 / Qwen3.5 / LFM2.5 / Gemma 4）拼接上下文。
+  static Future<Stream<LocalLlmEvent>> generate(
+    String prompt, {
+    String? system,
+    List<Map<String, String>>? history,
+    bool enableThinking = false,
+  }) async {
     _ensureHook();
     final controller = StreamController<LocalLlmEvent>();
     try {
       final result = await _channel.invokeMethod<Map<Object?, Object?>>(
         'generate',
-        {'prompt': prompt},
+        {
+          'prompt': prompt,
+          if (system != null && system.isNotEmpty) 'system': system,
+          if (history != null && history.isNotEmpty) 'history': history,
+          'enableThinking': enableThinking,
+        },
       );
       final id = (result?['id'] as num?)?.toInt() ?? ++_seq;
       _streams[id] = controller;
@@ -305,8 +328,8 @@ class LocalModelManager extends ChangeNotifier {
   /// 全局实例：设置页和对话页共用一个（下载过程中切页面不丢状态）。
   static LocalModelManager instance = LocalModelManager();
 
-  /// 输入预算（token）：总上限 1280，给回答留出空间。
-  static const int promptBudget = 800;
+  /// 输入预算（token）：总上限 2048，给回答留出空间。
+  static const int promptBudget = 1400;
 
   final LocalModelSpec? _specOverride;
   final AppDirs? _dirsOverride;
@@ -650,6 +673,19 @@ class LocalModelManager extends ChangeNotifier {
   }
 }
 
+/// 结构化本地模型对话请求，交给 LiteRT-LM 原生对话模板渲染。
+class LocalLlmRequest {
+  const LocalLlmRequest({
+    required this.system,
+    required this.history,
+    required this.userText,
+  });
+
+  final String system;
+  final List<Map<String, String>> history;
+  final String userText;
+}
+
 /// 本地模型的提示词拼装与输出清洗。
 ///
 /// 小模型的「记忆力」和指令跟随都有限，所以这里刻意把提示词做得很短：
@@ -669,6 +705,56 @@ class LocalLlmChat {
   static const String _rules =
       '规则：只根据下面给出的资料回答；资料里没有的就说不知道，'
       '不要编造书里的情节或数据；不要提这段说明。';
+
+  /// 组装结构化请求（供原生 LiteRT-LM Conversation API 使用）；超预算时按梯度裁切。
+  static Future<LocalLlmRequest> buildRequest({
+    required List<AiTurn> history,
+    required String userText,
+    ReadingSnapshot? snapshot,
+    bool includeReading = true,
+  }) async {
+    final system = _systemContent(snapshot, includeReading: includeReading);
+    var turns = [...history];
+    while (turns.length > 4) {
+      turns.removeRange(0, 2);
+    }
+    String rawPreview(String sys, List<AiTurn> h, String u) =>
+        '$sys\n${h.map((t) => t.content).join('\n')}\n$u';
+
+    if (await LocalLlmEngine.tokenCount(rawPreview(system, turns, userText)) <=
+        LocalModelManager.promptBudget) {
+      return LocalLlmRequest(
+        system: system,
+        history: [
+          for (final t in turns) {'role': t.role, 'content': t.content},
+        ],
+        userText: userText,
+      );
+    }
+
+    final leanSystem = _systemContent(null, includeReading: false);
+    if (await LocalLlmEngine.tokenCount(
+          rawPreview(leanSystem, turns, userText),
+        ) <=
+        LocalModelManager.promptBudget) {
+      return LocalLlmRequest(
+        system: leanSystem,
+        history: [
+          for (final t in turns) {'role': t.role, 'content': t.content},
+        ],
+        userText: userText,
+      );
+    }
+
+    final clipped = userText.length <= 600
+        ? userText
+        : userText.substring(userText.length - 600);
+    return LocalLlmRequest(
+      system: leanSystem,
+      history: const [],
+      userText: clipped,
+    );
+  }
 
   /// 组一份 ChatML 提示词；超预算时先丢最早的对话，再丢阅读数据。
   static Future<String> buildPrompt({
@@ -740,10 +826,21 @@ class LocalLlmChat {
     return buffer.toString();
   }
 
-  /// 清洗模型输出：切掉结束标记与残留的特殊 token。
+  /// 清洗模型输出：移除思维链片段、结束标记与残留特殊 token。
   static String clean(String raw) {
     var text = raw;
-    for (final marker in [_imEnd, '<|im_start|>', '<|endoftext|>']) {
+    text = text.replaceAll(RegExp(r'<think>[\s\S]*?</think>'), '');
+    final openThink = text.indexOf('<think>');
+    if (openThink >= 0) {
+      text = text.substring(0, openThink);
+    }
+    for (final marker in [
+      _imEnd,
+      '<|im_start|>',
+      '<|endoftext|>',
+      '<end_of_turn>',
+      '<|eot_id|>',
+    ]) {
       final index = text.indexOf(marker);
       if (index >= 0) text = text.substring(0, index);
     }

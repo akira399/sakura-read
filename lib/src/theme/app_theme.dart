@@ -170,8 +170,8 @@ class SakuraTheme {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: [
-        Color.lerp(const Color(0xFFFDECF2), a, 0.10)!,
-        const Color(0xFFEFEAFD),
+        Color.lerp(const Color(0xFFFFF8F5), a, 0.08)!,
+        Color.lerp(const Color(0xFFFBF6F1), a, 0.03)!,
       ],
     );
   }

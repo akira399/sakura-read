@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
+import '../core/theme/sakura_layout.dart';
 import '../data/book_store.dart';
 import '../data/models.dart';
 import '../data/prefs.dart';
@@ -29,31 +32,66 @@ class RecentPage extends StatelessWidget {
       builder: (context, _) {
         final recents = store.books.where((b) => b.lastReadAt > 0).toList()
           ..sort((a, b) => b.lastReadAt.compareTo(a.lastReadAt));
+        final isWide = SakuraLayout.isWide(context);
+        final hInsets = SakuraLayout.horizontalInsets(context);
+        final screenWidth = MediaQuery.sizeOf(context).width;
+        final extraCenterPad = math.max(
+          0.0,
+          (screenWidth - hInsets.horizontal - SakuraLayout.contentMaxWidth) / 2,
+        );
+        final bottomPad = MediaQuery.paddingOf(context).bottom + 104;
+
         return Scaffold(
           body: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(child: _header(context, recents.length)),
               if (recents.isEmpty)
-                const SliverFillRemaining(
+                SliverFillRemaining(
                   hasScrollBody: false,
                   child: EmptyState(
                     icon: Icons.history_rounded,
                     title: '还没有阅读记录',
                     subtitle: '去书架翻开一本小说吧～',
+                    scrollable: false,
+                    bottomClearance: bottomPad,
                   ),
                 )
               else
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                  sliver: SliverList.separated(
-                    itemCount: recents.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) => _RecentTile(
-                      book: recents[index],
-                      store: store,
-                      prefs: prefs,
-                    ),
+                  padding: EdgeInsets.fromLTRB(
+                    hInsets.left + extraCenterPad,
+                    4,
+                    hInsets.right + extraCenterPad,
+                    bottomPad,
                   ),
+                  sliver: isWide
+                      ? SliverGrid(
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 14,
+                                mainAxisExtent: 108,
+                              ),
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) => _RecentTile(
+                              book: recents[index],
+                              store: store,
+                              prefs: prefs,
+                            ),
+                            childCount: recents.length,
+                          ),
+                        )
+                      : SliverList.separated(
+                          itemCount: recents.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) => _RecentTile(
+                            book: recents[index],
+                            store: store,
+                            prefs: prefs,
+                          ),
+                        ),
                 ),
             ],
           ),
@@ -64,42 +102,52 @@ class RecentPage extends StatelessWidget {
 
   Widget _header(BuildContext context, int count) {
     final scheme = Theme.of(context).colorScheme;
+    final hInsets = SakuraLayout.horizontalInsets(context, min: 20);
+    final shortLandscape = SakuraLayout.isShortLandscape(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(
-        20,
-        MediaQuery.paddingOf(context).top + 18,
-        20,
+        hInsets.left,
+        MediaQuery.paddingOf(context).top + (shortLandscape ? 10 : 18),
+        hInsets.right,
         10,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: Center(
+        heightFactor: 1.0,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: SakuraLayout.contentMaxWidth,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.history_rounded, color: scheme.primary),
-              const SizedBox(width: 8),
-              const Text(
-                '最近阅读',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-              ),
-              const Spacer(),
-              IconButton.filledTonal(
-                tooltip: '阅读记录',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => StatsPage(statsStore: statsStore),
+              Row(
+                children: [
+                  Icon(Icons.history_rounded, color: scheme.primary),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '最近阅读',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
                   ),
-                ),
-                icon: const Icon(Icons.insights_rounded, size: 20),
+                  const Spacer(),
+                  IconButton.filledTonal(
+                    tooltip: '阅读记录',
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => StatsPage(statsStore: statsStore),
+                      ),
+                    ),
+                    icon: const Icon(Icons.insights_rounded, size: 20),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                count > 0 ? '继续上次的故事 · 共 $count 条记录' : '你的阅读足迹会出现在这里',
+                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            count > 0 ? '继续上次的故事 · 共 $count 条记录' : '你的阅读足迹会出现在这里',
-            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
-          ),
-        ],
+        ),
       ),
     );
   }
