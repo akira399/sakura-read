@@ -172,20 +172,32 @@ class _ShelfBackdropState extends State<ShelfBackdrop>
 
     return ColoredBox(
       color: baseBg,
-      child: CustomPaint(
-        painter: _ShelfAtmospherePainter(
-          phase: _phase,
-          visualStyle: widget.visualStyle,
-          ambientAura: widget.ambientAura,
-          showPetals:
-              widget.showPetals &&
-              widget.visualStyle != VisualStylePreset.animePop,
-          isDark: isDark,
-          palette: palette,
-          hairline: sakura.hairline,
-          petals: _petals,
-        ),
-        child: widget.child,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  willChange: _needsAnimation,
+                  painter: _ShelfAtmospherePainter(
+                    phase: _phase,
+                    visualStyle: widget.visualStyle,
+                    ambientAura: widget.ambientAura,
+                    showPetals:
+                        widget.showPetals &&
+                        widget.visualStyle != VisualStylePreset.animePop,
+                    isDark: isDark,
+                    palette: palette,
+                    hairline: sakura.hairline,
+                    petals: _petals,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          widget.child,
+        ],
       ),
     );
   }

@@ -54,7 +54,13 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   final CredentialStore _credentials;
   bool _credentialsReady = false;
   bool _hadLegacyPlaintextSecrets = false;
+  bool _initialLoadPending = false;
   Future<void>? _deferredLoadFuture;
+
+  bool get isInitialLoadPending => _initialLoadPending;
+  void markInitialLoadPending() {
+    _initialLoadPending = true;
+  }
 
   final AppDirs? _dirsOverride;
   File? _file;
@@ -302,12 +308,12 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   ReaderBg get readerBg =>
       kReaderBgs[readerBgIndex.clamp(0, kReaderBgs.length - 1)];
 
-  Future<void> load({bool deferHeavyInit = false}) async {
+  Future<void> load({AppDirs? dirs, bool deferHeavyInit = false}) async {
     _credentialsReady = false;
     _hadLegacyPlaintextSecrets = false;
     _deferredLoadFuture = null;
-    final dirs = _dirsOverride ?? await NativeBridge.appDirs();
-    _file = File('${dirs.files}/settings.json');
+    final resolvedDirs = dirs ?? _dirsOverride ?? await NativeBridge.appDirs();
+    _file = File('${resolvedDirs.files}/settings.json');
     try {
       if (await _file!.exists()) {
         final data = await readJson(_file!);
@@ -420,6 +426,7 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
     } catch (_) {
       // 读取失败时使用默认设置
     }
+    _initialLoadPending = false;
     notifyListeners();
     if (!deferHeavyInit) {
       await completeDeferredLoad();

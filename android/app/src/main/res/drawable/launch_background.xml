@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 樱读启动闪屏：仅浅粉底（无开屏动画，直接进入应用） -->
+<!-- Android 7–10 原生闪屏兜底：浅粉底居中展示樱读 Logo -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/splash_bg" />
+    <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@drawable/splash_logo" />
+    </item>
 </layer-list>

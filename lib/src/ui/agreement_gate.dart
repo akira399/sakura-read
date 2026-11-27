@@ -24,7 +24,7 @@ class AgreementGate extends StatelessWidget {
       builder: (context, _) => Stack(
         children: [
           child,
-          if (!prefs.agreementAccepted)
+          if (!prefs.isInitialLoadPending && !prefs.agreementAccepted)
             Positioned.fill(
               child: _AgreementView(
                 onAccept: () {

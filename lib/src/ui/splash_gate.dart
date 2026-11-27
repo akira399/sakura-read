@@ -7,6 +7,15 @@ import 'package:flutter/scheduler.dart';
 import '../data/pet_store.dart';
 import 'widgets/sakura_petals.dart';
 
+const String kSplashArtAsset = 'assets/images/splash_reading_v2.jpg';
+
+int splashArtCacheWidth(Size logicalSize, double devicePixelRatio) {
+  final shortSide = math.min(logicalSize.width, logicalSize.height);
+  final target = (shortSide * devicePixelRatio).round();
+  if (target <= 0) return 900;
+  return math.min(target, 900);
+}
+
 /// 冷启动开屏动画：樱花 logo「绽放」+ 标题浮现 + 花瓣飘落，最后淡出进入应用。
 ///
 /// - 前面不再有静态 logo 阶段（原生闪屏只保留纯色底），直接进入绽放动画；
@@ -54,23 +63,19 @@ class _SplashGateState extends State<SplashGate>
   /// 截断在 250ms 内：哪怕遇到再大的跳变，动画也只按正常速度往前走。
   static const int _maxFrameStepMs = 250;
 
-  /// 播到这个进度就把下层页面挂上来。
-  ///
-  /// 下层页面（书架 + 封面 + 毛玻璃导航栏）的首次构建/光栅化实测要 150ms 以上，
-  /// 所以卡在「文字已浮现完、还没开始淡出」的静止窗口里挂载：这段被占掉的
-  /// 时间屏幕上基本只有立绘和花瓣，看不出停顿。
-  static const double _childMountAt = .62;
+  /// 播到这个进度就把下层页面挂上来，开屏淡出时书架已准备就绪。
+  static const double _childMountAt = .25;
 
   late bool _show = widget.forcePlay || (widget.enabled && !_played);
   bool _childMounted = false;
 
-  /// 绽放进度（0 → 1）：只在前 30% 的时间段里更新。
+  /// 绽放进度（0.55 → 1）：首帧直接透出看板娘开屏图，完全消除白屏等待。
   final ValueNotifier<double> _bloom = ValueNotifier<double>(1);
 
   /// 文字浮现用的原始进度 t：只在 20% ~ 70% 之间更新。
   final ValueNotifier<double> _text = ValueNotifier<double>(0);
 
-  /// 淡出进度（0 → 1）：只在最后 24% 的时间段里更新。
+  /// 淡出进度（0 → 1）：只在最后 20% 的时间段里更新。
   final ValueNotifier<double> _fade = ValueNotifier<double>(0);
 
   late final Ticker _ticker = createTicker(_onTick);
@@ -83,12 +88,22 @@ class _SplashGateState extends State<SplashGate>
     super.initState();
     if (_show) {
       _played = true;
-      _bloom.value = 0;
+      _bloom.value = 0.55;
       _ticker.start();
     } else {
       // 进程内二次进入（没播开屏）：直接放行
       _played = true;
       petMarkSplashDone();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant SplashGate oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 异步读取配置发现用户关闭了开屏动画时，立即收起开屏直接进书架
+    if (!widget.forcePlay && !widget.enabled && _show) {
+      _ticker.stop();
+      _finish();
     }
   }
 
@@ -103,7 +118,9 @@ class _SplashGateState extends State<SplashGate>
 
     // 分阶段刷新：同一时刻只有一个 ValueNotifier 在变，避免整屏重建。
     if (t < .32) {
-      _bloom.value = Curves.easeOutBack.transform((t / .30).clamp(0.0, 1.0));
+      _bloom.value =
+          0.55 +
+          0.45 * Curves.easeOutCubic.transform((t / .30).clamp(0.0, 1.0));
     } else if (_bloom.value < 1) {
       _bloom.value = 1;
     }
@@ -192,12 +209,8 @@ class _SplashView extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mq = MediaQuery.of(context);
     final isLandscape = mq.size.width > mq.size.height;
-    // 立绘按屏幕像素宽解码即可：整张 900x1600 的原图解码更久、占内存更多。
-    final cacheWidth = math.min(
-      ((isLandscape ? mq.size.height : mq.size.width) * mq.devicePixelRatio)
-          .round(),
-      1600,
-    );
+    // 立绘按屏幕短边像素宽与原图宽度取较小值解码，并与 main.dart 预解码缓存键一致。
+    final cacheWidth = splashArtCacheWidth(mq.size, mq.devicePixelRatio);
 
     return ValueListenableBuilder<double>(
       valueListenable: fade,
@@ -302,7 +315,7 @@ class _SplashPhoto extends StatelessWidget {
           },
           child: RepaintBoundary(
             child: Image.asset(
-              'assets/images/splash_reading_v2.jpg',
+              kSplashArtAsset,
               fit: isLandscape ? BoxFit.contain : BoxFit.cover,
               alignment: isLandscape
                   ? const Alignment(0.45, 0)
@@ -317,7 +330,7 @@ class _SplashPhoto extends StatelessWidget {
           valueListenable: bloom,
           builder: (context, b, _) {
             if (b >= 1) return const SizedBox.shrink();
-            final alpha = isDark ? .78 * (1 - b) : .72 * (1 - b);
+            final alpha = isDark ? .50 * (1 - b) : .38 * (1 - b);
             return IgnorePointer(
               child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -356,7 +369,7 @@ class _OpeningPagesPainter extends CustomPainter {
     if (progress >= 1) return;
     final width = size.width * .5 * (1 - progress);
     final paint = Paint()
-      ..color = const Color(0xFFFFF8F4).withValues(alpha: .8 * (1 - progress));
+      ..color = const Color(0xFFFFF8F4).withValues(alpha: .45 * (1 - progress));
     final left = Path()
       ..moveTo(0, 0)
       ..lineTo(width, size.height * .04)
@@ -409,11 +422,10 @@ class _SplashText extends StatelessWidget {
                 child: Text(
                   '樱 读',
                   style: TextStyle(
-                    fontFamily: 'LXGWWenKai',
                     fontSize: 30,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                     color: isDark ? const Color(0xFFF3A9CC) : _kTitleColor,
-                    letterSpacing: 4,
+                    letterSpacing: 6,
                   ),
                 ),
               ),

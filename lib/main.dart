@@ -22,29 +22,23 @@ import 'src/platform/perf_probe.dart';
 import 'src/source/http_client.dart';
 import 'src/source/source_store.dart';
 import 'src/ui/reader/reader_page.dart';
+import 'src/ui/splash_gate.dart';
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+void main() {
+  final binding = WidgetsFlutterBinding.ensureInitialized();
+  binding.deferFirstFrame();
   PerfProbe.start();
-  // 系统栏模式不阻塞启动：晚几帧生效也没人看得出来
+  // 系统栏模式与原生通道查询不阻塞首帧：runApp 立即同步触发首帧渲染
   unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
   final appDirsFuture = NativeBridge.appDirs();
   final permFuture = NativeBridge.hasStoragePermission();
-  final appDirs = await appDirsFuture;
-  final prefs = AppPrefs(dirsOverride: appDirs);
-  // 首帧仅需轻量读取 settings.json；Keystore 凭据与自定义字体在首帧后并行水合
-  await prefs.load(deferHeavyInit: true);
-  // 恢复上次选的本地小模型（id 失效时管理器自动回落第一档）
-  localModels.selectedId = prefs.aiLocalModelId;
-  // 默认按屏幕支持的最高刷新率出帧（可在设置 → 性能里关掉）
-  DisplayService.setHighRefresh(prefs.highRefreshRate);
-  SourceHttpClient.defaultCookieDir = p.join(appDirs.files, 'cookies');
 
-  final store = BookStore(dirsOverride: appDirs)..markLoadingPending();
-  final sourceStore = SourceStore(dirsOverride: appDirs);
-  final bookmarkStore = BookmarkStore(dirsOverride: appDirs);
-  final statsStore = StatsStore(dirsOverride: appDirs);
-  final petStore = PetStore(dirsOverride: appDirs);
+  final prefs = AppPrefs()..markInitialLoadPending();
+  final store = BookStore()..markLoadingPending();
+  final sourceStore = SourceStore();
+  final bookmarkStore = BookmarkStore();
+  final statsStore = StatsStore();
+  final petStore = PetStore();
 
   SourceStore.shared = sourceStore;
   BookmarkStore.shared = bookmarkStore;
@@ -95,10 +89,13 @@ Future<void> main() async {
     ),
   );
 
-  // 首帧渲染与开屏同时推进后台水合：数据库、书库、书源、书签、统计、桌宠、凭据与字体全部并行加载
+  // 首帧画出前先异步预解码开屏插画（不卡住同步建树，有 350ms 兜底超时）
+  unawaited(_prewarmSplashArt(binding));
+
+  // 首帧画出后分两级在后台并行水合，避免与首屏和书架抢占主线程资源
   unawaited(
-    _hydrateInBackground(
-      appDirs: appDirs,
+    _bootstrapAndHydrate(
+      appDirsFuture: appDirsFuture,
       prefs: prefs,
       store: store,
       sourceStore: sourceStore,
@@ -109,8 +106,46 @@ Future<void> main() async {
   );
 }
 
-Future<void> _hydrateInBackground({
-  required AppDirs appDirs,
+Future<void> _prewarmSplashArt(WidgetsBinding binding) async {
+  try {
+    final view = binding.platformDispatcher.views.firstOrNull;
+    final dpr = (view != null && view.devicePixelRatio > 0)
+        ? view.devicePixelRatio
+        : 2.0;
+    final logicalSize = view != null
+        ? view.physicalSize / dpr
+        : const Size(400, 800);
+    final cacheWidth = splashArtCacheWidth(logicalSize, dpr);
+    final provider = ResizeImage(
+      const AssetImage(kSplashArtAsset),
+      width: cacheWidth,
+    );
+    final stream = provider.resolve(const ImageConfiguration());
+    final completer = Completer<void>();
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (_, _) {
+        if (!completer.isCompleted) completer.complete();
+      },
+      onError: (_, _) {
+        if (!completer.isCompleted) completer.complete();
+      },
+    );
+    stream.addListener(listener);
+    try {
+      await completer.future.timeout(const Duration(milliseconds: 350));
+    } finally {
+      stream.removeListener(listener);
+    }
+  } catch (_) {
+    // 兜底：任何异常都不阻塞首帧放行
+  } finally {
+    binding.allowFirstFrame();
+  }
+}
+
+Future<void> _bootstrapAndHydrate({
+  required Future<AppDirs> appDirsFuture,
   required AppPrefs prefs,
   required BookStore store,
   required SourceStore sourceStore,
@@ -118,25 +153,31 @@ Future<void> _hydrateInBackground({
   required StatsStore statsStore,
   required PetStore petStore,
 }) async {
-  final dbFuture =
-      SakuraDatabase.open(dbPath: p.join(appDirs.files, 'sakura_read_v2.db'))
-          .then((db) async {
-            SakuraDatabase.shared = db;
-            store.attachDatabase(db);
-            ReplaceRuleStore.shared.attachDatabase(db);
-            await Future.wait(<Future<void>>[
-              store.load(),
-              ReplaceRuleStore.shared.load(),
-            ]);
-          });
+  final appDirs = await appDirsFuture;
+  SourceHttpClient.defaultCookieDir = p.join(appDirs.files, 'cookies');
 
+  // 阶段 1（书架主路径）：优先加载设置、数据库、书架书单与桌宠
+  await prefs.load(dirs: appDirs, deferHeavyInit: true);
+  DisplayService.setHighRefresh(prefs.highRefreshRate);
+
+  final db = await SakuraDatabase.open(
+    dbPath: p.join(appDirs.files, 'sakura_read_v2.db'),
+  );
+  SakuraDatabase.shared = db;
+  store.attachDatabase(db);
+  ReplaceRuleStore.shared.attachDatabase(db);
+
+  await Future.wait(<Future<void>>[store.load(), petStore.load()]);
+  PerfProbe.mark('shelfReady');
+
+  // 阶段 2（次要数据）：后台静默补齐凭据/字体/净化规则/书源/书签/统计
   await Future.wait(<Future<void>>[
     prefs.completeDeferredLoad(),
-    dbFuture,
+    ReplaceRuleStore.shared.load(),
     sourceStore.load().then((_) => sourceStore.ensureBuiltinSources()),
     bookmarkStore.load(),
     statsStore.load(),
-    petStore.load(),
   ]);
+  localModels.selectedId = prefs.aiLocalModelId;
   PerfProbe.mark('hydrated');
 }

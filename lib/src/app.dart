@@ -158,7 +158,7 @@ class SakuraApp extends StatelessWidget {
               prefs: prefs,
               child: SplashGate(
                 enabled: prefs.showSplashAnimation,
-                duration: const Duration(milliseconds: 950),
+                duration: const Duration(milliseconds: 650),
                 child: HomePage(
                   store: store,
                   prefs: prefs,

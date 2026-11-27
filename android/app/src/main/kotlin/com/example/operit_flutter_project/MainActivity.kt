@@ -47,10 +47,29 @@ class MainActivity : FlutterActivity() {
     // 冷启动时系统把文件 intent 传进来，Dart 尚未就绪 → 先存路径等 Dart 来取；
     // 热启动（已有实例）时通过 [notifyFileOpened] 直接推送。
     private var pendingOpenPath: String? = null
+    private var launchBackdropCleared = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingOpenPath = resolveOpenIntent(intent)
+    }
+
+    override fun onFlutterUiDisplayed() {
+        super.onFlutterUiDisplayed()
+        if (!launchBackdropCleared) {
+            launchBackdropCleared = true
+            val nightMask = resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK
+            val bgRes = if (nightMask == android.content.res.Configuration.UI_MODE_NIGHT_YES) {
+                R.color.splash_bg_dark
+            } else {
+                R.color.splash_bg
+            }
+            window.setBackgroundDrawableResource(bgRes)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setTranslucent(false)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -66,7 +85,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        val credentials = SecureCredentials(this)
+        val credentials by lazy { SecureCredentials(this) }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "sakuraread/credentials")
             .setMethodCallHandler { call, result ->
                 if (call.method != "read" && call.method != "write") {

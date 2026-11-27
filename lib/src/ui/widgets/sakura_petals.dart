@@ -68,7 +68,10 @@ class _SakuraPetalsState extends State<SakuraPetals>
     if (reduced != _reducedMotion) {
       _reducedMotion = reduced;
       if (reduced) {
+        if (_ticker.isActive) _ticker.stop();
         _phase.value = .35;
+      } else {
+        if (!_ticker.isActive) _ticker.start();
       }
     }
   }

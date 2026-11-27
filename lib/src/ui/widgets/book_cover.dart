@@ -41,7 +41,7 @@ class BookCover extends StatelessWidget {
   Widget build(BuildContext context) {
     final path = book.coverPath;
     Widget content;
-    if (!book.generatedCover && path != null && File(path).existsSync()) {
+    if (!book.generatedCover && path != null && path.isNotEmpty) {
       content = LayoutBuilder(
         builder: (context, constraints) {
           final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -192,6 +192,12 @@ class GeneratedCover extends StatelessWidget {
           final h = constraints.maxHeight;
           final compact = h < 140;
           final tiny = h < 76;
+          final dpr = MediaQuery.devicePixelRatioOf(context);
+          final logicalW =
+              constraints.maxWidth.isFinite && constraints.maxWidth > 0
+              ? constraints.maxWidth
+              : 200.0;
+          final cacheWidth = (logicalW * dpr).clamp(120.0, 540.0).round();
           return Stack(
             fit: StackFit.expand,
             children: [
@@ -199,6 +205,8 @@ class GeneratedCover extends StatelessWidget {
                 child: Image.asset(
                   _coverAssets[_titleHash % _coverAssets.length],
                   fit: BoxFit.cover,
+                  cacheWidth: cacheWidth,
+                  gaplessPlayback: true,
                   errorBuilder: (_, _, _) => const SizedBox.shrink(),
                 ),
               ),
