@@ -463,6 +463,9 @@ class OnlineRepo {
       ).getString(raw);
       if (rendered == null || rendered.trim().isEmpty) return const [];
       final t = rendered.trim();
+      if (t == 'undefined' || t == 'null' || LegadoJsEngine.containsJs(t)) {
+        return const [];
+      }
       if (t.startsWith('[')) return _parseJsonCategories(t);
       return _parseLineCategories(t);
     }
@@ -520,8 +523,12 @@ class OnlineRepo {
         if (comma >= 0) {
           title = item.substring(0, comma).trim();
           url = item.substring(comma + 1).trim();
-        } else {
+        } else if (item.startsWith('http://') ||
+            item.startsWith('https://') ||
+            item.startsWith('/')) {
           url = item;
+        } else {
+          continue;
         }
       }
       if (url.isEmpty) continue;
