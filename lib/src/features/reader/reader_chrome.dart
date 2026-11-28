@@ -134,6 +134,7 @@ class ReaderTopBar extends StatelessWidget {
     required this.onShowXray,
     required this.onShowAnnotations,
     required this.onShowChapters,
+    this.onSearchBook,
     this.onOpenEpubOriginal,
     this.onDownloadWholeBook,
     this.onOpenChapterSource,
@@ -151,6 +152,7 @@ class ReaderTopBar extends StatelessWidget {
   final VoidCallback onShowXray;
   final VoidCallback onShowAnnotations;
   final VoidCallback onShowChapters;
+  final VoidCallback? onSearchBook;
   final VoidCallback? onOpenEpubOriginal;
   final VoidCallback? onDownloadWholeBook;
   final VoidCallback? onOpenChapterSource;
@@ -251,6 +253,15 @@ class ReaderTopBar extends StatelessWidget {
                       ],
                     ),
                   ),
+                  if (onSearchBook != null)
+                    IconButton(
+                      onPressed: onSearchBook,
+                      icon: Icon(
+                        Icons.search_rounded,
+                        color: palette.foreground,
+                      ),
+                      tooltip: '书内搜索',
+                    ),
                   IconButton(
                     onPressed: onShowAnnotations,
                     icon: Badge(

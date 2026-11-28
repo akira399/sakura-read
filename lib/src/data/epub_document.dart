@@ -29,6 +29,7 @@ String prepareEpubHtml(
   required double fontSize,
   required String background,
   required String foreground,
+  bool forceThemeColors = true,
 }) {
   final doc = html.parse(source);
   for (final node in doc.querySelectorAll(
@@ -50,10 +51,15 @@ String prepareEpubHtml(
       }
     }
   }
+  final colorOverride = forceThemeColors
+      ? 'body,p,div,span,li,td,th,dt,dd,h1,h2,h3,h4,h5,h6,blockquote,em,strong,font{color:$foreground !important;background-color:transparent !important}'
+      : '';
   doc.head?.append(
     html.parseFragment(
       '<meta name="viewport" content="width=device-width, initial-scale=1">'
-      '<style>html{background:$background;color:$foreground}body{font-size:${fontSize}px;line-height:1.8;margin:20px;overflow-wrap:anywhere}img,svg{max-width:100%;height:auto}a{color:inherit;text-decoration:underline}pre{white-space:pre-wrap}</style>',
+      '<style>html{background:$background;color:$foreground}$colorOverride'
+      'body{font-size:${fontSize}px;line-height:1.8;margin:20px;overflow-wrap:anywhere}'
+      'img,svg{max-width:100%;height:auto}a{color:inherit;text-decoration:underline}pre{white-space:pre-wrap}</style>',
     ),
   );
   return doc.outerHtml;

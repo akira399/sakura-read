@@ -12,6 +12,7 @@ class TtsBar extends StatelessWidget {
     required this.onToggle,
     required this.onStop,
     required this.onOpenSettings,
+    this.onSleepTimer,
     this.dark = true,
   });
 
@@ -21,6 +22,7 @@ class TtsBar extends StatelessWidget {
   final VoidCallback onToggle;
   final VoidCallback onStop;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onSleepTimer;
 
   /// 深色底（阅读器默认）还是浅色底。
   final bool dark;
@@ -116,6 +118,7 @@ class TtsBar extends StatelessWidget {
                 tooltip: '下一段',
                 onTap: onNext,
               ),
+              if (onSleepTimer != null) _sleepButton(fg: fg, fgDim: fgDim),
               _btn(
                 icon: Icons.tune_rounded,
                 fg: fg,
@@ -132,6 +135,52 @@ class TtsBar extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _sleepButton({required Color fg, required Color fgDim}) {
+    final rem = service.sleepRemaining;
+    final afterChapter = service.stopAfterChapter;
+    final active = rem != null || afterChapter;
+    String? badge;
+    if (rem != null) {
+      final mins = (rem.inSeconds / 60).ceil().clamp(1, 999);
+      badge = '${mins}m';
+    } else if (afterChapter) {
+      badge = '章末';
+    }
+    return Tooltip(
+      message: '定时停止',
+      child: InkWell(
+        onTap: onSleepTimer,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                active ? Icons.timer_rounded : Icons.timer_outlined,
+                size: 19,
+                color: active
+                    ? (dark ? const Color(0xFFFFB7C5) : Colors.pinkAccent)
+                    : fg,
+              ),
+              if (badge != null) ...[
+                const SizedBox(width: 2),
+                Text(
+                  badge,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: dark ? const Color(0xFFFFB7C5) : Colors.pinkAccent,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 

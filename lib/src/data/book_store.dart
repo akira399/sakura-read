@@ -128,7 +128,8 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
 
   /// 在线书籍：切换书源（更新书页地址 / 源地址 / 目录，并清空该书的章节缓存）。
   ///
-  /// 保留阅读进度（章节序号夹取到新目录范围，章内偏移归零）。
+  /// 保留阅读进度（章节序号夹取到新目录范围，章内偏移归零）；[preserveMeta] 为 true 时
+  /// 保留原有非空书名 / 作者 / 简介（及封面），防止差源覆盖优质资料。
   Future<void> switchOnlineSource(
     String id, {
     required String path,
@@ -137,6 +138,7 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     String? title,
     String? author,
     String? intro,
+    bool preserveMeta = false,
   }) async {
     final b = byId(id);
     if (b == null || b.format != BookFormat.online) return;
@@ -146,11 +148,17 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
       ..clear()
       ..addAll(chapters);
     final t = (title ?? '').trim();
-    if (t.isNotEmpty) b.title = t;
+    if (t.isNotEmpty && (!preserveMeta || b.title.trim().isEmpty)) {
+      b.title = t;
+    }
     final a = (author ?? '').trim();
-    if (a.isNotEmpty) b.author = a;
+    if (a.isNotEmpty && (!preserveMeta || b.author.trim().isEmpty)) {
+      b.author = a;
+    }
     final i = (intro ?? '').trim();
-    if (i.isNotEmpty) b.intro = i;
+    if (i.isNotEmpty && (!preserveMeta || b.intro.trim().isEmpty)) {
+      b.intro = i;
+    }
     b.chapterIndex = chapters.isEmpty
         ? 0
         : b.chapterIndex.clamp(0, chapters.length - 1).toInt();
@@ -201,6 +209,81 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     b.title = trimmed;
     _persistMeta(id: id, title: trimmed);
     notifyListeners();
+  }
+
+  /// 手动更新书籍资料（书名 / 作者 / 简介）。
+  void updateBookInfo(
+    String id, {
+    String? title,
+    String? author,
+    String? intro,
+  }) {
+    final b = byId(id);
+    if (b == null) return;
+    var changed = false;
+    final t = title?.trim();
+    if (t != null && t.isNotEmpty && t != b.title) {
+      b.title = t;
+      changed = true;
+    }
+    if (author != null && author.trim() != b.author) {
+      b.author = author.trim();
+      changed = true;
+    }
+    if (intro != null && intro.trim() != b.intro) {
+      b.intro = intro.trim();
+      changed = true;
+    }
+    if (!changed) return;
+    _persistUpsert(b);
+    notifyListeners();
+  }
+
+  /// 将已缓存的在线书籍合并导出为本地 `.txt` 文件；若无已缓存章节返回 null。
+  Future<String?> exportCachedOnlineBookToTxt(Book book) async {
+    if (book.format != BookFormat.online) return null;
+    final dir = chapterCacheDir(book.id);
+    if (!await dir.exists()) return null;
+
+    final buf = StringBuffer()..writeln(book.title);
+    if (book.author.trim().isNotEmpty) {
+      buf.writeln('作者：${book.author.trim()}');
+    }
+    buf.writeln();
+
+    var exportedCount = 0;
+    for (var i = 0; i < book.chapters.length; i++) {
+      final f = File('${dir.path}/ch_v2_${i.toString().padLeft(4, '0')}.txt');
+      if (!await f.exists()) continue;
+      final body = (await f.readAsString()).trim();
+      if (body.isEmpty) continue;
+      final chTitle = book.chapters[i].title.trim();
+      if (chTitle.isNotEmpty) {
+        buf.writeln(chTitle);
+        buf.writeln();
+      }
+      buf.writeln(body);
+      buf.writeln();
+      exportedCount++;
+    }
+    if (exportedCount == 0) return null;
+
+    final safeName = book.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+    final fileName = '${safeName.isEmpty ? 'sakuraread_export' : safeName}.txt';
+    final root = await NativeBridge.storageRoot();
+    final primaryDir = Directory('$root/Download/SakuraRead');
+    try {
+      await primaryDir.create(recursive: true);
+      final outFile = File('${primaryDir.path}/$fileName');
+      await outFile.writeAsString(buf.toString(), flush: true);
+      return outFile.path;
+    } catch (_) {
+      final fallbackDir = Directory('${chapterCacheRoot.parent.path}/exports');
+      await fallbackDir.create(recursive: true);
+      final outFile = File('${fallbackDir.path}/$fileName');
+      await outFile.writeAsString(buf.toString(), flush: true);
+      return outFile.path;
+    }
   }
 
   /// 设置书籍分组（'' = 未分组）。
@@ -269,6 +352,18 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
     void Function(String message)? onProgress,
   }) async {
     if (containsPath(path)) return ImportResult.fail('已经在书架里了');
+    final file = File(path);
+    try {
+      if (!await file.exists()) {
+        return ImportResult.fail('找不到文件，可能已被移动或删除');
+      }
+      final len = await file.length();
+      if (len <= 0) {
+        return ImportResult.fail('文件内容为空（0 字节），无法导入');
+      }
+    } on FileSystemException catch (e) {
+      return ImportResult.fail('无法读取文件（可能是存储权限不足或文件损坏）：${e.message}');
+    }
     final ext = pathExtension(path);
     try {
       if (ext == 'txt') {
@@ -280,6 +375,10 @@ class BookStore extends ChangeNotifier with ReliablePersistence {
       return ImportResult.fail('不支持的格式 .$ext（仅支持 txt / epub）');
     } on EpubException catch (e) {
       return ImportResult.fail(e.message);
+    } on FileSystemException catch (e) {
+      return ImportResult.fail('读取失败（请检查存储权限或磁盘空间）：${e.message}');
+    } on FormatException catch (e) {
+      return ImportResult.fail('文件编码或结构异常：${e.message}');
     } catch (e) {
       return ImportResult.fail('导入失败：$e');
     }

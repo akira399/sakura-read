@@ -9,7 +9,8 @@ enum ShelfSortMode {
   title('书名'),
   author('作者'),
   progress('阅读进度'),
-  chars('字数');
+  chars('字数'),
+  manual('手动排序');
 
   const ShelfSortMode(this.label);
 
@@ -19,7 +20,7 @@ enum ShelfSortMode {
   ///
   /// - 最近阅读 / 添加时间：新的在前 → 降序；
   /// - 书名 / 作者：A→Z 顺读 → 升序；
-  /// - 阅读进度 / 字数：多的在前 → 降序。
+  /// - 阅读进度 / 字数 / 手动排序。
   bool get defaultAscending => switch (this) {
     ShelfSortMode.recentRead => false,
     ShelfSortMode.addedTime => false,
@@ -27,6 +28,7 @@ enum ShelfSortMode {
     ShelfSortMode.author => true,
     ShelfSortMode.progress => false,
     ShelfSortMode.chars => false,
+    ShelfSortMode.manual => true,
   };
 }
 
@@ -52,6 +54,7 @@ ShelfSortMode shelfSortModeFrom(String? value) => switch (value) {
   'author' => ShelfSortMode.author,
   'progress' => ShelfSortMode.progress,
   'chars' => ShelfSortMode.chars,
+  'manual' => ShelfSortMode.manual,
   _ => ShelfSortMode.recentRead,
 };
 
@@ -90,6 +93,8 @@ int compareBooks(Book a, Book b, ShelfSortMode mode) {
     case ShelfSortMode.chars:
       final c = a.totalChars.compareTo(b.totalChars);
       return c != 0 ? c : naturalCompare(a.title, b.title);
+    case ShelfSortMode.manual:
+      return a.addedAt.compareTo(b.addedAt);
   }
 }
 
@@ -98,7 +103,28 @@ void sortBooksForShelf(
   List<Book> books,
   ShelfSortMode mode, {
   required bool ascending,
+  List<String>? manualOrder,
 }) {
+  if (mode == ShelfSortMode.manual &&
+      manualOrder != null &&
+      manualOrder.isNotEmpty) {
+    final pos = <String, int>{
+      for (var i = 0; i < manualOrder.length; i++) manualOrder[i]: i,
+    };
+    books.sort((a, b) {
+      final ia = pos[a.id];
+      final ib = pos[b.id];
+      if (ia != null && ib != null) {
+        final cmp = ia.compareTo(ib);
+        return ascending ? cmp : -cmp;
+      }
+      if (ia != null) return -1;
+      if (ib != null) return 1;
+      final c = a.addedAt.compareTo(b.addedAt);
+      return ascending ? c : -c;
+    });
+    return;
+  }
   books.sort((a, b) {
     final c = compareBooks(a, b, mode);
     return ascending ? c : -c;

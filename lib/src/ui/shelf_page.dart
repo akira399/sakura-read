@@ -706,6 +706,7 @@ class _ShelfPageState extends State<ShelfPage> {
       books,
       widget.prefs.shelfSort,
       ascending: widget.prefs.shelfAscending,
+      manualOrder: widget.prefs.manualShelfOrder,
     );
     if (books.any((b) => b.pinned)) {
       final pinned = [
@@ -896,6 +897,18 @@ class _ShelfPageState extends State<ShelfPage> {
                       ),
                     ),
                     const Spacer(),
+                    if (prefs.shelfSort == ShelfSortMode.manual)
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pop(sheetContext);
+                          _openManualOrderSheet();
+                        },
+                        icon: const Icon(Icons.drag_handle_rounded, size: 16),
+                        label: const Text(
+                          '调整顺序',
+                          style: TextStyle(fontSize: 12.5),
+                        ),
+                      ),
                     TextButton.icon(
                       onPressed: prefs.toggleShelfAscending,
                       icon: Icon(
@@ -961,9 +974,100 @@ class _ShelfPageState extends State<ShelfPage> {
       ShelfSortMode.author => '作者名',
       ShelfSortMode.progress => '阅读进度',
       ShelfSortMode.chars => '全书字数',
+      ShelfSortMode.manual => '手动顺序',
     };
     final dir = prefs.shelfAscending ? '从低到高' : '从高到低';
-    return '按$name$dir';
+    return prefs.shelfSort == ShelfSortMode.manual
+        ? '按$name${prefs.shelfAscending ? '正序' : '倒序'}（可点右侧“调整顺序”拖拽）'
+        : '按$name$dir';
+  }
+
+  Future<void> _openManualOrderSheet() async {
+    final ordered = List<Book>.of(widget.store.books);
+    _sortBooks(ordered);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(ctx).height * 0.66,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 14, 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.drag_indicator_rounded, size: 18),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          '拖拽调整书架顺序',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          widget.prefs.setManualShelfOrder(
+                            ordered.map((b) => b.id).toList(),
+                          );
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text('完成'),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ReorderableListView.builder(
+                    itemCount: ordered.length,
+                    onReorderItem: (oldIdx, newIdx) {
+                      setSheetState(() {
+                        final item = ordered.removeAt(oldIdx);
+                        ordered.insert(newIdx, item);
+                      });
+                      widget.prefs.setManualShelfOrder(
+                        ordered.map((b) => b.id).toList(),
+                      );
+                    },
+                    itemBuilder: (_, i) {
+                      final b = ordered[i];
+                      return ListTile(
+                        key: ValueKey(b.id),
+                        leading: Text(
+                          '${i + 1}',
+                          style: TextStyle(
+                            color: Theme.of(ctx).colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        title: Text(
+                          b.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: b.author.isEmpty
+                            ? null
+                            : Text(
+                                b.author,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                        trailing: const Icon(Icons.drag_handle_rounded),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _arrangeLabel(String text) => Text(

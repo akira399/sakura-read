@@ -12,7 +12,7 @@ enum PickerMode { files, folder, sourceFiles, fonts, images, bookshelfFiles }
 /// 各模式允许展示的文件扩展名（小写、不带点）；
 /// `folder` 模式不展示文件，返回空集合。
 Set<String> pickerExtensionsFor(PickerMode mode) => switch (mode) {
-  PickerMode.fonts => const {'ttf', 'otf'},
+  PickerMode.fonts => const {'ttf', 'otf', 'ttc'},
   PickerMode.images => const {'png', 'jpg', 'jpeg', 'webp'},
   PickerMode.bookshelfFiles => const {'json', 'zip'},
   PickerMode.files => kNovelExtensions,

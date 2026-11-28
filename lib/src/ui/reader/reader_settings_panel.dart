@@ -79,12 +79,36 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     );
   }
 
-  /// 排版：字号 / 行距 / 段间距 / 字间距 / 左右边距 / 上下留白 / 段首缩进。
+  /// 排版：预设方案 / 字号 / 行距 / 段间距 / 字间距 / 左右边距 / 上下留白 / 缩进与对齐。
   Widget _typographyTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        const _Label('一键排版预设'),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            for (final preset in _kTypographyPresets)
+              ChoiceChip(
+                label: Text(preset.label),
+                selected: _matchesPreset(preset),
+                visualDensity: VisualDensity.compact,
+                onSelected: (_) => widget.prefs.applyTypographyPreset(
+                  fontSize: preset.fontSize,
+                  lineHeight: preset.lineHeight,
+                  paragraphSpacing: preset.paragraphSpacing,
+                  letterSpacing: preset.letterSpacing,
+                  readerMarginH: preset.marginH,
+                  paragraphIndent: true,
+                  textJustify: true,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
         _fontSizeRow(),
         _sliderRow(
           label: '行距',
@@ -147,8 +171,33 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           onChanged: widget.prefs.setParagraphIndent,
           title: const Text('段首缩进两格', style: TextStyle(fontSize: 13.5)),
         ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: widget.prefs.textJustify,
+          onChanged: widget.prefs.setTextJustify,
+          title: const Text('正文两端对齐', style: TextStyle(fontSize: 13.5)),
+          subtitle: Text(
+            '让每一行左右边缘更整齐',
+            style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  bool _matchesPreset(_TypographyPreset preset) {
+    final p = widget.prefs;
+    return (p.fontSize - preset.fontSize).abs() < 0.1 &&
+        (p.lineHeight - preset.lineHeight).abs() < 0.05 &&
+        (p.paragraphSpacing - preset.paragraphSpacing).abs() < 0.5 &&
+        (p.letterSpacing - preset.letterSpacing).abs() < 0.05 &&
+        (p.readerMarginH - preset.marginH).abs() < 0.5 &&
+        p.paragraphIndent &&
+        p.textJustify;
   }
 
   /// 字号行：滑杆 + 快捷 A- / A+ 微调按钮。
@@ -335,11 +384,13 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     if (picked == null || picked.isEmpty) return;
     try {
       await widget.prefs.importReaderAsset(picked.first, font: font);
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('导入失败，请选择有效文件（最大 20 MB）')));
+        final msg = e is StateError
+            ? e.message
+            : '导入失败，请选择有效文件（字体最大 60 MB，背景最大 20 MB）';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg)));
       }
     }
   }
@@ -643,3 +694,56 @@ class _Label extends StatelessWidget {
     );
   }
 }
+
+class _TypographyPreset {
+  const _TypographyPreset({
+    required this.label,
+    required this.fontSize,
+    required this.lineHeight,
+    required this.paragraphSpacing,
+    required this.letterSpacing,
+    required this.marginH,
+  });
+
+  final String label;
+  final double fontSize;
+  final double lineHeight;
+  final double paragraphSpacing;
+  final double letterSpacing;
+  final double marginH;
+}
+
+const List<_TypographyPreset> _kTypographyPresets = <_TypographyPreset>[
+  _TypographyPreset(
+    label: '番茄舒朗',
+    fontSize: 19,
+    lineHeight: 1.7,
+    paragraphSpacing: 16,
+    letterSpacing: 0.5,
+    marginH: 20,
+  ),
+  _TypographyPreset(
+    label: 'QQ 紧凑',
+    fontSize: 17,
+    lineHeight: 1.5,
+    paragraphSpacing: 8,
+    letterSpacing: 0.2,
+    marginH: 14,
+  ),
+  _TypographyPreset(
+    label: '纸书经典',
+    fontSize: 18,
+    lineHeight: 1.8,
+    paragraphSpacing: 12,
+    letterSpacing: 0.6,
+    marginH: 24,
+  ),
+  _TypographyPreset(
+    label: '护眼大字',
+    fontSize: 22,
+    lineHeight: 1.9,
+    paragraphSpacing: 18,
+    letterSpacing: 0.8,
+    marginH: 18,
+  ),
+];

@@ -12,6 +12,8 @@ import 'package:flutter/services.dart';
 
 import '../../data/book_source.dart';
 import '../../data/book_store.dart';
+import '../../data/epub_parser.dart';
+import '../../data/image_header.dart';
 import '../../data/models.dart';
 import '../../data/paginator.dart';
 import '../../data/offline_downloader.dart';
@@ -26,6 +28,7 @@ import '../../features/reader/chapter_paginator_cache.dart';
 import '../../features/reader/image_viewer_page.dart';
 import '../../features/reader/reader_chrome.dart';
 import '../../features/reader/simulation_turn.dart';
+import '../library_search_page.dart';
 import '../../platform/native_bridge.dart';
 import '../../platform/tts_service.dart';
 import '../../platform/url_launcher.dart';
@@ -403,11 +406,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
   }
 
+  Size? _resolveImageSize(String imageName) {
+    final dir = _imageDir;
+    if (dir == null || dir.isEmpty || imageName.isEmpty) return null;
+    return readImageSizeFromFile('$dir/$imageName');
+  }
+
   String _processText(int chapterIndex, String raw) {
-    final isScroll = widget.prefs.pageMode == PageTurnMode.scroll;
     final purifier = widget.textPurifier ?? ReaderPage.defaultTextPurifier;
     final key =
-        '${chapterIndex}_${widget.prefs.paragraphIndent}_${isScroll ? 1 : 0}_${purifier.hashCode}';
+        '${chapterIndex}_${widget.prefs.paragraphIndent}_${purifier.hashCode}';
     final cached = _cache.getProcessedText(key);
     if (cached != null) return cached;
     var text = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
@@ -418,29 +426,36 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         sourceUrl: _book?.sourceUrl,
       );
     }
-    // 分页模式无法把图片嵌进文字排版里（分页按字符测量），
-    // 这里把插图标记换成可读的占位文字，避免控制字符混进正文。
-    // 滚动模式会保留标记并渲染真图（见 _ScrollReader）。
-    if (!isScroll) {
-      text = text.replaceAll(RegExp('\u0001IMG:[^\u0001]*\u0001'), '［插图］');
-    }
     if (widget.prefs.paragraphIndent) {
       final lines = text.split('\n');
       for (var i = 0; i < lines.length; i++) {
         final line = lines[i];
         if (line.trim().isEmpty) continue;
-        if (line.startsWith('　') || line.startsWith('［')) continue;
+        if (line.startsWith('　') ||
+            line.startsWith('［') ||
+            line.startsWith(EpubParser.imageMarkerPrefix)) {
+          continue;
+        }
         lines[i] = '　　$line';
       }
       text = lines.join('\n');
     }
     // 章节标题：在线阅读的正文容器不含标题、部分 EPUB 也不含 →
-    // 正文开头若找不到标题，就在文首补一行（TXT 自带标题时自动去重）。
+    // 正文开头若找不到标题，就在文首补一行（纯图片章节不补，免得遮挡插图/封面）。
+    final hasProse = text
+        .replaceAll(RegExp('\u0001IMG:[^\u0001]*\u0001'), '')
+        .trim()
+        .isNotEmpty;
     final title = (_book?.chapters[chapterIndex].title ?? '').trim();
-    if (title.isNotEmpty && text.isNotEmpty) {
+    if (hasProse && title.isNotEmpty && text.isNotEmpty) {
       final head = text
           .split('\n')
-          .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
+          .firstWhere(
+            (l) =>
+                l.trim().isNotEmpty &&
+                !l.trim().startsWith(EpubParser.imageMarkerPrefix),
+            orElse: () => '',
+          );
       String squash(String s) => s.replaceAll(RegExp(r'[\s\u3000]+'), '');
       final h = squash(head);
       final t = squash(title);
@@ -490,9 +505,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final p = widget.prefs;
     return '$chapterIndex|${widget.bookId}|'
         '${_viewport.width.round()}x${_viewport.height.round()}|'
-        '${p.fontSize}|${p.lineHeight}|${p.letterSpacing}|${p.readerMarginH}|'
+        '${p.fontSize}|${p.lineHeight}|${p.paragraphSpacing}|'
+        '${p.letterSpacing}|${p.readerMarginH}|'
         '${_effectiveMarginH.toStringAsFixed(1)}|'
-        '${p.fontFamily}|${p.paragraphIndent}|${p.pageMode.name}|'
+        '${p.fontFamily}|${p.paragraphIndent}|${p.textJustify}|${p.pageMode.name}|'
         '${p.readerPaddingTop}|${p.readerPaddingBottom}|'
         '${chapterText.length}|${chapterText.hashCode}';
   }
@@ -574,7 +590,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       return;
     }
 
-    final session = PaginatorSession(style: _textStyle, size: _bodySize());
+    final session = PaginatorSession(
+      style: _textStyle,
+      size: _bodySize(),
+      align: widget.prefs.textJustify ? TextAlign.justify : TextAlign.left,
+      paragraphSpacing: widget.prefs.paragraphSpacing,
+      imageSizeResolver: _resolveImageSize,
+    );
     final pages = <PageSlice>[];
     setState(() {
       _pages = pages;
@@ -586,10 +608,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     var offset = 0;
     var count = 0;
     while (offset < text.length && gen == _paginateGen && mounted) {
-      var end = session.fitEnd(text, offset);
-      if (end <= offset) end = offset + 1;
-      if (end > text.length) end = text.length;
-      pages.add(PageSlice(offset, end));
+      final slice = session.nextPage(text, offset);
+      pages.add(slice);
+      final end = slice.end <= offset ? offset + 1 : slice.end;
       offset = session.skipLeadingNewlines(text, end);
       count++;
       if (!_revealed && (offset >= text.length || offset > _targetOffset)) {
@@ -703,6 +724,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           _chapterIndex - 1,
           _sliceText(prevText, prevPages.last),
           prevPages.last.start,
+          prevPages.last.blocks,
         ),
       );
     }
@@ -710,7 +732,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     // 本章全部页
     final curText = _textOfChapter(_chapterIndex) ?? _chapterText;
     for (final p in _pages) {
-      flow.add(_FlowPage(_chapterIndex, _sliceText(curText, p), p.start));
+      flow.add(
+        _FlowPage(_chapterIndex, _sliceText(curText, p), p.start, p.blocks),
+      );
     }
     // 下一章全部页（已预加载时纳入，可以连续向前翻过章界）
     final nextPages = _cachedPagesOf(_chapterIndex + 1);
@@ -718,7 +742,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (nextPages != null && nextText != null) {
       for (final p in nextPages) {
         flow.add(
-          _FlowPage(_chapterIndex + 1, _sliceText(nextText, p), p.start),
+          _FlowPage(
+            _chapterIndex + 1,
+            _sliceText(nextText, p),
+            p.start,
+            p.blocks,
+          ),
         );
       }
     }
@@ -951,14 +980,19 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final sig = _layoutSigFor(index, text);
     if (!_cache.tryStartPreload(sig)) return;
     try {
-      final session = PaginatorSession(style: _textStyle, size: _bodySize());
+      final session = PaginatorSession(
+        style: _textStyle,
+        size: _bodySize(),
+        align: widget.prefs.textJustify ? TextAlign.justify : TextAlign.left,
+        paragraphSpacing: widget.prefs.paragraphSpacing,
+        imageSizeResolver: _resolveImageSize,
+      );
       final pages = <PageSlice>[];
       var offset = 0;
       while (offset < text.length && mounted) {
-        var end = session.fitEnd(text, offset);
-        if (end <= offset) end = offset + 1;
-        if (end > text.length) end = text.length;
-        pages.add(PageSlice(offset, end));
+        final slice = session.nextPage(text, offset);
+        pages.add(slice);
+        final end = slice.end <= offset ? offset + 1 : slice.end;
         offset = session.skipLeadingNewlines(text, end);
         // 每页让出一次事件循环，避免预加载造成掉帧
         await Future<void>.delayed(Duration.zero);
@@ -1129,6 +1163,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   onNext: _ttsNext,
                   onToggle: _toggleTts,
                   onStop: _stopTts,
+                  onSleepTimer: _showTtsTimerSheet,
                   onOpenSettings: _showTtsSettings,
                 ),
               ),
@@ -1218,6 +1253,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
     final darkPaper =
         ThemeData.estimateBrightnessForColor(bg.color) == Brightness.dark;
+    final align = widget.prefs.textJustify ? TextAlign.justify : TextAlign.left;
     Widget reader;
     if (mode == PageTurnMode.scroll) {
       reader = _ScrollReader(
@@ -1226,6 +1262,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         nameColor: Theme.of(context).colorScheme.primary,
         annotationsForChapter: _annotations.forChapter,
         darkPaper: darkPaper,
+        textAlign: align,
         chapters: _scrollChapters,
         style: _textStyle,
         marginH: _effectiveMarginH,
@@ -1322,6 +1359,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         mode: mode,
         topReserve: _topReserve,
         bottomReserve: _bottomReserve,
+        imageDir: _imageDir,
+        textAlign: align,
         onPageChanged: _onFlowPageChanged,
         onSettled: _onReaderSettled,
         onBeyondNext: () {
@@ -1493,6 +1532,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     required bool darkPaper,
     required Color nameColor,
   }) {
+    final align = widget.prefs.textJustify ? TextAlign.justify : TextAlign.left;
     return Container(
       color: backdrop,
       child: Padding(
@@ -1503,15 +1543,15 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           _bottomReserve,
         ),
         child: SizedBox.expand(
-          child: _ReaderRichText(
-            text: fp.text,
-            baseOffset: fp.startOffset,
+          child: _PageContentView(
+            page: fp,
             style: _textStyle,
             color: nameColor,
             pattern: widget.prefs.xrayHighlight ? _xray?.pattern : null,
             annotations: _annotations.forChapter(fp.chapter),
             darkPaper: darkPaper,
-            scaler: TextScaler.noScaling,
+            imageDir: _imageDir,
+            textAlign: align,
           ),
         ),
       ),
@@ -1528,14 +1568,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     var chosen = '';
     for (final line in lines) {
       final trimmed = line.trim();
-      if (trimmed.length >= 6) {
+      if (!trimmed.startsWith(EpubParser.imageMarkerPrefix) &&
+          trimmed.length >= 6) {
         chosen = trimmed;
         break;
       }
       relStart += line.length + 1;
     }
     if (chosen.isEmpty) {
-      chosen = fp.text.trim();
+      chosen = fp.text
+          .replaceAll(RegExp('\u0001IMG:[^\u0001]*\u0001'), '［插图］')
+          .trim();
       relStart = 0;
     }
     if (chosen.isEmpty) return;
@@ -1613,6 +1656,25 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openBookSearch() async {
+    final book = _book;
+    if (book == null) return;
+    final picked = await Navigator.of(context)
+        .push<({int chapter, int offset})>(
+          MaterialPageRoute(
+            builder: (_) => LibrarySearchPage(
+              store: widget.store,
+              prefs: widget.prefs,
+              onlyBook: book,
+              returnSelection: true,
+            ),
+          ),
+        );
+    if (picked != null && mounted) {
+      unawaited(_goToChapter(picked.chapter, picked.offset));
+    }
+  }
+
   Widget _buildTopBar(ReaderBg bg) {
     final book = _book;
     return ReaderTopBar(
@@ -1628,6 +1690,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       onShowXray: _showXraySheet,
       onShowAnnotations: _showAnnotationsSheet,
       onShowChapters: _showChapterSheet,
+      onSearchBook: _openBookSearch,
       onOpenEpubOriginal: book?.format == BookFormat.epub
           ? _openEpubOriginal
           : null,
@@ -1951,9 +2014,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       widget.prefs.ttsVoiceSid,
     );
 
-    // 朗读进度回调：自动跟随 + 章节末尾续播
+    // 朗读进度回调：自动跟随 + 章节末尾续播 + 定时停播通知
     _tts.onParagraph = _onTtsParagraph;
     _tts.onFinished = _onTtsChapterFinished;
+    _tts.onSleepStopped = () {
+      if (!mounted) return;
+      setState(() => _ttsActive = false);
+      _toastLate('已按定时设置停止朗读');
+    };
     setState(() => _ttsActive = true);
     await _tts.start(
       _ttsParagraphs.map((p) => p.text).toList(),
@@ -1964,6 +2032,95 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _showTtsTimerSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        final rem = _tts.sleepRemaining;
+        final afterChapter = _tts.stopAfterChapter;
+        Widget option({
+          required String title,
+          String? subtitle,
+          required bool selected,
+          required VoidCallback onTap,
+        }) {
+          return ListTile(
+            dense: true,
+            title: Text(title),
+            subtitle: subtitle == null ? null : Text(subtitle),
+            trailing: selected
+                ? Icon(Icons.check_rounded, color: scheme.primary)
+                : null,
+            onTap: () {
+              onTap();
+              Navigator.pop(ctx);
+            },
+          );
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                child: Row(
+                  children: [
+                    Icon(Icons.timer_outlined, color: scheme.primary, size: 18),
+                    const SizedBox(width: 8),
+                    const Text(
+                      '朗读定时停止',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (rem != null)
+                      Text(
+                        '剩余 ${(rem.inSeconds / 60).ceil()} 分钟',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.primary,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              option(
+                title: '不定时',
+                selected: !_tts.hasSleepTimer,
+                onTap: () => _tts.cancelSleepTimer(),
+              ),
+              for (final mins in const [15, 30, 45, 60])
+                option(
+                  title: '$mins 分钟后停止',
+                  selected: false,
+                  onTap: () {
+                    _tts.setSleepTimer(Duration(minutes: mins));
+                    _toastLate('将在 $mins 分钟后停止朗读');
+                  },
+                ),
+              option(
+                title: '读完本章后停止',
+                subtitle: '当前章节播完即停，不自动跳下一章',
+                selected: afterChapter,
+                onTap: () {
+                  _tts.setStopAfterChapter(true);
+                  _toastLate('将在本章读完后停止朗读');
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   /// 朗读进行到某一段：可选自动跟随（翻到对应页 / 滚动到位）。
   void _onTtsParagraph(int index) {
     if (!widget.prefs.ttsAutoFollow) return;
@@ -1971,20 +2128,27 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final offset = _ttsParagraphs[index].offset;
     if (widget.prefs.pageMode == PageTurnMode.scroll) {
       _scrollKey.currentState?.scrollToOffset(_chapterIndex, offset);
-    } else {
+    } else if (_pages.isNotEmpty) {
       final page = _pageForOffset(_pages, offset);
       // 只改 _pageIndex 不会动 PageView / PageCurlView（它只在 initialPage 里读一次），
-      // 所以这里直接驱动翻页 + 同步页码状态。
+      // 所以这里直接驱动翻页 + 同步页码状态并触发进度保存。
       _jumpPagerTo(_flowChapterStart + page);
       if (page != _pageIndex) {
         setState(() => _pageIndex = page);
+        _afterPageChanged();
       }
     }
   }
 
-  /// 本章读完：按设置自动进入下一章继续朗读。
+  /// 本章读完：支持「读完本章后停止」定时，或按设置自动进入下一章继续朗读。
   Future<void> _onTtsChapterFinished() async {
     if (!mounted) return;
+    if (_tts.stopAfterChapter) {
+      _tts.cancelSleepTimer();
+      setState(() => _ttsActive = false);
+      _toastLate('已按定时设置在本章结束后停止朗读');
+      return;
+    }
     final book = _book;
     if (book == null) return;
     if (!widget.prefs.ttsAutoNextChapter) {
@@ -3090,6 +3254,7 @@ class _ReaderRichText extends StatelessWidget {
     this.annotations = const <ReaderAnnotation>[],
     this.darkPaper = false,
     this.scaler,
+    this.textAlign = TextAlign.left,
   });
 
   final String text;
@@ -3100,6 +3265,7 @@ class _ReaderRichText extends StatelessWidget {
   final List<ReaderAnnotation> annotations;
   final bool darkPaper;
   final TextScaler? scaler;
+  final TextAlign textAlign;
 
   @override
   Widget build(BuildContext context) {
@@ -3122,7 +3288,7 @@ class _ReaderRichText extends StatelessWidget {
     }
 
     if (nameMatches.isEmpty && localHighlights.isEmpty) {
-      return Text(text, style: style, textScaler: scaler);
+      return Text(text, style: style, textScaler: scaler, textAlign: textAlign);
     }
 
     // 收集所有区间边界点，切分出互不重叠的文本片段。
@@ -3174,6 +3340,7 @@ class _ReaderRichText extends StatelessWidget {
     return Text.rich(
       TextSpan(style: style, children: spans),
       textScaler: scaler,
+      textAlign: textAlign,
     );
   }
 }
@@ -3193,6 +3360,8 @@ class _PagedReader extends StatefulWidget {
     required this.mode,
     required this.topReserve,
     required this.bottomReserve,
+    this.imageDir,
+    this.textAlign = TextAlign.left,
     required this.onPageChanged,
     required this.onSettled,
     required this.onBeyondNext,
@@ -3222,6 +3391,8 @@ class _PagedReader extends StatefulWidget {
   final PageTurnMode mode;
   final double topReserve;
   final double bottomReserve;
+  final String? imageDir;
+  final TextAlign textAlign;
   final ValueChanged<int> onPageChanged;
 
   /// 滚动 / 动画落稳后回调（用于跨章落章与页流刷新）。
@@ -3372,15 +3543,15 @@ class _PagedReaderState extends State<_PagedReader> {
                       widget.bottomReserve,
                     ),
                     child: SizedBox.expand(
-                      child: _ReaderRichText(
-                        text: fp.text,
-                        baseOffset: fp.startOffset,
+                      child: _PageContentView(
+                        page: fp,
                         style: widget.style,
                         color: widget.nameColor,
                         pattern: widget.namePattern,
                         annotations: widget.annotationsForChapter(fp.chapter),
                         darkPaper: widget.darkPaper,
-                        scaler: TextScaler.noScaling,
+                        imageDir: widget.imageDir,
+                        textAlign: widget.textAlign,
                       ),
                     ),
                   ),
@@ -3435,13 +3606,103 @@ class _PagedReaderState extends State<_PagedReader> {
   }
 }
 
-/// 跨章连页中的一页：切好的正文文本 + 所属章节 + 章内起始偏移。
+/// 跨章连页中的一页：切好的正文文本 + 所属章节 + 章内起始偏移 + 可选图文块。
 class _FlowPage {
-  const _FlowPage(this.chapter, this.text, this.startOffset);
+  const _FlowPage(
+    this.chapter,
+    this.text,
+    this.startOffset, [
+    this.blocks = const [],
+  ]);
 
   final int chapter;
   final String text;
   final int startOffset;
+  final List<PageBlock> blocks;
+}
+
+/// 单页图文混排画布（覆盖 / 滑动 / 淡入 / 仿真共用的纯文本或图文块渲染）。
+class _PageContentView extends StatelessWidget {
+  const _PageContentView({
+    required this.page,
+    required this.style,
+    required this.color,
+    required this.darkPaper,
+    this.pattern,
+    this.annotations = const <ReaderAnnotation>[],
+    this.imageDir,
+    this.textAlign = TextAlign.left,
+  });
+
+  final _FlowPage page;
+  final TextStyle style;
+  final Color color;
+  final RegExp? pattern;
+  final List<ReaderAnnotation> annotations;
+  final bool darkPaper;
+  final String? imageDir;
+  final TextAlign textAlign;
+
+  @override
+  Widget build(BuildContext context) {
+    final blocks = page.blocks;
+    if (blocks.isEmpty) {
+      return _ReaderRichText(
+        text: page.text,
+        baseOffset: page.startOffset,
+        style: style,
+        color: color,
+        pattern: pattern,
+        annotations: annotations,
+        darkPaper: darkPaper,
+        scaler: TextScaler.noScaling,
+        textAlign: textAlign,
+      );
+    }
+
+    final onlyImages = blocks.every((b) => b is PageImageBlock);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisAlignment: onlyImages
+          ? MainAxisAlignment.center
+          : MainAxisAlignment.start,
+      children: [
+        for (var i = 0; i < blocks.length; i++)
+          switch (blocks[i]) {
+            PageTextBlock(:final start, :final text, :final bottomGap) =>
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: i + 1 < blocks.length ? bottomGap : 0,
+                ),
+                child: _ReaderRichText(
+                  text: text,
+                  baseOffset: start,
+                  style: style,
+                  color: color,
+                  pattern: pattern,
+                  annotations: annotations,
+                  darkPaper: darkPaper,
+                  scaler: TextScaler.noScaling,
+                  textAlign: textAlign,
+                ),
+              ),
+            PageImageBlock(:final imageName, :final width, :final height) =>
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: onlyImages ? 0 : 4),
+                child: Center(
+                  child: BookImage(
+                    name: imageName,
+                    dir: imageDir,
+                    width: width,
+                    height: height,
+                    darkPaper: darkPaper,
+                  ),
+                ),
+              ),
+          },
+      ],
+    );
+  }
 }
 
 // ==================== 滚动视图 ====================
@@ -3479,10 +3740,12 @@ class _ScrollReader extends StatefulWidget {
     this.onNeedPrev,
     this.imageDir,
     this.paragraphGap = 12,
+    this.textAlign = TextAlign.left,
   });
 
   /// 插图目录（EPUB 图片；空则正文里的图片标记显示为「［插图］」）。
   final String? imageDir;
+  final TextAlign textAlign;
 
   /// 参与的章节（按章节号升序、且连续），首个是本次阅读的起始章。
   final List<_ScrollChapterText> chapters;
@@ -3831,7 +4094,11 @@ class _ScrollReaderState extends State<_ScrollReader> {
               onTap: widget.onToggleBars,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 10),
-                child: BookImage(name: imgName, dir: widget.imageDir),
+                child: BookImage(
+                  name: imgName,
+                  dir: widget.imageDir,
+                  darkPaper: widget.darkPaper,
+                ),
               ),
             );
           }
@@ -3858,6 +4125,7 @@ class _ScrollReaderState extends State<_ScrollReader> {
                 annotations: widget.annotationsForChapter(_paraChapter[index]),
                 darkPaper: widget.darkPaper,
                 scaler: TextScaler.noScaling,
+                textAlign: widget.textAlign,
               ),
             ),
           );
@@ -3882,16 +4150,27 @@ String? _imageNameOf(String paragraph) {
 
 /// 正文插图（从书籍缓存目录读取）。
 ///
-/// 用户反馈「书里的插图不能加载」：EPUB 导入时图片已抽到
-/// `<cacheDir>/img/`，这里按占位标记里的文件名加载。
-/// 读不到时降级为「［插图］」文字，不打扰阅读。
+/// EPUB 导入或按章按需解析时将图片落盘到 `<cacheDir>/img/`，阅读器在所有模式下按
+/// `\u0001IMG:<文件名>\u0001` 占位标记加载真图，读不到时再异步降级为「［插图］」。
 class BookImage extends StatelessWidget {
-  const BookImage({super.key, required this.name, this.dir});
+  const BookImage({
+    super.key,
+    required this.name,
+    this.dir,
+    this.width,
+    this.height,
+    this.darkPaper = false,
+  });
 
   final String name;
 
   /// 图片目录（为空则只显示占位）。
   final String? dir;
+
+  /// 分页排版计算出的展示宽/高（滚动模式为 null）。
+  final double? width;
+  final double? height;
+  final bool darkPaper;
 
   @override
   Widget build(BuildContext context) {
@@ -3921,9 +4200,45 @@ class BookImage extends StatelessWidget {
     final d = dir;
     if (d == null || d.isEmpty) return placeholder;
     final file = File('$d/$name');
-    if (!file.existsSync()) return placeholder;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final logicalW = width ?? MediaQuery.sizeOf(context).width;
+    final cacheWidth = (logicalW * dpr).clamp(180.0, 1440.0).round();
+
+    Widget img = ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.file(
+        file,
+        width: width,
+        height: height,
+        fit: BoxFit.contain,
+        cacheWidth: cacheWidth,
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => placeholder,
+        frameBuilder: (_, child, frame, wasSync) {
+          if (wasSync || frame != null) return child;
+          if (width != null && height != null) {
+            return SizedBox(width: width, height: height);
+          }
+          return placeholder;
+        },
+      ),
+    );
+
+    if (darkPaper) {
+      img = DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFFDAD5CC),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Padding(padding: const EdgeInsets.all(4), child: img),
+      );
+      if (width != null && height != null) {
+        img = SizedBox(width: width, height: height, child: img);
+      }
+    }
 
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () {
         Navigator.of(context).push(
           MaterialPageRoute<void>(
@@ -3931,18 +4246,7 @@ class BookImage extends StatelessWidget {
           ),
         );
       },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Image.file(
-          file,
-          fit: BoxFit.contain,
-          errorBuilder: (_, _, _) => placeholder,
-          frameBuilder: (_, child, frame, wasSync) {
-            if (wasSync || frame != null) return child;
-            return placeholder;
-          },
-        ),
-      ),
+      child: img,
     );
   }
 }

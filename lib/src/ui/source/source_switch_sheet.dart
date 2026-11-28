@@ -1,7 +1,7 @@
-// 换源面板：为一本在线书（书架 / 阅读中）重新搜索并切换到新的书源。
+// 换源面板：为一本在线书（书架 / 阅读中）流式搜索并切换到新的书源。
 //
-// 流程：自动用当前书名搜索所有启用书源 → 按相关性排序展示候选
-// → 选择后先拉取详情/目录校验，再切换（保留阅读进度，清空旧源章节缓存）。
+// 流程：并发向启用的书源发出搜索，每个源返回后立刻按相关性插入候选列表，
+// 用户不必等所有慢源/死源超时；选择后校验目录再切换（可保留原封面与简介）。
 import 'package:flutter/material.dart';
 
 import '../../data/book_store.dart';
@@ -63,9 +63,16 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
   final OnlineBookService _service = OnlineBookService();
 
   bool _searching = true;
+  int _doneCount = 0;
+  int _totalCount = 0;
   String? _error;
+  final List<_Candidate> _allCandidates = <_Candidate>[];
   List<_Candidate> _candidates = const [];
+  final Set<String> _seen = <String>{};
+  int _orderSeq = 0;
   int? _busyIndex;
+  late bool _preserveMeta =
+      !widget.book.generatedCover || widget.book.intro.trim().isNotEmpty;
 
   @override
   void initState() {
@@ -74,6 +81,22 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
   }
 
   OnlineRepo? _repo;
+
+  void _rebuildSorted() {
+    _allCandidates.sort((a, b) {
+      final c = b.score.compareTo(a.score);
+      if (c != 0) return c;
+      return a.order.compareTo(b.order);
+    });
+    final related = [
+      for (final c in _allCandidates)
+        if (c.score >= 480) c,
+    ];
+    _candidates = List.unmodifiable(
+      related.isNotEmpty ? related : _allCandidates,
+    );
+  }
+
   Future<void> _search() async {
     try {
       final enabled = widget.sourceStore.enabled;
@@ -84,51 +107,51 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
         });
         return;
       }
-      final repo = _repo = OnlineRepo(store: widget.sourceStore);
-      final results = await repo.searchAll(widget.book.title);
-      if (!mounted) return;
-
-      final all = <_Candidate>[];
-      final seen = <String>{};
-      var order = 0;
-      for (final r in results) {
-        if (!r.ok) continue;
-        for (final b in r.books) {
-          final url = (b.bookUrl ?? '').trim();
-          if (url.isEmpty) continue;
-          if (!seen.add('${r.source.bookSourceUrl}|$url')) continue;
-          all.add(
-            _Candidate(
-              r.source,
-              b,
-              bookRelevanceScore(b, widget.book.title),
-              order++,
-            ),
-          );
-        }
-      }
-      all.sort((a, b) {
-        final c = b.score.compareTo(a.score);
-        if (c != 0) return c;
-        return a.order.compareTo(b.order);
+      setState(() {
+        _searching = true;
+        _doneCount = 0;
+        _totalCount = enabled.length;
+        _error = null;
       });
-      // 只保留与书名 / 作者沾边的候选，避免展示无关书
-      final related = [
-        for (final c in all)
-          if (c.score >= 480) c,
-      ];
-      final list = related.isNotEmpty ? related : all;
+
+      final repo = _repo = OnlineRepo(store: widget.sourceStore);
+      await repo.searchAll(
+        widget.book.title,
+        onSourceDone: (r) {
+          if (!mounted) return;
+          setState(() {
+            _doneCount++;
+            if (r.ok) {
+              var added = false;
+              for (final b in r.books) {
+                final url = (b.bookUrl ?? '').trim();
+                if (url.isEmpty) continue;
+                if (!_seen.add('${r.source.bookSourceUrl}|$url')) continue;
+                _allCandidates.add(
+                  _Candidate(
+                    r.source,
+                    b,
+                    bookRelevanceScore(b, widget.book.title),
+                    _orderSeq++,
+                  ),
+                );
+                added = true;
+              }
+              if (added) _rebuildSorted();
+            }
+          });
+        },
+      );
       if (!mounted) return;
       setState(() {
         _searching = false;
-        _candidates = list;
-        if (list.isEmpty) _error = '没有找到可用的换源结果';
+        if (_candidates.isEmpty) _error = '没有找到可用的换源结果';
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _searching = false;
-        _error = '$e';
+        if (_candidates.isEmpty) _error = '$e';
       });
     }
   }
@@ -142,8 +165,12 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
 
   Future<void> _pick(int index) async {
     if (_busyIndex != null) return;
+    _repo?.cancel();
     final cand = _candidates[index];
-    setState(() => _busyIndex = index);
+    setState(() {
+      _searching = false;
+      _busyIndex = index;
+    });
     try {
       final info = await _service.fetchInfo(cand.source, cand.url);
       if (info.chapters.isEmpty) {
@@ -161,6 +188,7 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
         title: info.name ?? cand.name,
         author: info.author ?? cand.author,
         intro: info.intro,
+        preserveMeta: _preserveMeta,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -182,11 +210,11 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
         ?.bookSourceName;
     return SafeArea(
       child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.62,
+        height: MediaQuery.sizeOf(context).height * 0.68,
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              padding: const EdgeInsets.fromLTRB(20, 0, 14, 6),
               child: Row(
                 children: [
                   const Icon(Icons.swap_horiz_rounded, size: 18),
@@ -199,9 +227,63 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
-                  if (currentSource != null)
+                  if (_searching) ...[
+                    Text(
+                      '$_doneCount/$_totalCount 源',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        _repo?.cancel();
+                        setState(() {
+                          _searching = false;
+                          if (_candidates.isEmpty) _error = '已停止搜索，暂无结果';
+                        });
+                      },
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: const Text('停止', style: TextStyle(fontSize: 12)),
+                    ),
+                  ] else if (currentSource != null)
                     Text(
                       '当前：$currentSource',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (_searching)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: LinearProgressIndicator(
+                  minHeight: 2.5,
+                  value: _totalCount > 0 ? _doneCount / _totalCount : null,
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+              child: Row(
+                children: [
+                  FilterChip(
+                    selected: _preserveMeta,
+                    label: const Text(
+                      '保留原封面与简介',
+                      style: TextStyle(fontSize: 11.5),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (v) => setState(() => _preserveMeta = v),
+                  ),
+                  const Spacer(),
+                  if (_candidates.isNotEmpty)
+                    Text(
+                      '已找到 ${_candidates.length} 个候选源',
                       style: TextStyle(
                         fontSize: 11.5,
                         color: scheme.onSurfaceVariant,
@@ -218,20 +300,23 @@ class _SourceSwitchSheetState extends State<_SourceSwitchSheet> {
   }
 
   Widget _buildList(BuildContext context, ColorScheme scheme) {
-    if (_searching) {
-      return const Center(
+    if (_candidates.isEmpty && _searching) {
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 14),
-            Text('正在搜索可用书源…', style: TextStyle(fontSize: 13)),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 14),
+            Text(
+              '正在并发搜索书源（$_doneCount / $_totalCount）…',
+              style: const TextStyle(fontSize: 13),
+            ),
           ],
         ),
       );
     }
     final error = _error;
-    if (error != null) {
+    if (_candidates.isEmpty && error != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),

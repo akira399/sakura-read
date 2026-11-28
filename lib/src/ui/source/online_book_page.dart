@@ -13,6 +13,7 @@ import '../../data/models.dart';
 import '../../data/prefs.dart';
 import '../../source/models.dart';
 import '../../source/online_book_service.dart';
+import '../../source/online_repo.dart';
 import '../../source/source_store.dart';
 import '../reader/reader_page.dart';
 
@@ -55,13 +56,15 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
   List<ChapterRef> _chapters = const [];
   bool _busy = false;
 
-  OnlineBookVariant get _variant => widget.variants[_sel];
+  late final List<OnlineBookVariant> _variants = List.of(widget.variants);
+
+  OnlineBookVariant get _variant => _variants[_sel];
 
   String get _bookUrl => (_variant.book.bookUrl ?? '').trim();
 
   /// 书架里已有的同一本书（任一来源变体命中即算）。
   Book? get _shelfBook {
-    for (final v in widget.variants) {
+    for (final v in _variants) {
       final url = (v.book.bookUrl ?? '').trim();
       if (url.isEmpty) continue;
       final b = widget.bookStore.onlineByPath(url);
@@ -120,13 +123,47 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
     _load();
   }
 
-  /// 详情页读取失败时，直接跳到下一个可用来源重试。
-  ///
-  /// 某个书源整站挂掉时（用户反馈的「读取详情失败」），换源比反复重试有效。
+  /// 详情页读取失败时，优先跳到下一个已知来源；只有一个源时拉起全源流式搜索换源。
   void _switchToAnotherSource() {
-    if (widget.variants.length < 2) return;
-    final next = (_sel + 1) % widget.variants.length;
-    _switchSource(next);
+    if (_variants.length >= 2) {
+      final next = (_sel + 1) % _variants.length;
+      _switchSource(next);
+      return;
+    }
+    _openStreamSourceSearch();
+  }
+
+  Future<void> _openStreamSourceSearch() async {
+    final store = SourceStore.shared;
+    if (store == null) return;
+    final rawName = (_info?.name ?? _variant.book.name ?? '').trim();
+    if (rawName.isEmpty) return;
+
+    final picked = await showModalBottomSheet<OnlineBookVariant>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _OnlineBookStreamSwitchSheet(
+        bookTitle: rawName,
+        currentUrl: _bookUrl,
+        sourceStore: store,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final idx = _variants.indexWhere(
+      (v) =>
+          v.book.bookUrl == picked.book.bookUrl &&
+          v.source.bookSourceUrl == picked.source.bookSourceUrl,
+    );
+    if (idx >= 0) {
+      _switchSource(idx);
+    } else {
+      setState(() {
+        _variants.add(picked);
+        _sel = _variants.length - 1;
+      });
+      _load();
+    }
   }
 
   // ---------- 书架 / 换源 / 阅读 ----------
@@ -286,6 +323,13 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
         ),
+        actions: [
+          IconButton(
+            tooltip: '全源换源',
+            icon: const Icon(Icons.swap_horiz_rounded),
+            onPressed: _openStreamSourceSearch,
+          ),
+        ],
       ),
       body: _buildBody(context),
     );
@@ -306,7 +350,7 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
     }
     final error = _error;
     if (error != null) {
-      final canSwitch = widget.variants.length > 1;
+      final hasMoreKnown = _variants.length > 1;
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -327,7 +371,9 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                canSwitch ? '网点偶尔会抽风，重试一次，或换个书源再试' : '网点偶尔会抽风，稍等几秒再重试',
+                hasMoreKnown
+                    ? '网点偶尔会抽风，重试一次，或换个书源再试'
+                    : '该书源当前无法访问，可以直接搜索并切换其他书源',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   height: 1.5,
@@ -344,14 +390,12 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('重试'),
                   ),
-                  if (canSwitch) ...[
-                    const SizedBox(width: 12),
-                    OutlinedButton.icon(
-                      onPressed: _switchToAnotherSource,
-                      icon: const Icon(Icons.swap_horiz_rounded),
-                      label: const Text('换个书源'),
-                    ),
-                  ],
+                  const SizedBox(width: 12),
+                  OutlinedButton.icon(
+                    onPressed: _switchToAnotherSource,
+                    icon: const Icon(Icons.swap_horiz_rounded),
+                    label: Text(hasMoreKnown ? '换个书源' : '搜其他书源'),
+                  ),
                 ],
               ),
             ],
@@ -410,18 +454,36 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      if (widget.variants.length > 1)
+                      if (_variants.length > 1)
                         _sourceChips(scheme)
                       else
-                        Text(
-                          '来源：${_variant.source.bookSourceName}'
-                          '${_chapters.isNotEmpty ? ' · 共 ${_chapters.length} 章' : ''}',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: scheme.onSurfaceVariant.withValues(
-                              alpha: .85,
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                '来源：${_variant.source.bookSourceName}'
+                                '${_chapters.isNotEmpty ? ' · 共 ${_chapters.length} 章' : ''}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 6),
+                            GestureDetector(
+                              onTap: _openStreamSourceSearch,
+                              child: Text(
+                                '换源',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: scheme.primary,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       if (shelfFromOther != null) ...[
                         const SizedBox(height: 4),
@@ -544,10 +606,10 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
       spacing: 6,
       runSpacing: 6,
       children: [
-        for (var i = 0; i < widget.variants.length; i++)
+        for (var i = 0; i < _variants.length; i++)
           ChoiceChip(
             label: Text(
-              widget.variants[i].source.bookSourceName,
+              _variants[i].source.bookSourceName,
               style: const TextStyle(fontSize: 11.5),
             ),
             selected: i == _sel,
@@ -555,6 +617,13 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             onSelected: (_) => _switchSource(i),
           ),
+        ActionChip(
+          label: const Text('搜其他源', style: TextStyle(fontSize: 11.5)),
+          avatar: const Icon(Icons.swap_horiz_rounded, size: 15),
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          onPressed: _openStreamSourceSearch,
+        ),
       ],
     );
   }
@@ -694,6 +763,262 @@ class _ExpandableIntroState extends State<_ExpandableIntro> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _OnlineBookStreamSwitchSheet extends StatefulWidget {
+  const _OnlineBookStreamSwitchSheet({
+    required this.bookTitle,
+    required this.currentUrl,
+    required this.sourceStore,
+  });
+
+  final String bookTitle;
+  final String currentUrl;
+  final SourceStore sourceStore;
+
+  @override
+  State<_OnlineBookStreamSwitchSheet> createState() =>
+      _OnlineBookStreamSwitchSheetState();
+}
+
+class _OnlineBookStreamSwitchSheetState
+    extends State<_OnlineBookStreamSwitchSheet> {
+  OnlineRepo? _repo;
+  bool _searching = true;
+  int _doneCount = 0;
+  int _totalCount = 0;
+  String? _error;
+  final List<(BookSource, SearchBook, int, int)> _raw = [];
+  List<(BookSource, SearchBook)> _items = const [];
+  final Set<String> _seen = <String>{};
+  int _seq = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _search();
+  }
+
+  Future<void> _search() async {
+    final enabled = widget.sourceStore.enabled;
+    if (enabled.isEmpty) {
+      setState(() {
+        _searching = false;
+        _error = '还没有启用的书源';
+      });
+      return;
+    }
+    setState(() {
+      _searching = true;
+      _doneCount = 0;
+      _totalCount = enabled.length;
+      _error = null;
+    });
+    final repo = _repo = OnlineRepo(store: widget.sourceStore);
+    await repo.searchAll(
+      widget.bookTitle,
+      onSourceDone: (r) {
+        if (!mounted) return;
+        setState(() {
+          _doneCount++;
+          if (!r.ok) return;
+          var changed = false;
+          for (final b in r.books) {
+            final url = (b.bookUrl ?? '').trim();
+            if (url.isEmpty) continue;
+            if (!_seen.add('${r.source.bookSourceUrl}|$url')) continue;
+            _raw.add((
+              r.source,
+              b,
+              bookRelevanceScore(b, widget.bookTitle),
+              _seq++,
+            ));
+            changed = true;
+          }
+          if (changed) {
+            _raw.sort((a, b) {
+              final c = b.$3.compareTo(a.$3);
+              return c != 0 ? c : a.$4.compareTo(b.$4);
+            });
+            final related = [
+              for (final e in _raw)
+                if (e.$3 >= 480) (e.$1, e.$2),
+            ];
+            _items = related.isNotEmpty
+                ? related
+                : [for (final e in _raw) (e.$1, e.$2)];
+          }
+        });
+      },
+    );
+    if (!mounted) return;
+    setState(() {
+      _searching = false;
+      if (_items.isEmpty) _error = '没有找到其他可用书源';
+    });
+  }
+
+  @override
+  void dispose() {
+    _repo?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.65,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 14, 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.swap_horiz_rounded, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '全源搜索 · ${widget.bookTitle}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  if (_searching) ...[
+                    Text(
+                      '$_doneCount/$_totalCount 源',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        _repo?.cancel();
+                        setState(() {
+                          _searching = false;
+                          if (_items.isEmpty) _error = '已停止搜索，暂无结果';
+                        });
+                      },
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: const Text('停止', style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (_searching)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: LinearProgressIndicator(
+                  minHeight: 2.5,
+                  value: _totalCount > 0 ? _doneCount / _totalCount : null,
+                ),
+              ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: _items.isEmpty
+                  ? Center(
+                      child: _searching
+                          ? const CircularProgressIndicator()
+                          : Text(_error ?? '暂无结果'),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 16),
+                      itemCount: _items.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 6),
+                      itemBuilder: (context, i) {
+                        final item = _items[i];
+                        final isCurrent = item.$2.bookUrl == widget.currentUrl;
+                        return Material(
+                          color: scheme.surfaceContainerHighest.withValues(
+                            alpha: .5,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: isCurrent
+                                ? null
+                                : () {
+                                    _repo?.cancel();
+                                    Navigator.of(
+                                      context,
+                                    ).pop(OnlineBookVariant(item.$1, item.$2));
+                                  },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          (item.$2.name ?? '').trim().isEmpty
+                                              ? '（未命名）'
+                                              : item.$2.name!.trim(),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          [
+                                            if ((item.$2.author ?? '')
+                                                .trim()
+                                                .isNotEmpty)
+                                              item.$2.author!.trim(),
+                                            item.$1.bookSourceName,
+                                          ].join(' · '),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: scheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (isCurrent)
+                                    Text(
+                                      '当前',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: scheme.primary,
+                                      ),
+                                    )
+                                  else
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      size: 20,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

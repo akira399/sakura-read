@@ -51,18 +51,35 @@ class TxtBookContent implements BookContent {
   }
 }
 
-/// EPUB：读取导入时缓存的章节文本；缓存丢失时从源文件重新提取。
+/// EPUB：读取导入时缓存的章节文本；缓存丢失或插图缺失时从源文件按章重新提取。
 class EpubBookContent implements BookContent {
   EpubBookContent(this.book, this.store);
 
   final Book book;
   final BookStore store;
   final Map<int, String> _memo = {};
+  final Set<int> _refreshedChapters = <int>{};
+  static final RegExp _imgMarkerRe = RegExp('\u0001IMG:([^\u0001]+)\u0001');
 
   File _cacheFile(int index) => File(
     '${store.chapterCacheDir(book.id).path}/'
     'ch_${index.toString().padLeft(4, '0')}.txt',
   );
+
+  bool _needsImageRefresh(String text, String imgDir, int index) {
+    if (!_refreshedChapters.contains(index) && text.contains('［插图］')) {
+      return true;
+    }
+    for (final m in _imgMarkerRe.allMatches(text)) {
+      final name = m.group(1);
+      if (name != null &&
+          name.isNotEmpty &&
+          !File('$imgDir/$name').existsSync()) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   @override
   Future<String> chapterText(int index) async {
@@ -80,18 +97,23 @@ class EpubBookContent implements BookContent {
 
   Future<String> _load(int index) async {
     final file = _cacheFile(index);
+    final cacheDir = store.chapterCacheDir(book.id).path;
+    final imgDir = '$cacheDir/img';
     try {
       if (await file.exists()) {
         final cached = await file.readAsString();
-        if (cached.isNotEmpty) return cached;
+        if (cached.isNotEmpty && !_needsImageRefresh(cached, imgDir, index)) {
+          return cached;
+        }
       }
     } catch (_) {}
 
+    _refreshedChapters.add(index);
     final href = book.chapters[index].href ?? '';
     final fresh = await compute(_extractEpubChapterIsolate, {
       'path': book.path,
       'href': href,
-      'cacheDir': store.chapterCacheDir(book.id).path,
+      'cacheDir': cacheDir,
     });
     if (fresh.isNotEmpty) {
       try {
@@ -216,12 +238,14 @@ String _decodeTxtIsolate(Uint8List bytes) {
 String _extractEpubChapterIsolate(Map<String, dynamic> args) {
   final path = args['path'] as String;
   final href = args['href'] as String;
-  final parsed = EpubParser.parse(File(path).readAsBytesSync());
-  final chapter = parsed.chapters.where((c) => c.href == href).firstOrNull;
+  final chapter = EpubParser.extractChapterFromFile(path, href);
   if (chapter == null) return '';
-  final dir = Directory('${args['cacheDir']}/img')..createSync(recursive: true);
-  for (final image in chapter.images) {
-    File('${dir.path}/${image.name}').writeAsBytesSync(image.bytes);
+  if (chapter.images.isNotEmpty) {
+    final dir = Directory('${args['cacheDir']}/img')
+      ..createSync(recursive: true);
+    for (final image in chapter.images) {
+      File('${dir.path}/${image.name}').writeAsBytesSync(image.bytes);
+    }
   }
   return chapter.text;
 }

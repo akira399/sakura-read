@@ -108,6 +108,78 @@ class _BookDetailPageState extends State<BookDetailPage> {
     );
   }
 
+  Future<void> _exportTxt() async {
+    final book = _book;
+    if (book == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final saved = await store.exportCachedOnlineBookToTxt(book);
+    if (!mounted) return;
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(saved == null ? '还没有已缓存的章节，请先缓存后再导出' : '已导出 TXT：$saved'),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  Future<void> _editBookInfo() async {
+    final book = _book;
+    if (book == null) return;
+    final titleCtrl = TextEditingController(text: book.title);
+    final authorCtrl = TextEditingController(text: book.author);
+    final introCtrl = TextEditingController(text: book.intro);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑书籍信息'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(labelText: '书名'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: authorCtrl,
+                decoration: const InputDecoration(labelText: '作者'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: introCtrl,
+                maxLines: 4,
+                minLines: 2,
+                decoration: const InputDecoration(labelText: '简介'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved == true && mounted) {
+      store.updateBookInfo(
+        book.id,
+        title: titleCtrl.text,
+        author: authorCtrl.text,
+        intro: introCtrl.text,
+      );
+    }
+    titleCtrl.dispose();
+    authorCtrl.dispose();
+    introCtrl.dispose();
+  }
+
   Future<void> _changeCover() async {
     final picked = await Navigator.of(context).push<List<String>>(
       MaterialPageRoute(
@@ -182,7 +254,11 @@ class _BookDetailPageState extends State<BookDetailPage> {
           body: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
-                child: _Header(book: book, store: store),
+                child: _Header(
+                  book: book,
+                  store: store,
+                  onEditInfo: _editBookInfo,
+                ),
               ),
               SliverToBoxAdapter(
                 child: Padding(
@@ -212,6 +288,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                       onDownload: _downloadAll,
                       onCancel: _downloader.cancel,
                       onClear: _clearCache,
+                      onExportTxt: _exportTxt,
                     ),
                   ),
                 ),
@@ -312,10 +389,11 @@ class _BookDetailPageState extends State<BookDetailPage> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.book, required this.store});
+  const _Header({required this.book, required this.store, this.onEditInfo});
 
   final Book book;
   final BookStore store;
+  final VoidCallback? onEditInfo;
 
   @override
   Widget build(BuildContext context) {
@@ -371,9 +449,26 @@ class _Header extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              IconButton(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+              Row(
+                children: [
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (onEditInfo != null)
+                    IconButton(
+                      onPressed: onEditInfo,
+                      tooltip: '编辑书籍信息',
+                      icon: const Icon(
+                        Icons.edit_outlined,
+                        color: Colors.white,
+                      ),
+                    ),
+                ],
               ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -573,6 +668,7 @@ class _OfflineCard extends StatelessWidget {
     required this.onDownload,
     required this.onCancel,
     required this.onClear,
+    this.onExportTxt,
   });
 
   final Book book;
@@ -586,6 +682,7 @@ class _OfflineCard extends StatelessWidget {
   final VoidCallback onDownload;
   final VoidCallback onCancel;
   final VoidCallback onClear;
+  final VoidCallback? onExportTxt;
 
   @override
   Widget build(BuildContext context) {
@@ -671,6 +768,20 @@ class _OfflineCard extends StatelessWidget {
                   ),
                 ),
                 if (cached > 0) ...[
+                  if (onExportTxt != null) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: onExportTxt,
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      icon: const Icon(Icons.save_alt_rounded, size: 17),
+                      label: const Text(
+                        '导出 TXT',
+                        style: TextStyle(fontSize: 12.5),
+                      ),
+                    ),
+                  ],
                   const SizedBox(width: 8),
                   TextButton.icon(
                     onPressed: onClear,

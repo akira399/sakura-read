@@ -82,12 +82,14 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   ShelfSortMode shelfSort = ShelfSortMode.recentRead;
   bool shelfAscending = false;
   ShelfViewMode shelfView = ShelfViewMode.grid;
+  List<String> manualShelfOrder = <String>[];
 
   // ---- 阅读 ----
   double fontSize = 18;
   double lineHeight = 1.75;
   double letterSpacing = 0;
   double readerMarginH = 20;
+  bool textJustify = true;
 
   /// 段间距（每段之间的额外空隙，单位 px）。
   ///
@@ -207,12 +209,20 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
 
   Future<void> importReaderAsset(String path, {required bool font}) async {
     final source = File(path);
-    if (await source.length() > 20 * 1024 * 1024) {
-      throw StateError('文件不能超过 20 MB');
+    final maxBytes = font ? 60 * 1024 * 1024 : 20 * 1024 * 1024;
+    if (await source.length() > maxBytes) {
+      throw StateError(font ? '字体文件不能超过 60 MB' : '背景图不能超过 20 MB');
     }
     final dirs = _dirsOverride ?? await NativeBridge.appDirs();
+    final dot = path.lastIndexOf('.');
+    final ext = font && dot >= 0
+        ? path.substring(dot + 1).toLowerCase()
+        : (font ? 'ttf' : 'img');
+    final safeExt = (ext == 'ttf' || ext == 'otf' || ext == 'ttc')
+        ? ext
+        : (font ? 'ttf' : 'img');
     final target = File(
-      '${dirs.files}/reader-assets/${DateTime.now().microsecondsSinceEpoch}.${font ? 'ttf' : 'img'}',
+      '${dirs.files}/reader-assets/${DateTime.now().microsecondsSinceEpoch}.$safeExt',
     );
     await target.parent.create(recursive: true);
     await source.copy(target.path);
@@ -370,11 +380,19 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
           pageMode = _pageModeFrom(data['pageMode'] as String?);
           keepScreenOn = data['keepScreenOn'] as bool? ?? true;
           paragraphIndent = data['paragraphIndent'] as bool? ?? true;
+          textJustify = data['textJustify'] as bool? ?? true;
           volumeKeyPaging = data['volumeKeyPaging'] as bool? ?? true;
           // v3：书架排列（老版本无此键时保持默认）
           shelfSort = shelfSortModeFrom(data['shelfSort'] as String?);
           shelfAscending = data['shelfAscending'] as bool? ?? false;
           shelfView = shelfViewModeFrom(data['shelfView'] as String?);
+          final rawOrder = data['manualShelfOrder'];
+          if (rawOrder is List) {
+            manualShelfOrder = rawOrder
+                .map((e) => e.toString())
+                .where((s) => s.isNotEmpty)
+                .toList();
+          }
           // v4：朗读设置
           ttsRate = ((data['ttsRate'] as num?)?.toDouble() ?? 1.0).clamp(
             0.5,
@@ -773,6 +791,39 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
     notifyListeners();
   }
 
+  void setTextJustify(bool v) {
+    if (textJustify == v) return;
+    textJustify = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setManualShelfOrder(List<String> ids) {
+    manualShelfOrder = ids.where((e) => e.isNotEmpty).toList();
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void applyTypographyPreset({
+    required double fontSize,
+    required double lineHeight,
+    required double paragraphSpacing,
+    required double letterSpacing,
+    required double readerMarginH,
+    required bool paragraphIndent,
+    required bool textJustify,
+  }) {
+    this.fontSize = fontSize.clamp(12, 34).toDouble();
+    this.lineHeight = lineHeight.clamp(1.0, 2.6).toDouble();
+    this.paragraphSpacing = paragraphSpacing.clamp(0, 40).toDouble();
+    this.letterSpacing = letterSpacing.clamp(0, 3).toDouble();
+    this.readerMarginH = readerMarginH.clamp(8, 48).toDouble();
+    this.paragraphIndent = paragraphIndent;
+    this.textJustify = textJustify;
+    _saveSoon();
+    notifyListeners();
+  }
+
   void setXrayHighlight(bool v) {
     if (xrayHighlight == v) return;
     xrayHighlight = v;
@@ -1040,9 +1091,11 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
         'keepScreenOn': keepScreenOn,
         'volumeKeyPaging': volumeKeyPaging,
         'paragraphIndent': paragraphIndent,
+        'textJustify': textJustify,
         'shelfSort': shelfSort.name,
         'shelfAscending': shelfAscending,
         'shelfView': shelfView.name,
+        'manualShelfOrder': manualShelfOrder,
         'ttsRate': ttsRate,
         'ttsPitch': ttsPitch,
         'ttsAutoFollow': ttsAutoFollow,

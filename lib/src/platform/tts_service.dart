@@ -66,6 +66,84 @@ class TtsService extends ChangeNotifier {
   /// 合成请求序号：只播放「最新一次」合成结果，避免暂停后残留的音频抢播。
   int _speakSeq = 0;
 
+  /// 预合成下一段缓存键（index|rate|sid|hash）及正在进行中的 Future。
+  String? _prefetchKey;
+  Future<bool>? _prefetchFuture;
+  int? _prefetchSeq;
+
+  /// 定时停止状态。
+  Timer? _sleepTimer;
+  DateTime? _sleepUntil;
+  bool _stopAfterChapter = false;
+  Timer? _sleepUiTick;
+
+  /// 定时结束触发自动停播时的通知回调。
+  VoidCallback? onSleepStopped;
+
+  Duration? get sleepRemaining {
+    final until = _sleepUntil;
+    if (until == null) return null;
+    final rem = until.difference(DateTime.now());
+    if (rem.isNegative) return Duration.zero;
+    return rem;
+  }
+
+  bool get stopAfterChapter => _stopAfterChapter;
+
+  bool get hasSleepTimer => _sleepUntil != null || _stopAfterChapter;
+
+  void setSleepTimer(Duration? duration) {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _sleepUiTick?.cancel();
+    _sleepUiTick = null;
+    if (duration == null) {
+      _sleepUntil = null;
+      notifyListeners();
+      return;
+    }
+    _stopAfterChapter = false;
+    _sleepUntil = DateTime.now().add(duration);
+    _sleepTimer = Timer(duration, () {
+      _sleepTimer = null;
+      _sleepUiTick?.cancel();
+      _sleepUiTick = null;
+      _sleepUntil = null;
+      unawaited(stop());
+      onSleepStopped?.call();
+      notifyListeners();
+    });
+    _sleepUiTick = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_sleepUntil == null) {
+        _sleepUiTick?.cancel();
+        _sleepUiTick = null;
+        return;
+      }
+      notifyListeners();
+    });
+    notifyListeners();
+  }
+
+  void setStopAfterChapter(bool value) {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _sleepUiTick?.cancel();
+    _sleepUiTick = null;
+    _sleepUntil = null;
+    _stopAfterChapter = value;
+    notifyListeners();
+  }
+
+  void cancelSleepTimer() {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _sleepUiTick?.cancel();
+    _sleepUiTick = null;
+    _sleepUntil = null;
+    _stopAfterChapter = false;
+    notifyListeners();
+  }
+
   /// 每个段落的音高（AI 分角色朗读用；null = 全部用 [_pitch]）。
   ///
   /// 用户反馈「番茄那种自动分角色阅读功能支持吗」——本地按对白 / 旁白
@@ -307,6 +385,7 @@ class TtsService extends ChangeNotifier {
   Future<void> pause() async {
     _paused = true;
     _speaking = false;
+    _speakSeq++;
     try {
       await _channel.invokeMethod('ttsStop');
     } catch (_) {}
@@ -319,10 +398,19 @@ class TtsService extends ChangeNotifier {
     _speaking = false;
     _index = -1;
     _paragraphs = const [];
+    _speakSeq++;
+    _clearPrefetch();
+    cancelSleepTimer();
     try {
       await _channel.invokeMethod('ttsStop');
     } catch (_) {}
     notifyListeners();
+  }
+
+  void _clearPrefetch() {
+    _prefetchKey = null;
+    _prefetchFuture = null;
+    _prefetchSeq = null;
   }
 
   /// 跳到指定段落。
@@ -424,22 +512,34 @@ class TtsService extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// 内置离线语音：合成 → 交给原生播放 → 走和系统引擎一样的 done 事件。
-  ///
-  /// 合成在独立 isolate 里做，UI 不会卡；播完一段再合成下一段，
-  /// 这样切换段落 / 调语速都能立刻响应。
+  String _offlinePrefetchKey(int index, String clean) =>
+      '$index|${_rate.toStringAsFixed(2)}|$_voiceSid|${clean.hashCode}';
+
+  /// 内置离线语音：优先复用预合成结果 → 交给原生播放 → 后台预合成下一段以消除停顿。
   Future<void> _speakOffline(String text, int index) async {
     final engine = OfflineTtsEngine.instance;
     final seq = ++_speakSeq;
     final dir = await _offlinePath();
     if (!_speaking) return;
     final clean = text.replaceAll(RegExp(r'[\u0001-\u0008\u000b-\u001f]'), '');
-    final ok = await engine.synthesize(
-      clean,
-      outPath: '$dir/p$index.wav',
-      speed: _rate,
-      sid: _voiceSid,
-    );
+    final key = _offlinePrefetchKey(index, clean);
+    final outPath = '$dir/p$index.wav';
+
+    bool ok;
+    if (_prefetchKey == key && _prefetchFuture != null) {
+      ok = await _prefetchFuture!;
+      _prefetchFuture = null;
+    } else {
+      _prefetchKey = key;
+      _prefetchSeq = seq;
+      ok = await engine.synthesize(
+        clean,
+        outPath: outPath,
+        speed: _rate,
+        sid: _voiceSid,
+      );
+    }
+
     // 合成期间用户可能已经暂停 / 跳段 / 点了下一段：只播最新那次
     if (seq != _speakSeq || !_speaking || _index != index) return;
     if (!ok) {
@@ -450,10 +550,42 @@ class TtsService extends ChangeNotifier {
     }
     try {
       await _channel.invokeMethod<bool>('ttsPlayFile', {
-        'path': '$dir/p$index.wav',
+        'path': outPath,
         'utteranceId': 'p$index',
       });
     } catch (_) {}
+
+    if (seq == _speakSeq && _speaking && !_paused) {
+      unawaited(_prefetchOffline(index + 1, seq, dir));
+    }
+  }
+
+  Future<void> _prefetchOffline(int nextIndex, int seq, String dir) async {
+    if (nextIndex < 0 || nextIndex >= _paragraphs.length) return;
+    if (!_speaking || _paused || seq != _speakSeq) return;
+    final clean = _paragraphs[nextIndex].replaceAll(
+      RegExp(r'[\u0001-\u0008\u000b-\u001f]'),
+      '',
+    );
+    if (clean.trim().isEmpty) return;
+    final key = _offlinePrefetchKey(nextIndex, clean);
+    if (_prefetchKey == key && _prefetchFuture != null) return;
+    _prefetchKey = key;
+    _prefetchSeq = seq;
+    final fut = OfflineTtsEngine.instance.synthesize(
+      clean,
+      outPath: '$dir/p$nextIndex.wav',
+      speed: _rate,
+      sid: _voiceSid,
+    );
+    _prefetchFuture = fut;
+    try {
+      await fut;
+    } catch (_) {
+      if (_prefetchSeq == seq && _prefetchKey == key) {
+        _prefetchFuture = null;
+      }
+    }
   }
 
   /// 合成文件落地目录（App 缓存目录下 tts_speech/）。
@@ -490,10 +622,13 @@ class TtsService extends ChangeNotifier {
       switch (state) {
         case 'done':
           if (!_speaking || _paused) return;
+          final uttId = (args['utteranceId'] as String?) ?? '';
+          if (uttId.isNotEmpty && uttId != 'p$_index') return;
           final next = _index + 1;
           if (next >= _paragraphs.length) {
             _speaking = false;
             _index = -1;
+            _clearPrefetch();
             onFinished?.call();
             notifyListeners();
             return;
@@ -505,6 +640,7 @@ class TtsService extends ChangeNotifier {
           break;
         case 'error':
           _speaking = false;
+          _clearPrefetch();
           _lastError = '朗读出错，请检查语音引擎';
           notifyListeners();
           onError?.call(_lastError!);
@@ -515,6 +651,8 @@ class TtsService extends ChangeNotifier {
 
   /// 释放原生资源（App 退出时调用）。
   Future<void> shutdown() async {
+    _clearPrefetch();
+    cancelSleepTimer();
     try {
       await _channel.invokeMethod('ttsShutdown');
     } catch (_) {}

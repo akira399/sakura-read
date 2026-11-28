@@ -29,11 +29,7 @@ class EpubChapter {
   final String title;
   final String text;
 
-  /// 本章引用的插图（资源路径 + 原始字节）。
-  ///
-  /// 用户反馈「书里的插图不能加载」：EPUB 正文里的 `<img>` 以前只替换成
-  /// 「［插图］」占位文字，图片本身被丢掉。现在导入时把图片一并抽出来，
-  /// 交给 [BookStore] 存到书籍缓存目录，正文里写占位标记，阅读器按标记渲染。
+  /// 本章引用的插图（文件名 + 原始字节）。
   final List<EpubImage> images;
 
   int get charCount => text.length;
@@ -73,7 +69,7 @@ class EpubException implements Exception {
   String toString() => 'EPUB 解析失败：$message';
 }
 
-/// EPUB 解析器：container.xml → OPF（元数据 / manifest / spine）→ 目录（nav / ncx）→ 章节纯文本。
+/// EPUB 解析器：container.xml → OPF（元数据 / manifest / spine）→ 目录（nav / ncx）→ 章节纯文本 + 插图。
 class EpubParser {
   EpubParser._();
 
@@ -95,8 +91,6 @@ class EpubParser {
     'article',
     'header',
     'footer',
-    'td',
-    'th',
     'tr',
     'table',
     'figure',
@@ -109,6 +103,24 @@ class EpubParser {
     'dt',
     'dd',
     'body',
+  };
+
+  static const Set<String> _imageExtensions = {
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp',
+    'bmp',
+    'svg',
+  };
+
+  static const Set<String> _genericHtmlTitles = {
+    '未知',
+    'unknown',
+    'untitled',
+    'cover',
+    'titlepage',
   };
 
   /// 解析 EPUB 全量内容（导入时调用一次）。
@@ -237,8 +249,25 @@ class EpubParser {
     if (coverItem != null) {
       final entry = _findEntry(archive, coverItem.href);
       if (entry != null && entry.isFile) {
-        coverBytes = _entryBytes(entry);
-        coverExt = _extension(coverItem.href);
+        final lower = coverItem.href.toLowerCase();
+        if (_isHtmlHref(lower) && !coverItem.mediaType.startsWith('image/')) {
+          final htmlStr = _entryString(entry);
+          if (htmlStr != null) {
+            final coverExtracted = _extractTextWithImages(
+              htmlStr,
+              chapterDir: _dirName(coverItem.href),
+              opfDir: opfDir,
+              archive: archive,
+            );
+            if (coverExtracted.images.isNotEmpty) {
+              coverBytes = coverExtracted.images.first.bytes;
+              coverExt = _extension(coverExtracted.images.first.name);
+            }
+          }
+        } else {
+          coverBytes = _entryBytes(entry);
+          coverExt = _extension(coverItem.href);
+        }
       }
     }
 
@@ -248,84 +277,73 @@ class EpubParser {
     for (final href in spineRefs) {
       final entry = _findEntry(archive, href);
       if (entry == null || !entry.isFile) continue;
-      final lower = href.toLowerCase();
-      final isHtml =
-          lower.endsWith('.xhtml') ||
-          lower.endsWith('.html') ||
-          lower.endsWith('.htm') ||
-          lower.endsWith('.xml');
-      if (!isHtml) continue;
+      if (!_isHtmlHref(href.toLowerCase())) continue;
       final htmlStr = _entryString(entry);
       if (htmlStr == null || htmlStr.trim().isEmpty) continue;
-      // 该章所在目录（用于把相对图片路径解析成 zip 内路径）
       final chapterDir = _dirName(href);
       final extracted = _extractTextWithImages(
         htmlStr,
         chapterDir: chapterDir,
+        opfDir: opfDir,
         archive: archive,
       );
-      final text = extracted.text;
-      if (text.trim().isEmpty) continue;
+      if (extracted.text.trim().isEmpty && extracted.images.isEmpty) continue;
       index++;
       final title = tocTitles[href] ?? _fallbackTitle(htmlStr) ?? '第 $index 章';
       chapters.add(
         EpubChapter(
           href: href,
           title: title,
-          text: text,
+          text: extracted.text,
           images: extracted.images,
         ),
       );
     }
     if (chapters.isEmpty) throw EpubException('没有找到可阅读的章节');
 
-    // 补全未匹配的目录标题（导航 href 带锚点时用前缀匹配）
-    final fixed = <EpubChapter>[];
-    for (final ch in chapters) {
-      var title = ch.title;
-      if (title.startsWith('第 ') && title.endsWith(' 章')) {
-        for (final entry in tocTitles.entries) {
-          if (entry.key == ch.href) {
-            title = entry.value;
-            break;
-          }
-        }
-      }
-      // 注意：这里必须带上 images，否则「补全目录标题」这一步会把前面
-      // 抽出来的插图全丢掉（正文里只剩 \u0001IMG:...\u0001 标记，渲染时找不到文件）。
-      fixed.add(
-        EpubChapter(
-          href: ch.href,
-          title: title,
-          text: ch.text,
-          images: ch.images,
-        ),
-      );
-    }
-
     return EpubParseResult(
       meta: meta,
-      chapters: fixed,
+      chapters: chapters,
       coverBytes: coverBytes,
       coverExtension: coverExt,
     );
   }
 
-  // ---------- 正文提取 ----------
-
-  /// 从 EPUB 源文件按条目路径提取单章文本（缓存丢失时的回退路径）。
-  static String? extractChapterTextFromFile(String epubPath, String href) {
+  /// 从 EPUB 源文件按条目路径快速提取单章正文与插图（缓存修复 / 按章回退用，不解析全书章节）。
+  static ({String text, List<EpubImage> images})? extractChapterFromFile(
+    String epubPath,
+    String href,
+  ) {
     try {
       final bytes = File(epubPath).readAsBytesSync();
       final archive = ZipDecoder().decodeBytes(bytes, verify: false);
-      final entry = _findEntry(archive, href);
-      if (entry == null) return null;
+      var opfDir = '';
+      final container = _readString(archive, 'META-INF/container.xml');
+      if (container != null) {
+        final opfPath = _rootFilePath(container);
+        if (opfPath != null) opfDir = _dirName(opfPath);
+      }
+      var entry = _findEntry(archive, href);
+      if (entry == null && opfDir.isNotEmpty) {
+        entry = _findEntry(archive, _resolvePath(opfDir, href));
+      }
+      if (entry == null || !entry.isFile) return null;
       final htmlStr = _entryString(entry);
       if (htmlStr == null) return null;
-      return extractText(htmlStr);
+      return _extractTextWithImages(
+        htmlStr,
+        chapterDir: _dirName(entry.name),
+        opfDir: opfDir,
+        archive: archive,
+      );
     } catch (_) {
       return null;
     }
+  }
+
+  /// 从 EPUB 源文件按条目路径提取单章文本（缓存丢失时的回退路径）。
+  static String? extractChapterTextFromFile(String epubPath, String href) {
+    return extractChapterFromFile(epubPath, href)?.text;
   }
 
   /// HTML → 纯文本（段落用 \n 分隔，保留基本分段结构）。
@@ -340,11 +358,13 @@ class EpubParser {
   static const String imageMarkerPrefix = '\u0001IMG:';
   static const String imageMarkerSuffix = '\u0001';
 
-  /// HTML → 纯文本，同时把 `<img>` 抽成「图片 + 占位标记」。
+  /// HTML → 纯文本，同时把 `<img>` / `<svg><image>` / 内联 data URI 抽成「图片 + 占位标记」。
   static ({String text, List<EpubImage> images}) _extractTextWithImages(
     String htmlSource, {
     String chapterDir = '',
+    String opfDir = '',
     Archive? archive,
+    bool skipHidden = true,
   }) {
     dom.Document doc;
     try {
@@ -352,42 +372,156 @@ class EpubParser {
     } catch (_) {
       return (text: '', images: const []);
     }
+    final result = _walkDocument(
+      doc,
+      chapterDir: chapterDir,
+      opfDir: opfDir,
+      archive: archive,
+      skipHidden: skipHidden,
+    );
+    if (skipHidden && result.text.trim().isEmpty && result.images.isEmpty) {
+      return _walkDocument(
+        doc,
+        chapterDir: chapterDir,
+        opfDir: opfDir,
+        archive: archive,
+        skipHidden: false,
+      );
+    }
+    return result;
+  }
+
+  static ({String text, List<EpubImage> images}) _walkDocument(
+    dom.Document doc, {
+    required String chapterDir,
+    required String opfDir,
+    required Archive? archive,
+    required bool skipHidden,
+  }) {
     final out = <String>[];
     final images = <EpubImage>[];
     final usedNames = <String>{};
     final buf = StringBuffer();
+    var preDepth = 0;
+    final trCellCounts = <int>[];
 
     void flush() {
-      final s = buf
+      var s = buf
           .toString()
           .replaceAll('\u00a0', ' ')
           .replaceAll(RegExp(r'[ \t]+'), ' ')
+          .replaceAll(RegExp(r'[ \t]*\u0002[ \t]*'), '\n')
           .replaceAll(RegExp(r'\n\s*\n+'), '\n')
           .trim();
       buf.clear();
+      if (s.isEmpty) return;
+      // 消除 HTML 源码换行导致的中文句中多余空格，以及中文与角标 [13] 之间多余空格
+      if (preDepth == 0) {
+        final cjkGap = RegExp(
+          r'([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]) +([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef\[])',
+        );
+        final closeBracketCjk = RegExp(
+          r'([\]）]) +([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])',
+        );
+        for (var pass = 0; pass < 2; pass++) {
+          s = s
+              .replaceAllMapped(cjkGap, (m) => '${m[1]}${m[2]}')
+              .replaceAllMapped(closeBracketCjk, (m) => '${m[1]}${m[2]}');
+        }
+      }
       if (s.isNotEmpty) out.add(s);
     }
 
-    /// 把一张 `<img>` 变成「占位标记」，并把字节收集起来。
+    String uniqueName(String rawName, {int? entryIndex}) {
+      var name = rawName;
+      if (archive != null &&
+          entryIndex != null &&
+          archive.files
+                  .where((f) => f.isFile && _baseName(f.name) == name)
+                  .length >
+              1) {
+        name = '${entryIndex}_$name';
+      }
+      if (!usedNames.add(name)) {
+        name = '${usedNames.length}_$name';
+        usedNames.add(name);
+      }
+      return name;
+    }
+
+    ArchiveFile? resolveImageEntry(String cleanSrc) {
+      if (archive == null) return null;
+      // 1. 相对章节目录
+      final relChapter = _resolvePath(chapterDir, cleanSrc);
+      final hit1 = _findEntry(archive, relChapter);
+      if (hit1 != null && hit1.isFile) return hit1;
+      // 2. 相对 OPF 目录（部分制作不规范的 EPUB 会直接写 OPF 相对路径）
+      if (opfDir.isNotEmpty || cleanSrc.startsWith('/')) {
+        final relOpf = _resolvePath(opfDir, cleanSrc);
+        final hit2 = _findEntry(archive, relOpf);
+        if (hit2 != null && hit2.isFile) return hit2;
+      }
+      // 3. 唯一文件名匹配兜底（如路径层级写错但图片文件名唯一）
+      final targetBase = _baseName(cleanSrc.replaceAll('\\', '/'))
+          .toLowerCase();
+      if (targetBase.isNotEmpty) {
+        final matches = archive.files
+            .where(
+              (f) =>
+                  f.isFile &&
+                  _baseName(f.name).toLowerCase() == targetBase &&
+                  _imageExtensions.contains(_extension(f.name)),
+            )
+            .toList();
+        if (matches.length == 1) return matches.first;
+      }
+      return null;
+    }
+
     void emitImage(dom.Element node) {
+      final src = _attrValue(node, const [
+        'src',
+        'xlink:href',
+        'href',
+        'data-src',
+        'data-original',
+        'data-lazy-src',
+      ]);
+      if (src == null || src.isEmpty) {
+        buf.write('［插图］');
+        return;
+      }
+
+      // 支持内嵌 base64 图片（data:image/png;base64,...）
+      final inline = _decodeDataImageUri(src);
+      if (inline != null) {
+        final name = uniqueName(
+          'inline_${images.length}_${inline.bytes.length}.${inline.ext}',
+        );
+        images.add(EpubImage(name: name, bytes: inline.bytes));
+        flush();
+        out.add('$imageMarkerPrefix$name$imageMarkerSuffix');
+        return;
+      }
+
       if (archive == null) {
         buf.write('［插图］');
         return;
       }
-      final src =
-          (node.attributes['src'] ??
-                  node.attributes['href'] ??
-                  node.attributes['xlink:href'] ??
-                  node.attributes['data-src'] ??
-                  '')
-              .trim();
-      if (src.isEmpty) {
+
+      final cleanSrc = src
+          .replaceAll('\\', '/')
+          .split('#')
+          .first
+          .split('?')
+          .first
+          .trim();
+      if (cleanSrc.isEmpty) {
         buf.write('［插图］');
         return;
       }
-      // 解析为 zip 内路径（相对章节文件所在目录）
-      final path = _resolvePath(chapterDir, src.split('#').first);
-      final entry = _findEntry(archive, path);
+
+      final entry = resolveImageEntry(cleanSrc);
       if (entry == null || !entry.isFile) {
         buf.write('［插图］');
         return;
@@ -397,18 +531,10 @@ class EpubParser {
         buf.write('［插图］');
         return;
       }
-      // 去掉重名（不同目录下同名文件）避免互相覆盖
-      var name = _baseName(path);
-      if (archive.files
-              .where((f) => f.isFile && _baseName(f.name) == name)
-              .length >
-          1) {
-        name = '${archive.files.indexOf(entry)}_$name';
-      }
-      if (!usedNames.add(name)) {
-        name = '${usedNames.length}_$name';
-        usedNames.add(name);
-      }
+      final name = uniqueName(
+        _baseName(entry.name),
+        entryIndex: archive.files.indexOf(entry),
+      );
       images.add(EpubImage(name: name, bytes: bytes));
       flush();
       out.add('$imageMarkerPrefix$name$imageMarkerSuffix');
@@ -416,19 +542,34 @@ class EpubParser {
 
     void walk(dom.Node node) {
       if (node is dom.Text) {
-        buf.write(node.text);
+        if (preDepth > 0) {
+          buf.write(node.text);
+        } else {
+          buf.write(node.text.replaceAll(RegExp(r'[\r\n\t]+'), ' '));
+        }
         return;
       }
       if (node is dom.Element) {
         final name = node.localName?.toLowerCase() ?? '';
         if (name == 'script' || name == 'style' || name == 'head') return;
+        if (skipHidden && _isHiddenElement(node)) return;
         if (name == 'br') {
-          buf.write('\n');
+          buf.write(preDepth > 0 ? '\n' : '\u0002');
           return;
         }
         if (name == 'img' || name == 'image') {
           emitImage(node);
           return;
+        }
+        final isPre = name == 'pre';
+        if (isPre) preDepth++;
+        if (name == 'tr') trCellCounts.add(0);
+        if ((name == 'td' || name == 'th') && trCellCounts.isNotEmpty) {
+          final idx = trCellCounts.last;
+          trCellCounts[trCellCounts.length - 1] = idx + 1;
+          if (idx > 0 && buf.isNotEmpty) {
+            buf.write('  ·  ');
+          }
         }
         final isBlock = _blockTags.contains(name);
         if (isBlock) flush();
@@ -436,6 +577,8 @@ class EpubParser {
           walk(child);
         }
         if (isBlock) flush();
+        if (name == 'tr' && trCellCounts.isNotEmpty) trCellCounts.removeLast();
+        if (isPre && preDepth > 0) preDepth--;
         return;
       }
       for (final child in node.nodes) {
@@ -448,10 +591,78 @@ class EpubParser {
     return (text: out.join('\n'), images: images);
   }
 
+  static bool _isHiddenElement(dom.Element node) {
+    if (node.attributes.containsKey('hidden')) return true;
+    final style = node.attributes['style']?.toLowerCase();
+    if (style != null && RegExp(r'display\s*:\s*none').hasMatch(style)) {
+      return true;
+    }
+    return false;
+  }
+
+  static String? _attrValue(dom.Element node, List<String> names) {
+    for (final want in names) {
+      final wantLower = want.toLowerCase();
+      final exactPrefixed = wantLower.contains(':');
+      for (final entry in node.attributes.entries) {
+        final key = entry.key;
+        final String keyFull;
+        final String keyLocal;
+        if (key is dom.AttributeName) {
+          keyLocal = key.name.toLowerCase();
+          keyFull = key.prefix != null && key.prefix!.isNotEmpty
+              ? '${key.prefix!.toLowerCase()}:$keyLocal'
+              : keyLocal;
+        } else {
+          keyFull = key.toString().toLowerCase();
+          final colon = keyFull.indexOf(':');
+          keyLocal = colon >= 0 ? keyFull.substring(colon + 1) : keyFull;
+        }
+        if (keyFull == wantLower || (!exactPrefixed && keyLocal == wantLower)) {
+          final v = entry.value.trim();
+          if (v.isNotEmpty) return v;
+        }
+      }
+    }
+    return null;
+  }
+
+  static ({Uint8List bytes, String ext})? _decodeDataImageUri(String uri) {
+    final m = RegExp(
+      r'^data:image/([a-zA-Z0-9.+-]+)(?:;[^,]*)?;base64,(.*)$',
+      dotAll: true,
+    ).firstMatch(uri.trim());
+    if (m == null) return null;
+    try {
+      final rawSub = m.group(1)!.toLowerCase();
+      final ext = switch (rawSub) {
+        'jpeg' || 'jpg' => 'jpg',
+        'png' => 'png',
+        'gif' => 'gif',
+        'webp' => 'webp',
+        'bmp' => 'bmp',
+        _ => 'png',
+      };
+      final payload = m.group(2)!.replaceAll(RegExp(r'\s+'), '');
+      final bytes = base64Decode(payload);
+      if (bytes.isEmpty) return null;
+      return (bytes: bytes, ext: ext);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _isHtmlHref(String lowerHref) =>
+      lowerHref.endsWith('.xhtml') ||
+      lowerHref.endsWith('.html') ||
+      lowerHref.endsWith('.htm') ||
+      lowerHref.endsWith('.xml');
+
   /// 取路径的文件名（去目录）。
   static String _baseName(String path) {
-    final i = path.lastIndexOf('/');
-    return i < 0 ? path : path.substring(i + 1);
+    final normalized = path.replaceAll('\\', '/');
+    final i = normalized.lastIndexOf('/');
+    return i < 0 ? normalized : normalized.substring(i + 1);
   }
 
   // ---------- OPF / 目录解析 ----------
@@ -487,11 +698,20 @@ class EpubParser {
       if (type.contains('toc')) anchors.addAll(nav.querySelectorAll('a'));
     }
     if (anchors.isEmpty) anchors.addAll(doc.querySelectorAll('a'));
+    final exactKeys = <String>{};
     for (final a in anchors) {
       final href = a.attributes['href'];
       final title = a.text.trim();
       if (href == null || href.isEmpty || title.isEmpty) continue;
-      out.putIfAbsent(_resolvePath(navDir, href), () => title);
+      final resolved = _resolvePath(navDir, href);
+      if (resolved.isEmpty) continue;
+      if (!href.contains('#')) {
+        if (exactKeys.add(resolved)) {
+          out[resolved] = title;
+        }
+      } else {
+        out.putIfAbsent(resolved, () => title);
+      }
     }
   }
 
@@ -506,6 +726,7 @@ class EpubParser {
     } catch (_) {
       return;
     }
+    final exactKeys = <String>{};
     for (final np in doc.descendants.whereType<XmlElement>()) {
       if (np.name.local != 'navPoint') continue;
       String? title;
@@ -518,17 +739,31 @@ class EpubParser {
       }
       if (title != null && title.isNotEmpty && src != null && src.isNotEmpty) {
         final t = title;
-        out.putIfAbsent(_resolvePath(ncxDir, src), () => t);
+        final resolved = _resolvePath(ncxDir, src);
+        if (resolved.isEmpty) continue;
+        if (!src.contains('#')) {
+          if (exactKeys.add(resolved)) {
+            out[resolved] = t;
+          }
+        } else {
+          out.putIfAbsent(resolved, () => t);
+        }
       }
     }
   }
 
   static String? _fallbackTitle(String htmlStr) {
     final doc = html_parser.parse(htmlStr);
-    for (final tag in ['h1', 'h2', 'h3', 'title']) {
+    for (final tag in ['h1', 'h2', 'h3']) {
       final el = doc.querySelector(tag);
       final text = el?.text.trim();
       if (text != null && text.isNotEmpty) return text;
+    }
+    final titleText = doc.querySelector('title')?.text.trim();
+    if (titleText != null &&
+        titleText.isNotEmpty &&
+        !_genericHtmlTitles.contains(titleText.toLowerCase())) {
+      return titleText;
     }
     return null;
   }
@@ -555,7 +790,8 @@ class EpubParser {
       item.properties.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
 
   static ArchiveFile? _findEntry(Archive archive, String path) {
-    final target = path.startsWith('./') ? path.substring(2) : path;
+    var target = path.replaceAll('\\', '/');
+    if (target.startsWith('./')) target = target.substring(2);
     for (final f in archive.files) {
       if (f.name == target) return f;
     }
@@ -567,6 +803,10 @@ class EpubParser {
     if (decoded != target) {
       for (final f in archive.files) {
         if (f.name == decoded) return f;
+      }
+      final decodedLower = decoded.toLowerCase();
+      for (final f in archive.files) {
+        if (f.name.toLowerCase() == decodedLower) return f;
       }
     }
     return null;
@@ -606,22 +846,23 @@ class EpubParser {
   }
 
   static String _dirName(String path) {
-    final i = path.lastIndexOf('/');
-    return i < 0 ? '' : path.substring(0, i);
+    final normalized = path.replaceAll('\\', '/');
+    final i = normalized.lastIndexOf('/');
+    return i < 0 ? '' : normalized.substring(0, i);
   }
 
   static String _extension(String path) {
-    final name = path.substring(path.lastIndexOf('/') + 1);
+    final name = _baseName(path);
     final dot = name.lastIndexOf('.');
     return dot < 0 ? 'png' : name.substring(dot + 1).toLowerCase();
   }
 
   /// 解析相对路径并做 ../ 归一化。
   static String _resolvePath(String baseDir, String href) {
-    var h = _decodePath(href.split('#').first);
+    var h = _decodePath(href.replaceAll('\\', '/').split('#').first);
     final fragment = h.indexOf('#');
     if (fragment != -1) h = h.substring(0, fragment);
-    if (h.startsWith('/')) return h.substring(1);
+    if (h.startsWith('/')) h = h.substring(1);
     final combined = baseDir.isEmpty ? h : '$baseDir/$h';
     final parts = <String>[];
     for (final seg in combined.split('/')) {

@@ -29,6 +29,8 @@ class ReaderImageViewerPage extends StatefulWidget {
 class _ReaderImageViewerPageState extends State<ReaderImageViewerPage> {
   final TransformationController _transform = TransformationController();
   bool _zoomed = false;
+  bool _lightCanvas = false;
+  bool _chromeVisible = true;
 
   @override
   void dispose() {
@@ -47,12 +49,16 @@ class _ReaderImageViewerPageState extends State<ReaderImageViewerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bgColor = _lightCanvas ? const Color(0xFFF7F3EA) : Colors.black;
+    final chromeFg = _lightCanvas ? const Color(0xFF2B2620) : Colors.white;
+    final chromePillBg = _lightCanvas ? Colors.black12 : Colors.black54;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: bgColor,
       body: Stack(
         children: [
           Positioned.fill(
             child: GestureDetector(
+              onTap: () => setState(() => _chromeVisible = !_chromeVisible),
               onDoubleTap: _toggleDoubleTapZoom,
               child: InteractiveViewer(
                 transformationController: _transform,
@@ -63,18 +69,21 @@ class _ReaderImageViewerPageState extends State<ReaderImageViewerPage> {
                   child: Image(
                     image: widget.imageProvider,
                     fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const Column(
+                    errorBuilder: (_, _, _) => Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
                           Icons.broken_image_outlined,
                           size: 42,
-                          color: Colors.white54,
+                          color: chromeFg.withValues(alpha: 0.54),
                         ),
-                        SizedBox(height: 8),
+                        const SizedBox(height: 8),
                         Text(
                           '图片无法加载',
-                          style: TextStyle(color: Colors.white60, fontSize: 13),
+                          style: TextStyle(
+                            color: chromeFg.withValues(alpha: 0.6),
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                     ),
@@ -83,72 +92,92 @@ class _ReaderImageViewerPageState extends State<ReaderImageViewerPage> {
               ),
             ),
           ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.black45,
-                        foregroundColor: Colors.white,
+          if (_chromeVisible)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        style: IconButton.styleFrom(
+                          backgroundColor: chromePillBg,
+                          foregroundColor: chromeFg,
+                        ),
+                        icon: const Icon(Icons.close_rounded),
+                        tooltip: '关闭',
                       ),
-                      icon: const Icon(Icons.close_rounded),
-                      tooltip: '关闭',
-                    ),
-                    if (widget.caption != null &&
-                        widget.caption!.trim().isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          widget.caption!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 13,
+                      if (widget.caption != null &&
+                          widget.caption!.trim().isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            widget.caption!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: chromeFg.withValues(alpha: 0.78),
+                              fontSize: 13,
+                            ),
                           ),
                         ),
+                      ] else
+                        const Spacer(),
+                      IconButton(
+                        onPressed: () =>
+                            setState(() => _lightCanvas = !_lightCanvas),
+                        style: IconButton.styleFrom(
+                          backgroundColor: chromePillBg,
+                          foregroundColor: chromeFg,
+                        ),
+                        icon: Icon(
+                          _lightCanvas
+                              ? Icons.dark_mode_outlined
+                              : Icons.light_mode_outlined,
+                        ),
+                        tooltip: _lightCanvas ? '切换深色底色' : '切换浅色纸面底色',
                       ),
                     ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 18,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              top: false,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Text(
-                    '双指缩放 · 双击放大',
-                    style: TextStyle(color: Colors.white70, fontSize: 11.5),
                   ),
                 ),
               ),
             ),
-          ),
+          if (_chromeVisible)
+            Positioned(
+              bottom: 18,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: chromePillBg,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '双指缩放 · 双击放大 · 单击隐藏控制栏',
+                      style: TextStyle(
+                        color: chromeFg.withValues(alpha: 0.78),
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

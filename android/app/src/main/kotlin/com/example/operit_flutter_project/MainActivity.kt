@@ -358,15 +358,26 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** 列出系统可用的 TTS 引擎包名。 */
+    /** 列出系统可用的 TTS 引擎包名（含 MultiTTS 等未声明 CATEGORY_DEFAULT 的引擎）。 */
     private fun listTtsEngines(): List<String> {
-        return try {
+        val out = LinkedHashSet<String>()
+        try {
             val intent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE)
-            val services = packageManager.queryIntentServices(intent, PackageManager.MATCH_DEFAULT_ONLY)
-            services.mapNotNull { it.serviceInfo?.packageName }.distinct()
+            val services = packageManager.queryIntentServices(intent, 0)
+            for (s in services) {
+                val pkg = s.serviceInfo?.packageName
+                if (!pkg.isNullOrEmpty()) out.add(pkg)
+            }
         } catch (_: Exception) {
-            emptyList()
         }
+        try {
+            tts?.engines?.forEach { info ->
+                val name = info.name
+                if (!name.isNullOrEmpty()) out.add(name)
+            }
+        } catch (_: Exception) {
+        }
+        return out.toList()
     }
 
     /**

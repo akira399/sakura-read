@@ -40,6 +40,7 @@ class _EpubDocumentPageState extends State<EpubDocumentPage> {
   ).join();
   String? _error;
   bool _noteOpen = false;
+  bool _forceThemeColors = true;
 
   @override
   void initState() {
@@ -53,6 +54,19 @@ class _EpubDocumentPageState extends State<EpubDocumentPage> {
     port: _server!.port,
     pathSegments: [_token, ...path.split('/')],
   );
+
+  Uint8List? _lookupResource(String path) {
+    final direct = _resources[path];
+    if (direct != null) return direct;
+    final decoded = Uri.decodeFull(path);
+    final decodedHit = _resources[decoded];
+    if (decodedHit != null) return decodedHit;
+    final lower = decoded.toLowerCase();
+    for (final entry in _resources.entries) {
+      if (entry.key.toLowerCase() == lower) return entry.value;
+    }
+    return null;
+  }
 
   Future<void> _load() async {
     try {
@@ -71,7 +85,7 @@ class _EpubDocumentPageState extends State<EpubDocumentPage> {
         final segments = request.uri.pathSegments;
         final path = segments.skip(1).join('/');
         final bytes = segments.isNotEmpty && segments.first == _token
-            ? _resources[path]
+            ? _lookupResource(path)
             : null;
         request.response.headers.set(
           'Content-Security-Policy',
@@ -94,6 +108,7 @@ class _EpubDocumentPageState extends State<EpubDocumentPage> {
                   '#${bg.color.toARGB32().toRadixString(16).substring(2)}',
               foreground:
                   '#${bg.textColor.toARGB32().toRadixString(16).substring(2)}',
+              forceThemeColors: _forceThemeColors,
             ),
           );
         } else {
@@ -106,9 +121,12 @@ class _EpubDocumentPageState extends State<EpubDocumentPage> {
                   'png': 'image/png',
                   'jpg': 'image/jpeg',
                   'jpeg': 'image/jpeg',
+                  'gif': 'image/gif',
                   'webp': 'image/webp',
                   'ttf': 'font/ttf',
                   'otf': 'font/otf',
+                  'woff': 'font/woff',
+                  'woff2': 'font/woff2',
                 }[ext] ??
                 'application/octet-stream',
           );
@@ -224,6 +242,18 @@ class _EpubDocumentPageState extends State<EpubDocumentPage> {
         surfaceTintColor: Colors.transparent,
         title: const Text('EPUB 原书排版'),
         actions: [
+          IconButton(
+            tooltip: _forceThemeColors ? '切换原书配色' : '统一主题文字色',
+            icon: Icon(
+              _forceThemeColors
+                  ? Icons.format_color_text_rounded
+                  : Icons.palette_outlined,
+            ),
+            onPressed: () {
+              setState(() => _forceThemeColors = !_forceThemeColors);
+              _open(_chapter);
+            },
+          ),
           IconButton(
             tooltip: '目录',
             icon: const Icon(Icons.list),
