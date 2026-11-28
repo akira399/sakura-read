@@ -63,7 +63,7 @@ const _petPoutSnackLines = [
 class _PetOverlayState extends State<PetOverlay>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   static const double _size = 76;
-  static const double _dockPeekHide = 18;
+  static const double _dockPeekHide = 34;
 
   late final AnimationController _celebrate;
   late final AnimationController _hearts;
@@ -336,10 +336,10 @@ class _PetOverlayState extends State<PetOverlay>
     }
   }
 
-  /// 闲置 6 秒后自动优雅贴边探头，避免挡住书架封面。
+  /// 闲置 4 秒后自动优雅贴边探头，避免挡住书架封面。
   void _scheduleIdleDock() {
     _dockTimer?.cancel();
-    _dockTimer = Timer(const Duration(seconds: 6), () {
+    _dockTimer = Timer(const Duration(seconds: 4), () {
       if (!mounted || _dragging || _menuOpen || _maxX <= 0) return;
       final side = _dx < _maxX / 2 ? -1 : 1;
       setState(() {
@@ -835,31 +835,37 @@ class _PetOverlayState extends State<PetOverlay>
                                     child: child,
                                   ),
                                 ),
-                                child: SizedBox(
-                                  width: _size,
-                                  height: _size,
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      if (_showHearts)
-                                        Positioned.fill(
-                                          child: IgnorePointer(
-                                            child: _PetHearts(
-                                              animation: _hearts,
+                                child: AnimatedOpacity(
+                                  opacity: _dockedSide != 0 && _line == null
+                                      ? 0.94
+                                      : 1.0,
+                                  duration: const Duration(milliseconds: 220),
+                                  child: SizedBox(
+                                    width: _size,
+                                    height: _size,
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        if (_showHearts)
+                                          Positioned.fill(
+                                            child: IgnorePointer(
+                                              child: _PetHearts(
+                                                animation: _hearts,
+                                              ),
                                             ),
                                           ),
+                                        LiveSakuraPet(
+                                          size: _size,
+                                          mood: _mood,
+                                          assetOverride: _assetOverride,
+                                          lookTarget: _lookTarget,
+                                          motionEnabled: motionOn,
+                                          showSparkles: _showHearts,
+                                          peekingSide: _dockedSide,
+                                          accentColor: accent,
                                         ),
-                                      LiveSakuraPet(
-                                        size: _size,
-                                        mood: _mood,
-                                        assetOverride: _assetOverride,
-                                        lookTarget: _lookTarget,
-                                        motionEnabled: motionOn,
-                                        showSparkles: _showHearts,
-                                        peekingSide: _dockedSide,
-                                        accentColor: accent,
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),

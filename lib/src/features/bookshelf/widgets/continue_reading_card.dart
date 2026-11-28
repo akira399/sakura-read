@@ -118,21 +118,22 @@ class _ContinueReadingCardState extends State<ContinueReadingCard>
     final showEdges =
         widget.plankStyle == ShelfPlankStyle.frostedGlass ||
         widget.plankStyle == ShelfPlankStyle.warmWood;
-    final outlineColor = isDark
-        ? const Color(0xFF38BDF8)
-        : const Color(0xFF0F172A);
 
     final cardDecoration = isAnime
         ? BoxDecoration(
             color: isDark ? const Color(0xFF1E293B) : Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: outlineColor, width: 1.8),
+            border: Border.all(
+              color: const Color(0xFF38BDF8)
+                  .withValues(alpha: isDark ? 0.50 : 0.38),
+              width: 1.2,
+            ),
             boxShadow: [
               BoxShadow(
-                color: isDark
-                    ? const Color(0xFF38BDF8).withValues(alpha: 0.35)
-                    : outlineColor,
-                offset: const Offset(4, 4),
+                color: const Color(0xFF38BDF8)
+                    .withValues(alpha: isDark ? 0.20 : 0.15),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
               ),
             ],
           )
@@ -339,12 +340,15 @@ class _ContinueReadingCardState extends State<ContinueReadingCard>
                       color: isAnime ? const Color(0xFF38BDF8) : null,
                       shape: BoxShape.circle,
                       border: isAnime
-                          ? Border.all(color: outlineColor, width: 1.5)
+                          ? Border.all(
+                              color: Colors.white.withValues(alpha: 0.75),
+                              width: 1.2,
+                            )
                           : null,
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.play_arrow_rounded,
-                      color: isAnime ? const Color(0xFF0F172A) : Colors.white,
+                      color: Colors.white,
                       size: 22,
                     ),
                   ),

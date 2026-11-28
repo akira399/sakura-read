@@ -16,6 +16,7 @@ import '../../source/online_book_service.dart';
 import '../../source/online_repo.dart';
 import '../../source/source_store.dart';
 import '../reader/reader_page.dart';
+import 'source_search_page.dart';
 
 /// 同一本书的一个来源变体（书源 + 该源下的搜索结果）。
 class OnlineBookVariant {
@@ -443,15 +444,61 @@ class _OnlineBookPageState extends State<OnlineBookPage> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        [
-                          if (author.isNotEmpty) author,
-                          if (kind.isNotEmpty) kind,
-                        ].join(' · '),
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: scheme.onSurfaceVariant,
-                        ),
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 4,
+                        runSpacing: 2,
+                        children: [
+                          if (author.isNotEmpty)
+                            GestureDetector(
+                              onTap: () {
+                                final sourceStore = SourceStore.shared;
+                                if (sourceStore == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('书源模块尚未初始化')),
+                                  );
+                                  return;
+                                }
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => SourceSearchPage(
+                                      store: sourceStore,
+                                      bookStore: widget.bookStore,
+                                      prefs: widget.prefs,
+                                      initialQuery: author,
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    author,
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: scheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Icon(
+                                    Icons.search_rounded,
+                                    size: 13,
+                                    color: scheme.primary,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (kind.isNotEmpty)
+                            Text(
+                              author.isNotEmpty ? '· $kind' : kind,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 6),
                       if (_variants.length > 1)

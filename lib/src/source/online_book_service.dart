@@ -365,13 +365,13 @@ class OnlineBookService {
     var cleaned = cleanChapterText(buf.join('\n'));
     final repRule = source.contentRule?.replaceRegex?.trim() ?? '';
     if (repRule.isNotEmpty) {
-      cleaned = _applyContentReplaceRegex(cleaned, repRule);
+      cleaned = applyContentReplaceRegex(cleaned, repRule);
     }
     return cleaned;
   }
 
   /// 应用书源 `ruleContent.replaceRegex`（兼容 `##pattern##replacement` 或纯正则删除）。
-  static String _applyContentReplaceRegex(String text, String rule) {
+  static String applyContentReplaceRegex(String text, String rule) {
     if (text.isEmpty || rule.isEmpty) return text;
     if (rule.startsWith('##')) {
       final parts = rule.split('##').skip(1).toList();

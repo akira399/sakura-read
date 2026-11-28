@@ -2,6 +2,10 @@ package com.example.operit_flutter_project
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +19,7 @@ import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.util.Locale
 
@@ -39,6 +44,8 @@ class MainActivity : FlutterActivity() {
     private var currentEngine: String? = null
     private var ttsChannel: MethodChannel? = null
     private var openChannel: MethodChannel? = null
+    private var motionSensorManager: SensorManager? = null
+    private var motionSensorListener: SensorEventListener? = null
 
     /** 内置本地小模型（离线 AI 助手）推理通道。 */
     private var localLlm: LocalLlmEngine? = null
@@ -126,6 +133,37 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "sakuraread/motion")
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    unregisterMotionSensor()
+                    val sink = events ?: return
+                    val mgr = getSystemService(SENSOR_SERVICE) as? SensorManager ?: return
+                    val sensor = mgr.getDefaultSensor(Sensor.TYPE_GRAVITY)
+                        ?: mgr.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+                        ?: return
+                    motionSensorManager = mgr
+                    var smoothX = 0f
+                    var smoothY = 0f
+                    val listener = object : SensorEventListener {
+                        override fun onSensorChanged(event: SensorEvent) {
+                            val gx = (event.values[0] / 9.81f).coerceIn(-1f, 1f)
+                            val gy = (event.values[1] / 9.81f).coerceIn(-1f, 1f)
+                            smoothX += (gx - smoothX) * 0.16f
+                            smoothY += (gy - smoothY) * 0.16f
+                            sink.success(listOf(smoothX.toDouble(), smoothY.toDouble()))
+                        }
+
+                        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                    }
+                    motionSensorListener = listener
+                    mgr.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    unregisterMotionSensor()
+                }
+            })
         openChannel!!.setMethodCallHandler { call, result ->
             when (call.method) {
                 // Dart 就绪后调用：取走启动时收到的文件路径（取后清除）
@@ -799,7 +837,14 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun unregisterMotionSensor() {
+        val listener = motionSensorListener ?: return
+        motionSensorManager?.unregisterListener(listener)
+        motionSensorListener = null
+    }
+
     override fun onDestroy() {
+        unregisterMotionSensor()
         // 本地模型占着几百 MB native 内存，Activity 退出时务必释放
         localLlm?.dispose()
         localLlm = null

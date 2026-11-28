@@ -20,6 +20,7 @@ import '../data/stats_store.dart';
 import '../features/bookshelf/widgets/book_grid_card.dart';
 import '../features/bookshelf/widgets/book_list_tile.dart';
 import '../features/bookshelf/widgets/continue_reading_card.dart';
+import '../features/bookshelf/widgets/isometric_bookshelf.dart';
 import '../features/bookshelf/widgets/shelf_backdrop.dart';
 import '../features/bookshelf/widgets/shelf_group_bar.dart';
 import '../features/bookshelf/widgets/shelf_header.dart';
@@ -127,12 +128,14 @@ class _ShelfPageState extends State<ShelfPage> {
             : null;
         final activeBook =
             continueBook ?? (books.isNotEmpty ? books.first : null);
+        final prefs = widget.prefs;
+        final isIsometric = prefs.shelfView == ShelfViewMode.isometric;
         final singleBookSpotlight =
+            !isIsometric &&
             continueBook != null &&
             books.length == 1 &&
             _groupFilter == null &&
             books.first.id == continueBook.id;
-        final prefs = widget.prefs;
         final isWide = SakuraLayout.isWide(context);
         final shortLandscape = SakuraLayout.isShortLandscape(context);
         final hInsets = SakuraLayout.horizontalInsets(context);
@@ -208,7 +211,9 @@ class _ShelfPageState extends State<ShelfPage> {
                     onManageTap: _openManage,
                   ),
                 ),
-                if (continueBook != null && !(singleBookSpotlight && isWide))
+                if (continueBook != null &&
+                    !isIsometric &&
+                    !(singleBookSpotlight && isWide))
                   SliverToBoxAdapter(
                     child: Center(
                       heightFactor: 1.0,
@@ -312,100 +317,122 @@ class _ShelfPageState extends State<ShelfPage> {
                         ? const SizedBox.shrink()
                         : _buildEmpty(context),
                   )
-                else if (singleBookSpotlight && isWide)
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(
-                      sliverHPadLeft,
-                      shortLandscape ? 8 : 14,
-                      sliverHPadRight,
-                      bottomClearance,
+                else ...[
+                  if (isIsometric)
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        sliverHPadLeft,
+                        shortLandscape ? 8 : 12,
+                        sliverHPadRight,
+                        0,
+                      ),
+                      sliver: SliverToBoxAdapter(
+                        child: SakuraIsometricShelf(
+                          books: books,
+                          visualStyle: prefs.visualStyle,
+                          sortLabel: prefs.shelfSort.label,
+                          onOpenDetail: _openDetail,
+                          onContinueReading: _continueReading,
+                          onMenu: _showBookMenu,
+                          onArrangeTap: _showArrangeSheet,
+                        ),
+                      ),
                     ),
-                    sliver: SliverToBoxAdapter(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          IntrinsicHeight(
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(
-                                  flex: 11,
-                                  child: ContinueReadingCard(
-                                    book: continueBook,
-                                    visualStyle: prefs.visualStyle,
-                                    plankStyle: prefs.shelfPlankStyle,
-                                    silkBookmarkAndStamp:
-                                        prefs.silkBookmarkAndStamp,
-                                    compact: shortLandscape,
-                                    margin: EdgeInsets.zero,
-                                    onContinue: () =>
-                                        _continueReading(continueBook),
-                                    onOpenDetail: () =>
-                                        _openDetail(continueBook),
+                  if (singleBookSpotlight && isWide)
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        sliverHPadLeft,
+                        shortLandscape ? 8 : 14,
+                        sliverHPadRight,
+                        bottomClearance,
+                      ),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            IntrinsicHeight(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(
+                                    flex: 11,
+                                    child: ContinueReadingCard(
+                                      book: continueBook,
+                                      visualStyle: prefs.visualStyle,
+                                      plankStyle: prefs.shelfPlankStyle,
+                                      silkBookmarkAndStamp:
+                                          prefs.silkBookmarkAndStamp,
+                                      compact: shortLandscape,
+                                      margin: EdgeInsets.zero,
+                                      onContinue: () =>
+                                          _continueReading(continueBook),
+                                      onOpenDetail: () =>
+                                          _openDetail(continueBook),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  flex: 10,
-                                  child: _buildShelfActionCard(
-                                    context,
-                                    title: '书架还有充裕的藏书空间',
-                                    subtitle:
-                                        '导入本地 TXT / EPUB，或通过阅读 3.0 书源在线淘书',
-                                    compact: shortLandscape,
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    flex: 10,
+                                    child: _buildShelfActionCard(
+                                      context,
+                                      title: '书架还有充裕的藏书空间',
+                                      subtitle:
+                                          '导入本地 TXT / EPUB，或通过阅读 3.0 书源在线淘书',
+                                      compact: shortLandscape,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          if (hasPlank) ...[
-                            const SizedBox(height: 10),
-                            ShelfPlank(style: prefs.shelfPlankStyle),
+                            if (hasPlank) ...[
+                              const SizedBox(height: 10),
+                              ShelfPlank(style: prefs.shelfPlankStyle),
+                            ],
                           ],
-                        ],
+                        ),
+                      ),
+                    )
+                  else if (singleBookSpotlight)
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        sliverHPadLeft,
+                        14,
+                        sliverHPadRight,
+                        bottomClearance,
+                      ),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (hasPlank) ...[
+                              ShelfPlank(style: prefs.shelfPlankStyle),
+                              const SizedBox(height: 16),
+                            ],
+                            _buildShelfActionCard(
+                              context,
+                              title: '书架还有充裕的藏书空间',
+                              subtitle: '导入本地 TXT / EPUB，或通过阅读 3.0 书源在线淘书',
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        sliverHPadLeft,
+                        shortLandscape ? 8 : 12,
+                        sliverHPadRight,
+                        bottomClearance,
+                      ),
+                      sliver: _buildBooksSliver(
+                        books,
+                        availWidth: contentAvailWidth,
+                        isWide: isWide,
+                        shortLandscape: shortLandscape,
                       ),
                     ),
-                  )
-                else if (singleBookSpotlight)
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(
-                      sliverHPadLeft,
-                      14,
-                      sliverHPadRight,
-                      bottomClearance,
-                    ),
-                    sliver: SliverToBoxAdapter(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (hasPlank) ...[
-                            ShelfPlank(style: prefs.shelfPlankStyle),
-                            const SizedBox(height: 16),
-                          ],
-                          _buildShelfActionCard(
-                            context,
-                            title: '书架还有充裕的藏书空间',
-                            subtitle: '导入本地 TXT / EPUB，或通过阅读 3.0 书源在线淘书',
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(
-                      sliverHPadLeft,
-                      shortLandscape ? 8 : 12,
-                      sliverHPadRight,
-                      bottomClearance,
-                    ),
-                    sliver: _buildBooksSliver(
-                      books,
-                      availWidth: contentAvailWidth,
-                      isWide: isWide,
-                      shortLandscape: shortLandscape,
-                    ),
-                  ),
+                ],
               ],
             ),
           ),
@@ -666,6 +693,42 @@ class _ShelfPageState extends State<ShelfPage> {
               ),
             ),
             childCount: books.length,
+          ),
+        );
+      case ShelfViewMode.isometric:
+        if (isWide) {
+          return SliverGrid(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: availWidth >= 1040 ? 3 : 2,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 14,
+              mainAxisExtent: shortLandscape ? 94 : 102,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => StaggeredReveal(
+                index: index,
+                child: BookListTile(
+                  book: books[index],
+                  subtitle: _bookSubtitle(books[index]),
+                  onOpen: () => _openDetail(books[index]),
+                  onMenu: () => _showBookMenu(books[index]),
+                ),
+              ),
+              childCount: books.length,
+            ),
+          );
+        }
+        return SliverList.separated(
+          itemCount: books.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) => StaggeredReveal(
+            index: index,
+            child: BookListTile(
+              book: books[index],
+              subtitle: _bookSubtitle(books[index]),
+              onOpen: () => _openDetail(books[index]),
+              onMenu: () => _showBookMenu(books[index]),
+            ),
           ),
         );
     }
@@ -991,21 +1054,18 @@ class _ShelfPageState extends State<ShelfPage> {
                 const SizedBox(height: 14),
                 _arrangeLabel('显示样式'),
                 const SizedBox(height: 8),
-                SegmentedButton<ShelfViewMode>(
-                  segments: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
                     for (final view in ShelfViewMode.values)
-                      ButtonSegment(
-                        value: view,
+                      ChoiceChip(
+                        avatar: Icon(_viewIcon(view), size: 16),
                         label: Text(view.label),
-                        icon: Icon(_viewIcon(view), size: 16),
+                        selected: prefs.shelfView == view,
+                        onSelected: (_) => prefs.setShelfView(view),
                       ),
                   ],
-                  selected: {prefs.shelfView},
-                  onSelectionChanged: (s) => prefs.setShelfView(s.first),
-                  showSelectedIcon: false,
-                  style: const ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -1028,6 +1088,7 @@ class _ShelfPageState extends State<ShelfPage> {
     ShelfViewMode.compact => Icons.apps_rounded,
     ShelfViewMode.list => Icons.view_list_rounded,
     ShelfViewMode.cover => Icons.photo_library_rounded,
+    ShelfViewMode.isometric => Icons.view_carousel_rounded,
   };
 
   String _directionHint(AppPrefs prefs) {

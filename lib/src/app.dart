@@ -18,6 +18,7 @@ import 'ui/agreement_gate.dart';
 import 'ui/ai_chat_page.dart' show kAiChatActive;
 import 'ui/home_page.dart';
 import 'ui/splash_gate.dart';
+import 'ui/widgets/gyro_halo_overlay.dart';
 import 'ui/widgets/pet_guide_overlay.dart';
 import 'ui/widgets/pet_overlay.dart';
 
@@ -83,6 +84,12 @@ class SakuraApp extends StatelessWidget {
                   child: Stack(
                     children: [
                       child ?? const SizedBox.shrink(),
+                      Positioned.fill(
+                        child: GyroHaloOverlay(
+                          prefs: prefs,
+                          petStore: petStore,
+                        ),
+                      ),
                       // 新手引导 / AI 对话进行中时隐藏常规桌宠
                       // （引导由引导层自己摆位；对话时避免挡住气泡和输入框）
                       ValueListenableBuilder<bool>(

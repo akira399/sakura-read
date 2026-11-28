@@ -1,11 +1,24 @@
-/// 应用基本信息（版本 / 作者 / 主页 / 协议 / 免责声明）——设置页、更新弹窗与「关于」页共用。
+/// 一条开源引用与致谢记录（关于页与仓库文档共用）。
+class OpenSourceCredit {
+  const OpenSourceCredit({
+    required this.name,
+    required this.repo,
+    required this.note,
+  });
+
+  final String name;
+  final String repo;
+  final String note;
+}
+
+/// 应用基本信息（版本 / 作者 / 主页 / 协议 / 免责声明 / 引用致谢）——设置页、更新弹窗与「关于」页共用。
 ///
 /// 版本号与 `pubspec.yaml` 的 `version` 保持同步（发版时一起改）。
 class AppInfo {
   AppInfo._();
 
   /// 语义化版本（不含 build 号）。
-  static const String version = '2.1.1';
+  static const String version = '2.2.0';
 
   /// 作者。
   static const String author = 'akira399';
@@ -25,6 +38,40 @@ class AppInfo {
 
   /// 标语（与仓库 README 保持一致）。
   static const String slogan = '如果樱读陪你静静多读完了几章书，欢迎点亮一颗 ⭐️ Star 支持项目！';
+
+  /// 借鉴与引用的个人开源项目与作者主页清单。
+  static const List<OpenSourceCredit> openSourceCredits = [
+    OpenSourceCredit(
+      name: 'AzukiReader',
+      repo: 'https://github.com/AzukiPann/AzukiReader',
+      note: '立体等轴测书脊书架交互设计、滚动落点物理方程与目录排布灵感来源',
+    ),
+    OpenSourceCredit(
+      name: 'Wenku8_Flutter',
+      repo: 'https://github.com/P5UEDGK/Wenku8_Flutter',
+      note: '立体书架平行投影美学与档案式视觉动效上游参考',
+    ),
+    OpenSourceCredit(
+      name: 'Legado（阅读 3.0）',
+      repo: 'https://github.com/gedoor/legado',
+      note: '兼容书源 JSON 规则生态、JS 扩展约定与书架备份格式参考（全套以 Dart 独立实现）',
+    ),
+    OpenSourceCredit(
+      name: 'legado-with-MD3',
+      repo: 'https://github.com/HapeLee/legado-with-MD3',
+      note: 'Material 3 阅读器交互细节与设置分类思路参考',
+    ),
+    OpenSourceCredit(
+      name: '米安第一深情',
+      repo: 'https://www.coolapk.com/u/12223114',
+      note: 'AI 写源抓页取证与调试回修闭环思路及体验反馈参考',
+    ),
+    OpenSourceCredit(
+      name: '霞鹜文楷 Lite',
+      repo: 'https://github.com/lxgw/LxgwWenKai-Lite',
+      note: '内置默认中文阅读字体（SIL OFL-1.1 开源授权）',
+    ),
+  ];
 
   /// 免责声明条款（首启声明页与「关于」页共用语义）。
   static const List<String> disclaimerItems = [

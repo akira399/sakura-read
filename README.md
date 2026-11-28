@@ -24,6 +24,7 @@
   <a href="#features">✨ 核心特性</a> ·
   <a href="#local-ai">🤖 端侧 AI</a> ·
   <a href="#build">🔨 本地构建</a> ·
+  <a href="#credits">🙏 引用致谢</a> ·
   <a href="#faq">❓ 常见问题</a>
 </p>
 
@@ -71,7 +72,7 @@
 ### 🌐 阅读 3.0 书源与书架管理
 - **完整兼容 Legado 3.0 书源**：导入 JSON 即可并发搜书、聚合同名结果，内置 **QuickJS-NG** 引擎支持 `@js:` 规则与动态 URL，并内置书源体检过滤失效源。
 - **流式换源与在线缓存**：换源界面实时流式增量展示可用源并支持随时停止，可勾选**保留原书封面与简介**；已缓存章节支持一键**导出为本地 TXT**。
-- **灵活的书架整理**：支持网格 / 小图 / 列表 / 大封面四种视图，支持自定义分组、批量管理、编辑书籍信息（书名 / 作者 / 简介）以及**长按拖拽手动排序**。
+- **灵活的书架整理**：支持网格 / 小图 / 列表 / 大封面 / **立体（3D 等轴测书脊轮播）** 五种显示样式，支持自定义分组、批量管理、编辑书籍信息（书名 / 作者 / 简介）以及**长按拖拽手动排序**。
 
 ### 🎧 离线听书与第三方引擎
 - **开箱即用的离线 TTS**：随包内置 `sherpa-onnx` + VITS「超文」中文语音模型，无需联网或安装系统 TTS；可在「语音包」内按需下载 174 人「百变音色」（32 MB）或「小雅」（14 MB）。
@@ -183,6 +184,23 @@ android/app/src/main/kotlin/   # 原生语音播控、MultiTTS 扫描、Keystore
 
 `v2.1.0` 已完整修复 SVG 包裹图片、Base64 内嵌图与特殊相对路径的提取；若部分 EPUB 自带内联颜色文字，可切换至原版排版视图并点击顶部「**统一主题文字色**」图标，一键覆盖为当前阅读主题配色。
 </details>
+
+---
+
+<a id="credits"></a>
+
+## 🙏 引用与致谢
+
+樱读在设计与实现过程中参考了以下个人开源项目与作者思路，特此致谢：
+
+| 项目 / 作者 | 仓库或个人主页 | 引用 / 借鉴部分 |
+| --- | --- | --- |
+| **AzukiReader** | [AzukiPann/AzukiReader](https://github.com/AzukiPann/AzukiReader) | 立体等轴测书脊书架交互设计、滚动落点模拟与目录排布灵感 |
+| **Wenku8_Flutter** | [P5UEDGK/Wenku8_Flutter](https://github.com/P5UEDGK/Wenku8_Flutter) | 立体书架平行投影美学与档案式视觉动效上游参考 |
+| **Legado（阅读 3.0）** | [gedoor/legado](https://github.com/gedoor/legado) | 兼容书源 JSON 规则生态、JS 扩展约定与书架备份格式参考（独立 Dart 实现） |
+| **legado-with-MD3** | [HapeLee/legado-with-MD3](https://github.com/HapeLee/legado-with-MD3) | Material 3 阅读器交互与设置架构思路参考 |
+| **米安第一深情** | [酷安个人主页](https://www.coolapk.com/u/12223114) | AI 写源抓页取证与调试回修闭环思路及体验反馈参考 |
+| **霞鹜文楷 Lite** | [lxgw/LxgwWenKai-Lite](https://github.com/lxgw/LxgwWenKai-Lite) | 内置默认中文阅读字体（SIL OFL-1.1 开源授权） |
 
 ---
 

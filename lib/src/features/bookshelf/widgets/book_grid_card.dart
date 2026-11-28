@@ -31,7 +31,6 @@ class BookGridCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sakura = context.sakura;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final accent = Theme.of(context).colorScheme.primary;
     final percent = (book.progress * 100).round();
 
@@ -91,10 +90,8 @@ class BookGridCard extends StatelessWidget {
                                 ),
                                 border: Border(
                                   top: BorderSide(
-                                    color: isDark
-                                        ? const Color(0xFF38BDF8)
-                                        : const Color(0xFF0F172A),
-                                    width: 1.4,
+                                    color: Colors.white.withValues(alpha: 0.45),
+                                    width: 1.0,
                                   ),
                                 ),
                               ),

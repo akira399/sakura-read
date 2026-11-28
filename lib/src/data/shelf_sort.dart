@@ -40,7 +40,8 @@ enum ShelfViewMode {
   grid('网格'),
   compact('小图'),
   list('列表'),
-  cover('大封面');
+  cover('大封面'),
+  isometric('立体');
 
   const ShelfViewMode(this.label);
 
@@ -63,6 +64,7 @@ ShelfViewMode shelfViewModeFrom(String? value) => switch (value) {
   'compact' => ShelfViewMode.compact,
   'list' => ShelfViewMode.list,
   'cover' => ShelfViewMode.cover,
+  'isometric' => ShelfViewMode.isometric,
   _ => ShelfViewMode.grid,
 };
 

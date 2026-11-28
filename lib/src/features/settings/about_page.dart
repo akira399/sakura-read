@@ -100,6 +100,8 @@ class _AboutPageState extends State<AboutPage> {
                   const SizedBox(height: 14),
                   _buildOpenSourceCard(context, sakura, scheme),
                   const SizedBox(height: 14),
+                  _buildCreditsCard(context, sakura, scheme),
+                  const SizedBox(height: 14),
                   _buildDisclaimerCard(context, sakura),
                 ],
               ),
@@ -372,6 +374,112 @@ class _AboutPageState extends State<AboutPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildCreditsCard(
+    BuildContext context,
+    SakuraColors sakura,
+    ColorScheme scheme,
+  ) {
+    return Material(
+      color: sakura.card,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: sakura.hairline),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: false,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+          childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+          leading: SakuraIcon(
+            glyph: SakuraGlyph.appearance,
+            size: 18,
+            color: scheme.primary,
+            accent: scheme.primary,
+          ),
+          title: Row(
+            children: [
+              Text(
+                '引用致谢',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: sakura.inkPrimary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              _pill(
+                sakura,
+                scheme.primary,
+                '${AppInfo.openSourceCredits.length} 项',
+                filled: true,
+              ),
+            ],
+          ),
+          subtitle: Text(
+            '点击展开查看借鉴与引用的个人开源项目与作者主页',
+            style: TextStyle(fontSize: 11.5, color: sakura.inkSecondary),
+          ),
+          children: [
+            for (var i = 0; i < AppInfo.openSourceCredits.length; i++) ...[
+              if (i > 0) const Divider(height: 10),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        AppInfo.openSourceCredits[i].name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: sakura.inkPrimary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        AppInfo.openSourceCredits[i].repo
+                            .replaceFirst('https://github.com/', '')
+                            .replaceFirst('https://www.', '')
+                            .replaceFirst('https://', ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color: scheme.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                subtitle: Text(
+                  AppInfo.openSourceCredits[i].note,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.45,
+                    color: sakura.inkSecondary,
+                  ),
+                ),
+                trailing: const Icon(Icons.open_in_new_rounded, size: 16),
+                onTap: () => _openOrCopy(
+                  AppInfo.openSourceCredits[i].repo,
+                  AppInfo.openSourceCredits[i].name,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 

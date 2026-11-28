@@ -325,21 +325,27 @@ class _AnimePopHeader extends StatelessWidget {
               child: Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 38,
+                    height: 38,
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: borderCol, width: 1.8),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(
+                        color: isDark
+                            ? const Color(0xFF38BDF8).withValues(alpha: 0.7)
+                            : Colors.white.withValues(alpha: 0.9),
+                        width: 1.5,
+                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: borderCol,
-                          offset: const Offset(2.5, 3),
+                          color: Colors.black.withValues(alpha: 0.14),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
                         ),
                       ],
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(9.5),
                       child: Image.asset(
                         'assets/images/pet_read.png',
                         fit: BoxFit.cover,
@@ -349,32 +355,39 @@ class _AnimePopHeader extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 11),
+                  const SizedBox(width: 9),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         const Text(
                           'SAKURA READ // VOL.2',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: Colors.white70,
-                            fontSize: 9.5,
+                            fontSize: 9,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: 1.4,
+                            letterSpacing: 1.0,
                           ),
                         ),
                         Row(
                           children: [
-                            const Text(
-                              '桜読・蔵書',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 19,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 0.5,
+                            const Flexible(
+                              child: Text(
+                                '桜読・蔵書',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17.5,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.2,
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 6),
+                            const SizedBox(width: 5),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 6,
@@ -384,8 +397,8 @@ class _AnimePopHeader extends StatelessWidget {
                                 color: const Color(0xFFFDE047),
                                 borderRadius: BorderRadius.circular(5),
                                 border: Border.all(
-                                  color: borderCol,
-                                  width: 1.2,
+                                  color: Colors.white.withValues(alpha: 0.85),
+                                  width: 1.0,
                                 ),
                               ),
                               child: Text(
@@ -402,13 +415,14 @@ class _AnimePopHeader extends StatelessWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 6),
                   _AnimeBtn(
                     glyph: SakuraGlyph.aiCompanion,
                     tooltip: 'AI 助手',
                     borderCol: borderCol,
                     onTap: onAiTap,
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 5),
                   PetGuideTarget(
                     id: 'shelf_search',
                     child: _AnimeBtn(
@@ -418,14 +432,14 @@ class _AnimePopHeader extends StatelessWidget {
                       onTap: onSearchTap,
                     ),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 5),
                   _AnimeBtn(
                     glyph: SakuraGlyph.arrange,
                     tooltip: '排列方式',
                     borderCol: borderCol,
                     onTap: onArrangeTap,
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 5),
                   _AnimeBtn(
                     glyph: SakuraGlyph.manage,
                     tooltip: '批量管理',
@@ -477,14 +491,21 @@ class _AnimeBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: Container(
-          width: 34,
-          height: 34,
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: borderCol, width: 1.5),
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.85),
+              width: 1.2,
+            ),
             boxShadow: [
-              BoxShadow(color: borderCol, offset: const Offset(2, 2.5)),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.14),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
             ],
           ),
           alignment: Alignment.center,
@@ -492,7 +513,7 @@ class _AnimeBtn extends StatelessWidget {
             glyph: glyph,
             color: const Color(0xFF0F172A),
             accent: const Color(0xFFEC4899),
-            size: 18,
+            size: 17,
           ),
         ),
       ),

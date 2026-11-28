@@ -49,6 +49,20 @@ void main() {
     await tester.scrollUntilVisible(find.text('开源协议：GNU GPL-3.0'), 250);
     expect(find.text('开源协议：GNU GPL-3.0'), findsOneWidget);
 
+    await tester.scrollUntilVisible(find.text('引用致谢'), 250);
+    expect(find.text('引用致谢'), findsOneWidget);
+    // 默认折叠，点击后才展开个人开源项目与主页致谢
+    expect(find.text('AzukiReader'), findsNothing);
+    await tester.tap(find.text('引用致谢'));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(find.text('AzukiReader'), 250);
+    expect(find.text('AzukiReader'), findsOneWidget);
+    expect(find.text('Wenku8_Flutter'), findsOneWidget);
+    expect(find.text('米安第一深情'), findsOneWidget);
+    expect(find.textContaining('ilanzou'), findsNothing);
+    expect(find.text('Google LiteRT-LM'), findsNothing);
+
     await tester.scrollUntilVisible(find.text('免责声明'), 250);
     expect(find.text('免责声明'), findsOneWidget);
     expect(find.textContaining('GNU GPL-3.0'), findsWidgets);

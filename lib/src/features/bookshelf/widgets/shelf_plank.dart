@@ -117,25 +117,24 @@ class BookPageEdgesFrame extends StatelessWidget {
     final sakura = context.sakura;
 
     if (popOutline) {
-      final outline = isDark
-          ? const Color(0xFF38BDF8)
-          : const Color(0xFF0F172A);
+      final accentBorder = isDark
+          ? const Color(0xFF38BDF8).withValues(alpha: 0.60)
+          : const Color(0xFF38BDF8).withValues(alpha: 0.45);
       return Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(radius),
-          border: Border.all(color: outline, width: 1.8),
+          border: Border.all(color: accentBorder, width: 1.2),
           boxShadow: [
             BoxShadow(
-              color: isDark
-                  ? const Color(0xFF38BDF8).withValues(alpha: 0.35)
-                  : const Color(0xFF0F172A),
-              offset: const Offset(3.5, 4.5),
-              blurRadius: 0,
+              color: const Color(0xFF38BDF8)
+                  .withValues(alpha: isDark ? 0.24 : 0.20),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(radius - 1.5),
+          borderRadius: BorderRadius.circular(radius - 1),
           child: child,
         ),
       );

@@ -77,6 +77,18 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
   bool shelfSakuraPetals = true;
   bool silkBookmarkAndStamp = true;
   bool bookUnfoldTransition = true;
+  bool gyroHaloEnabled = true;
+  int gyroHaloColor = 0xFFFFB7D5;
+  double gyroHaloIntensity = 0.45;
+
+  static const List<(String, int)> gyroHaloPresets = [
+    ('淡粉樱晕', 0xFFFFB7D5),
+    ('晴空柔蓝', 0xFF93C5FD),
+    ('薄荷微光', 0xFF99F6E4),
+    ('星雾淡紫', 0xFFD8B4FE),
+    ('暖杏鎏金', 0xFFFDE68A),
+    ('月光冰白', 0xFFE2E8F0),
+  ];
 
   // ---- 书架排列 ----
   ShelfSortMode shelfSort = ShelfSortMode.recentRead;
@@ -342,6 +354,14 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
           shelfSakuraPetals = data['shelfSakuraPetals'] as bool? ?? true;
           silkBookmarkAndStamp = data['silkBookmarkAndStamp'] as bool? ?? true;
           bookUnfoldTransition = data['bookUnfoldTransition'] as bool? ?? true;
+          gyroHaloEnabled = data['gyroHaloEnabled'] as bool? ?? true;
+          gyroHaloColor =
+              (data['gyroHaloColor'] as num?)?.toInt() ?? 0xFFFFB7D5;
+          gyroHaloIntensity =
+              ((data['gyroHaloIntensity'] as num?)?.toDouble() ?? 0.45).clamp(
+                0.15,
+                1.0,
+              );
           fontSize = (data['fontSize'] as num?)?.toDouble() ?? 18;
           lineHeight = (data['lineHeight'] as num?)?.toDouble() ?? 1.75;
           letterSpacing = (data['letterSpacing'] as num?)?.toDouble() ?? 0;
@@ -971,6 +991,28 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
     notifyListeners();
   }
 
+  void setGyroHaloEnabled(bool v) {
+    if (gyroHaloEnabled == v) return;
+    gyroHaloEnabled = v;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setGyroHaloColor(int argb) {
+    if (gyroHaloColor == argb) return;
+    gyroHaloColor = argb;
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void setGyroHaloIntensity(double v) {
+    final clamped = v.clamp(0.15, 1.0).toDouble();
+    if (gyroHaloIntensity == clamped) return;
+    gyroHaloIntensity = clamped;
+    _saveSoon();
+    notifyListeners();
+  }
+
   /// 高刷新率渲染开关。
   void setHighRefreshRate(bool v) {
     if (highRefreshRate == v) return;
@@ -1075,6 +1117,9 @@ class AppPrefs extends ChangeNotifier with ReliablePersistence {
         'shelfSakuraPetals': shelfSakuraPetals,
         'silkBookmarkAndStamp': silkBookmarkAndStamp,
         'bookUnfoldTransition': bookUnfoldTransition,
+        'gyroHaloEnabled': gyroHaloEnabled,
+        'gyroHaloColor': gyroHaloColor,
+        'gyroHaloIntensity': gyroHaloIntensity,
         'fontSize': fontSize,
         'lineHeight': lineHeight,
         'letterSpacing': letterSpacing,

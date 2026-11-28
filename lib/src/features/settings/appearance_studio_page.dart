@@ -5,6 +5,7 @@ import '../../core/motion/sakura_motion.dart';
 import '../../core/theme/sakura_layout.dart';
 import '../../core/theme/sakura_tokens.dart';
 import '../../data/prefs.dart';
+import '../../data/shelf_sort.dart';
 
 /// 外观与书房风格工坊：4 套视觉艺术预设 + 7 项自由混搭特效 + 主题色。
 class AppearanceStudioPage extends StatelessWidget {
@@ -91,6 +92,31 @@ class AppearanceStudioPage extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
+                              '书架显示样式（含立体书脊）',
+                              style: TextStyle(
+                                color: sakura.inkPrimary,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final view in ShelfViewMode.values)
+                                  ChoiceChip(
+                                    label: Text(
+                                      view.label,
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    selected: prefs.shelfView == view,
+                                    onSelected: (_) => prefs.setShelfView(view),
+                                  ),
+                              ],
+                            ),
+                            const Divider(height: 22),
+                            Text(
                               '书架层板 / 封面陈列样式',
                               style: TextStyle(
                                 color: sakura.inkPrimary,
@@ -131,6 +157,75 @@ class AppearanceStudioPage extends StatelessWidget {
                               value: prefs.ambientCoverAura,
                               onChanged: prefs.setAmbientCoverAura,
                             ),
+                            _toggleRow(
+                              context,
+                              title: '陀螺仪重力光晕',
+                              subtitle: '随手机倾斜柔和流动的环境光晕，阅读正文时自动隐藏',
+                              value: prefs.gyroHaloEnabled,
+                              onChanged: prefs.setGyroHaloEnabled,
+                            ),
+                            if (prefs.gyroHaloEnabled) ...[
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final (name, argb)
+                                      in AppPrefs.gyroHaloPresets)
+                                    ChoiceChip(
+                                      avatar: Container(
+                                        width: 14,
+                                        height: 14,
+                                        decoration: BoxDecoration(
+                                          color: Color(argb),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: sakura.hairline,
+                                          ),
+                                        ),
+                                      ),
+                                      label: Text(
+                                        name,
+                                        style: const TextStyle(fontSize: 11.5),
+                                      ),
+                                      selected: prefs.gyroHaloColor == argb,
+                                      onSelected: (_) =>
+                                          prefs.setGyroHaloColor(argb),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Text(
+                                    '光晕强度',
+                                    style: TextStyle(
+                                      color: sakura.inkSecondary,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Slider(
+                                      value: prefs.gyroHaloIntensity,
+                                      min: 0.15,
+                                      max: 1.0,
+                                      divisions: 17,
+                                      onChanged: prefs.setGyroHaloIntensity,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${(prefs.gyroHaloIntensity * 100).round()}%',
+                                    style: TextStyle(
+                                      color: sakura.inkSecondary,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                            ],
                             _toggleRow(
                               context,
                               title: '悬浮液态玻璃底栏',

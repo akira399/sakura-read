@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
 import '../../core/theme/sakura_tokens.dart';
+import '../../data/ai_service.dart';
 import '../../data/prefs.dart';
 import '../../source/http_client.dart';
 import '../../source/models.dart';
 import '../../source/source_store.dart';
+import '../../ui/ai_settings_page.dart';
 import 'ai_source_studio.dart';
 
 /// 实时书源调试器 + AI 智能写源工坊（Design System 2.0）。
@@ -49,23 +53,29 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
 
   // ---- Tab 1: 实时四阶段调试状态 ----
   BookSource? _selectedSource;
-  final TextEditingController _keywordCtrl = TextEditingController(text: '西游记');
+  final TextEditingController _keywordCtrl = TextEditingController(
+    text: AiSourceStudio.defaultKeyword,
+  );
   bool _debugRunning = false;
   final Map<SourceDebugStage, SourceDebugStageResult> _stageMap = {};
   SourceDebugTrace? _lastTrace;
 
-  // ---- Tab 2: AI 写源工坊状态 ----
+  // ---- Tab 2: AI 一键写源工坊状态 ----
   final TextEditingController _siteUrlCtrl = TextEditingController();
   final TextEditingController _searchHintCtrl = TextEditingController();
   final TextEditingController _studioKeywordCtrl = TextEditingController(
-    text: '西游记',
+    text: AiSourceStudio.defaultKeyword,
   );
   BookSource? _repairTarget;
   String? _repairError;
+  bool _autoImport = true;
   bool _studioRunning = false;
   String _studioStatus = '';
   String? _studioError;
   AiSourceStudioResult? _studioResult;
+  bool _autoImported = false;
+  final List<AiSourceStepEvent> _studioSteps = [];
+  AiCancelToken? _cancelToken;
 
   AppPrefs? _resolvedPrefs;
 
@@ -75,8 +85,8 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
     _selectedSource =
         widget.initialSource ??
         (widget.store.sources.isNotEmpty ? widget.store.sources.first : null);
-    if (_selectedSource != null) {
-      _siteUrlCtrl.text = _selectedSource!.bookSourceUrl;
+    if (widget.initialSource != null) {
+      _siteUrlCtrl.text = widget.initialSource!.bookSourceUrl;
     }
   }
 
@@ -98,6 +108,7 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
 
   @override
   void dispose() {
+    _cancelToken?.cancel('disposed');
     _tabs.dispose();
     _runner.dispose();
     if (widget.studio == null) _studio.dispose();
@@ -110,8 +121,9 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
 
   Future<void> _runDebug() async {
     final source = _selectedSource;
-    final keyword = _keywordCtrl.text.trim();
-    if (source == null || keyword.isEmpty || _debugRunning) return;
+    final rawKw = _keywordCtrl.text.trim();
+    final keyword = rawKw.isEmpty ? AiSourceStudio.defaultKeyword : rawKw;
+    if (source == null || _debugRunning) return;
     setState(() {
       _debugRunning = true;
       _stageMap.clear();
@@ -140,21 +152,57 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
       _repairError = _lastTrace?.errorSummary;
       _siteUrlCtrl.text = source.bookSourceUrl;
       _studioKeywordCtrl.text = _keywordCtrl.text.trim().isEmpty
-          ? '西游记'
+          ? AiSourceStudio.defaultKeyword
           : _keywordCtrl.text.trim();
     });
     _tabs.animateTo(1);
   }
 
+  Future<void> _pasteUrl() async {
+    final data = await Clipboard.getData('text/plain');
+    final text = data?.text?.trim() ?? '';
+    if (text.isEmpty || !mounted) return;
+    setState(() {
+      _siteUrlCtrl.text = text;
+      _studioError = null;
+    });
+  }
+
+  Future<void> _openQuickOnlineConfig() async {
+    final prefs = _resolvedPrefs;
+    if (prefs == null) return;
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetCtx) => _QuickOnlineAiSheet(prefs: prefs),
+    );
+    if (saved == true && mounted) {
+      setState(() => _studioError = null);
+    }
+  }
+
   Future<void> _runAiStudio() async {
     final url = _siteUrlCtrl.text.trim();
-    if (url.isEmpty || _studioRunning) return;
+    if (url.isEmpty) {
+      setState(() => _studioError = '请先输入或粘贴目标小说网站链接');
+      return;
+    }
+    if (_studioRunning) return;
+    FocusScope.of(context).unfocus();
+
+    final cancel = AiCancelToken();
+    _cancelToken = cancel;
     setState(() {
       _studioRunning = true;
-      _studioStatus = '准备抓页…';
+      _studioStatus = '准备抓页分析…';
       _studioError = null;
       _studioResult = null;
+      _autoImported = false;
+      _studioSteps.clear();
+      _stageMap.clear();
     });
+
     try {
       final res = await _studio.generateAndValidate(
         siteUrl: url,
@@ -165,15 +213,53 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
             : _searchHintCtrl.text.trim(),
         existingToRepair: _repairTarget,
         repairError: _repairError,
+        cancelToken: cancel,
         onProgress: (status) {
           if (mounted) setState(() => _studioStatus = status);
         },
+        onStep: (ev) {
+          if (mounted) {
+            setState(() => _studioSteps.add(ev));
+          }
+        },
+        onValidationStage: (stage) {
+          if (mounted) {
+            setState(() => _stageMap[stage.stage] = stage);
+          }
+        },
       );
       if (!mounted) return;
+
+      var imported = false;
+      if (res.validated && _autoImport) {
+        final report = widget.store.addAll([res.source]);
+        unawaited(widget.store.flush());
+        imported = true;
+        _selectedSource = res.source;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                report.updated > 0
+                    ? '验证通过并已更新书源「${res.source.bookSourceName}」'
+                    : '验证通过并已自动导入书源「${res.source.bookSourceName}」',
+              ),
+            ),
+          );
+        }
+      }
+
       setState(() {
         _studioRunning = false;
         _studioStatus = '';
         _studioResult = res;
+        _autoImported = imported;
+        _lastTrace = res.validationTrace;
+        if (res.validationTrace != null) {
+          for (final s in res.validationTrace!.stages) {
+            _stageMap[s.stage] = s;
+          }
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -182,22 +268,30 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
         _studioStatus = '';
         _studioError = '$e';
       });
+    } finally {
+      if (identical(_cancelToken, cancel)) {
+        _cancelToken = null;
+      }
     }
   }
 
-  void _saveGeneratedSource() {
+  void _saveGeneratedSource({bool asDraft = false}) {
     final res = _studioResult;
     if (res == null) return;
     final report = widget.store.addAll([res.source]);
+    unawaited(widget.store.flush());
     setState(() {
       _selectedSource = res.source;
+      _autoImported = true;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          report.updated > 0
-              ? '已更新书源「${res.source.bookSourceName}」'
-              : '已保存新书源「${res.source.bookSourceName}」到书源库',
+          asDraft
+              ? '已将草稿「${res.source.bookSourceName}」保存到书源库'
+              : (report.updated > 0
+                    ? '已更新书源「${res.source.bookSourceName}」'
+                    : '已保存新书源「${res.source.bookSourceName}」到书源库'),
         ),
       ),
     );
@@ -262,7 +356,7 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
               const SizedBox(height: 8),
               if (sources.isEmpty)
                 Text(
-                  '书源库为空，可先切换到「AI 写源工坊」生成一个新书源。',
+                  '书源库为空，可先切换到「AI 写源工坊」贴入网站链接一键生成。',
                   style: TextStyle(color: colors.inkSecondary, fontSize: 13),
                 )
               else
@@ -302,7 +396,7 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
                 controller: _keywordCtrl,
                 decoration: const InputDecoration(
                   labelText: '测试关键词',
-                  hintText: '输入书名或作者，例如：西游记 / 诡秘之主',
+                  hintText: '输入书名或常用词，例如：我的 / 斗破苍穹 / 诡秘之主',
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -361,269 +455,827 @@ class _SourceDebuggerPageState extends State<SourceDebuggerPage>
     );
   }
 
-  // ---------- Tab 2: AI 智能写源工坊 ----------
+  // ---------- Tab 2: AI 一键写源工坊 ----------
 
   Widget _buildAiStudioTab(BuildContext context, SakuraColors colors) {
-    final accent = Theme.of(context).colorScheme.primary;
-    final aiReady = _resolvedPrefs?.aiConfigured ?? false;
+    final scheme = Theme.of(context).colorScheme;
+    final accent = scheme.primary;
+    final prefs = _resolvedPrefs;
+    final onlineReady = prefs?.aiHttpConfigured ?? false;
     final res = _studioResult;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
       children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: colors.card,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: colors.hairline),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: colors.accentSoft,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      Icons.auto_awesome_rounded,
-                      color: accent,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _repairTarget == null
-                              ? 'AI 自动写源（Legado 3.0）'
-                              : 'AI 修复书源：${_repairTarget!.bookSourceName}',
-                          style: TextStyle(
-                            color: colors.inkPrimary,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 14.5,
-                          ),
-                        ),
-                        Text(
-                          aiReady
-                              ? '抓取站点 DOM → 大模型生成规则 → 自动四阶段实测校验'
-                              : '提示：请先在「设置 → AI 助手」配置模型接口',
-                          style: TextStyle(
-                            color: colors.inkSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_repairTarget != null)
-                    TextButton(
-                      onPressed: () => setState(() {
-                        _repairTarget = null;
-                        _repairError = null;
-                      }),
-                      child: const Text('改为新建'),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _siteUrlCtrl,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: '目标小说网站 URL',
-                  hintText: 'https://www.example.com',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      controller: _searchHintCtrl,
-                      decoration: const InputDecoration(
-                        labelText: '搜索页地址参考（可选）',
-                        hintText: '/search.php?q=西游记',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _studioKeywordCtrl,
-                      decoration: const InputDecoration(
-                        labelText: '验证关键词',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _studioRunning ? null : _runAiStudio,
-                  icon: const Icon(Icons.bolt_rounded, size: 18),
-                  label: Text(
-                    _studioRunning
-                        ? (_studioStatus.isEmpty ? '生成中…' : _studioStatus)
-                        : (_repairTarget == null ? '抓取页面并生成书源' : '抓取页面并修复书源'),
-                  ),
-                ),
-              ),
-              if (_studioRunning) ...[
-                const SizedBox(height: 10),
-                const LinearProgressIndicator(),
-              ],
-              if (_studioError != null) ...[
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.errorContainer
-                        .withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    _studioError!,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: Theme.of(context).colorScheme.onErrorContainer,
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        if (res != null) ...[
-          const SizedBox(height: 14),
+        // 1. 在线大模型状态条（明确仅支持在线模型 + 一键配置入口）
+        if (prefs != null)
           Container(
-            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: colors.card,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: colors.hairline),
+              color: onlineReady
+                  ? const Color(0xFF3E9C73).withValues(alpha: 0.10)
+                  : Colors.orange.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: onlineReady
+                    ? const Color(0xFF3E9C73).withValues(alpha: 0.35)
+                    : Colors.orange.withValues(alpha: 0.45),
+              ),
             ),
+            child: Row(
+              children: [
+                Icon(
+                  onlineReady
+                      ? Icons.cloud_done_rounded
+                      : Icons.cloud_off_rounded,
+                  size: 18,
+                  color: onlineReady
+                      ? const Color(0xFF2D8660)
+                      : const Color(0xFFD97706),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    onlineReady
+                        ? '在线模型已就绪：${prefs.aiModel}'
+                        : 'AI 写源仅支持在线大模型（本地小模型暂无法稳定解析网页规则）',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: colors.inkPrimary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                  onPressed: _studioRunning ? null : _openQuickOnlineConfig,
+                  child: Text(onlineReady ? '切换接口' : '快速配置在线模型'),
+                ),
+              ],
+            ),
+          ),
+
+        // 2. 一键输入与操作主卡片
+        Material(
+          color: colors.card,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: colors.hairline),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: colors.accentSoft,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.auto_awesome_rounded,
+                        color: accent,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        res.source.bookSourceName,
-                        style: TextStyle(
-                          color: colors.inkPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    if (res.validationTrace != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: res.validated
-                              ? Colors.green.withValues(alpha: 0.14)
-                              : Colors.orange.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '实测 ${res.validationTrace!.passedCount}/4 阶段通过',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: res.validated ? Colors.green : Colors.orange,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _repairTarget == null
+                                ? 'AI 一键写源（贴入网址即可）'
+                                : 'AI 自动修复：${_repairTarget!.bookSourceName}',
+                            style: TextStyle(
+                              color: colors.inkPrimary,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14.5,
+                            ),
                           ),
-                        ),
+                          Text(
+                            'AI 自动取证首页 / 搜索 / 详情 / 目录 / 正文 → 4 阶段实测通过后自动导入',
+                            style: TextStyle(
+                              color: colors.inkSecondary,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
                       ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: _saveGeneratedSource,
-                      icon: const Icon(Icons.save_alt_rounded, size: 17),
-                      label: const Text('保存到书源库'),
                     ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(
-                          ClipboardData(text: res.formattedJson),
-                        );
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('已复制书源 JSON')),
-                        );
-                      },
-                      icon: const Icon(Icons.copy_rounded, size: 17),
-                      label: const Text('复制 JSON'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        setState(() {
-                          _selectedSource = res.source;
-                          _stageMap.clear();
-                          if (res.validationTrace != null) {
-                            for (final s in res.validationTrace!.stages) {
-                              _stageMap[s.stage] = s;
-                            }
-                            _lastTrace = res.validationTrace;
-                          }
-                        });
-                        _tabs.animateTo(0);
-                      },
-                      icon: const Icon(Icons.bug_report_outlined, size: 17),
-                      label: const Text('查看 4 阶段详情'),
-                    ),
+                    if (_repairTarget != null)
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _repairTarget = null;
+                          _repairError = null;
+                        }),
+                        child: const Text('改为新建'),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  constraints: const BoxConstraints(maxHeight: 280),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceSubtle,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: SingleChildScrollView(
-                    child: SelectableText(
-                      res.formattedJson,
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11.5,
-                        color: colors.inkPrimary,
-                      ),
+                TextField(
+                  controller: _siteUrlCtrl,
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.go,
+                  onSubmitted: (_) => _runAiStudio(),
+                  decoration: InputDecoration(
+                    labelText: '目标小说网站链接',
+                    hintText: 'https://www.example.com',
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_siteUrlCtrl.text.isNotEmpty)
+                          IconButton(
+                            tooltip: '清空',
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            onPressed: _studioRunning
+                                ? null
+                                : () => setState(() => _siteUrlCtrl.clear()),
+                          ),
+                        IconButton(
+                          tooltip: '从剪贴板粘贴网址',
+                          icon: const Icon(
+                            Icons.content_paste_rounded,
+                            size: 18,
+                          ),
+                          onPressed: _studioRunning ? null : _pasteUrl,
+                        ),
+                      ],
                     ),
                   ),
+                  onChanged: (_) => setState(() {}),
                 ),
+                const SizedBox(height: 6),
+                Theme(
+                  data: Theme.of(context)
+                      .copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: const EdgeInsets.only(top: 6, bottom: 4),
+                    dense: true,
+                    title: Text(
+                      '高级选项（测试词「${_studioKeywordCtrl.text.trim().isEmpty ? AiSourceStudio.defaultKeyword : _studioKeywordCtrl.text.trim()}」· ${_autoImport ? '通过即自动导入' : '仅生成不导入'}）',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colors.inkSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: _searchHintCtrl,
+                              decoration: const InputDecoration(
+                                labelText: '搜索页地址参考（可选）',
+                                hintText: '/search.php?q=我的',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _studioKeywordCtrl,
+                              decoration: const InputDecoration(
+                                labelText: '验证关键词',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        value: _autoImport,
+                        onChanged: _studioRunning
+                            ? null
+                            : (v) => setState(() => _autoImport = v),
+                        title: const Text(
+                          '4 阶段实测全部通过后自动导入书源库',
+                          style: TextStyle(fontSize: 12.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _studioRunning ? null : _runAiStudio,
+                        icon: const Icon(Icons.bolt_rounded, size: 18),
+                        label: Text(
+                          _studioRunning
+                              ? (_studioStatus.isEmpty
+                                    ? '分析生成中…'
+                                    : _studioStatus)
+                              : (_repairTarget == null
+                                    ? 'AI 一键写源并导入'
+                                    : 'AI 自动修复并更新'),
+                        ),
+                      ),
+                    ),
+                    if (_studioRunning) ...[
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        onPressed: () {
+                          _cancelToken?.cancel('user_cancelled');
+                          setState(() {
+                            _studioRunning = false;
+                            _studioStatus = '';
+                            _studioError = '已手动停止当前写源任务';
+                          });
+                        },
+                        child: const Text('停止'),
+                      ),
+                    ],
+                  ],
+                ),
+                if (_studioRunning) ...[
+                  const SizedBox(height: 10),
+                  const LinearProgressIndicator(),
+                ],
+                if (_studioError != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: scheme.errorContainer.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.error_outline_rounded,
+                          size: 18,
+                          color: scheme.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: SelectableText(
+                            _studioError!,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: scheme.onErrorContainer,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
+        ),
+
+        // 3. 结果与报错诊断卡片（置顶展示，无需先滑过长链路日志）
+        if (res != null) ...[
+          const SizedBox(height: 14),
+          Material(
+            color: colors.card,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(
+                color: res.validated
+                    ? const Color(0xFF3E9C73).withValues(alpha: 0.45)
+                    : Colors.orange.withValues(alpha: 0.50),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        res.validated
+                            ? Icons.check_circle_rounded
+                            : Icons.warning_amber_rounded,
+                        size: 20,
+                        color: res.validated
+                            ? const Color(0xFF3E9C73)
+                            : const Color(0xFFD9822B),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          res.source.bookSourceName,
+                          style: TextStyle(
+                            color: colors.inkPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      if (res.validationTrace != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: res.validated
+                                ? Colors.green.withValues(alpha: 0.14)
+                                : Colors.orange.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '实测 ${res.validationTrace!.passedCount}/4 阶段通过',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: res.validated
+                                  ? Colors.green
+                                  : Colors.orange,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (res.validated && _autoImported) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF3E9C73).withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '已自动导入书源库！示例书籍：《${res.validationTrace?.sampleBook?.name ?? '未知'}》 · '
+                        '目录 ${res.validationTrace?.sampleChapters.length ?? 0} 章 · '
+                        '正文 ${res.validationTrace?.sampleContent.trim().length ?? 0} 字',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: colors.inkPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (!res.validated && res.failureReason != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: SelectableText(
+                        res.failureReason!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.45,
+                          color: colors.inkPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (!res.validated)
+                        FilledButton.icon(
+                          onPressed: _studioRunning
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _repairTarget = res.source;
+                                    _repairError =
+                                        res.validationTrace?.errorSummary;
+                                  });
+                                  _runAiStudio();
+                                },
+                          icon: const Icon(
+                            Icons.auto_fix_high_rounded,
+                            size: 17,
+                          ),
+                          label: const Text('AI 继续修复'),
+                        ),
+                      if (!_autoImported)
+                        res.validated
+                            ? FilledButton.icon(
+                                onPressed: () => _saveGeneratedSource(),
+                                icon: const Icon(
+                                  Icons.save_alt_rounded,
+                                  size: 17,
+                                ),
+                                label: const Text('导入书源库'),
+                              )
+                            : OutlinedButton.icon(
+                                onPressed: () =>
+                                    _saveGeneratedSource(asDraft: true),
+                                icon: const Icon(
+                                  Icons.save_alt_rounded,
+                                  size: 17,
+                                ),
+                                label: const Text('仍保存草稿'),
+                              ),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _selectedSource = res.source;
+                            _stageMap.clear();
+                            if (res.validationTrace != null) {
+                              for (final s in res.validationTrace!.stages) {
+                                _stageMap[s.stage] = s;
+                              }
+                              _lastTrace = res.validationTrace;
+                            }
+                          });
+                          _tabs.animateTo(0);
+                        },
+                        icon: const Icon(Icons.bug_report_outlined, size: 17),
+                        label: const Text('查看 4 阶段详情'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Clipboard.setData(
+                            ClipboardData(text: res.formattedJson),
+                          );
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('已复制书源 JSON')),
+                          );
+                        },
+                        icon: const Icon(Icons.copy_rounded, size: 17),
+                        label: const Text('复制 JSON'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Theme(
+                    data: Theme.of(context)
+                        .copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      dense: true,
+                      initiallyExpanded: !res.validated,
+                      title: Text(
+                        '查看生成的 Legado 3.0 书源 JSON',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: colors.inkSecondary,
+                        ),
+                      ),
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          constraints: const BoxConstraints(maxHeight: 260),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: colors.surfaceSubtle,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: SingleChildScrollView(
+                            child: SelectableText(
+                              res.formattedJson,
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 11.5,
+                                color: colors.inkPrimary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
+
+        // 4. 实时步骤时间线（取证 / 实测 / 修复）
+        if (_studioSteps.isNotEmpty) _buildStepsTimeline(colors),
       ],
+    );
+  }
+
+  Widget _buildStepsTimeline(SakuraColors colors) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colors.card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.hairline),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'AI 执行链路（${_studioSteps.length} 步）',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                color: colors.inkSecondary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            for (final step in _studioSteps)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _StepRow(step: step, colors: colors),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StepRow extends StatelessWidget {
+  const _StepRow({required this.step, required this.colors});
+
+  final AiSourceStepEvent step;
+  final SakuraColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color) = switch (step.kind) {
+      AiSourceStepKind.fetch => (Icons.public_rounded, const Color(0xFF3B82F6)),
+      AiSourceStepKind.debug => (
+        Icons.bug_report_outlined,
+        Theme.of(context).colorScheme.primary,
+      ),
+      AiSourceStepKind.repair => (
+        Icons.auto_fix_high_rounded,
+        const Color(0xFFD97706),
+      ),
+      AiSourceStepKind.success => (
+        Icons.check_circle_rounded,
+        const Color(0xFF3E9C73),
+      ),
+      AiSourceStepKind.error => (
+        Icons.error_rounded,
+        Theme.of(context).colorScheme.error,
+      ),
+      AiSourceStepKind.info => (
+        Icons.auto_awesome_rounded,
+        colors.inkSecondary,
+      ),
+    };
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1.5),
+          child: Icon(icon, size: 15, color: color),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                step.title,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: colors.inkPrimary,
+                ),
+              ),
+              if ((step.detail ?? '').trim().isNotEmpty)
+                Text(
+                  step.detail!.trim(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: colors.inkSecondary),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickOnlineAiSheet extends StatefulWidget {
+  const _QuickOnlineAiSheet({required this.prefs});
+
+  final AppPrefs prefs;
+
+  @override
+  State<_QuickOnlineAiSheet> createState() => _QuickOnlineAiSheetState();
+}
+
+class _QuickOnlineAiSheetState extends State<_QuickOnlineAiSheet> {
+  late final TextEditingController _baseCtrl = TextEditingController(
+    text: widget.prefs.aiBaseUrl.isEmpty
+        ? 'https://api.deepseek.com/v1'
+        : widget.prefs.aiBaseUrl,
+  );
+  late final TextEditingController _keyCtrl = TextEditingController(
+    text: widget.prefs.aiApiKey,
+  );
+  late final TextEditingController _modelCtrl = TextEditingController(
+    text: widget.prefs.aiModel.isEmpty ? 'deepseek-chat' : widget.prefs.aiModel,
+  );
+  bool _showKey = false;
+  bool _testing = false;
+  String? _statusMsg;
+
+  @override
+  void dispose() {
+    _baseCtrl.dispose();
+    _keyCtrl.dispose();
+    _modelCtrl.dispose();
+    super.dispose();
+  }
+
+  void _applyPreset(AiProviderPreset preset) {
+    setState(() {
+      _baseCtrl.text = preset.baseUrl;
+      _modelCtrl.text = preset.defaultModel;
+      _statusMsg = null;
+    });
+  }
+
+  Future<void> _test() async {
+    if (_testing) return;
+    setState(() {
+      _testing = true;
+      _statusMsg = null;
+    });
+    final ai = AiService();
+    try {
+      final reply = await ai.testConnection(
+        baseUrl: _baseCtrl.text.trim(),
+        apiKey: _keyCtrl.text.trim(),
+        model: _modelCtrl.text.trim(),
+      );
+      if (mounted) setState(() => _statusMsg = '连接成功：$reply');
+    } catch (e) {
+      if (mounted) setState(() => _statusMsg = '连接失败：$e');
+    } finally {
+      ai.dispose();
+      if (mounted) setState(() => _testing = false);
+    }
+  }
+
+  Future<void> _save() async {
+    final base = _baseCtrl.text.trim();
+    final model = _modelCtrl.text.trim();
+    if (base.isEmpty || model.isEmpty) {
+      setState(() => _statusMsg = '请先填写接口地址与模型名称');
+      return;
+    }
+    widget.prefs.setAiConfig(
+      baseUrl: base,
+      apiKey: _keyCtrl.text.trim(),
+      model: model,
+      includeReading: widget.prefs.aiIncludeReading,
+    );
+    await widget.prefs.flush();
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onlinePresets = kAiProviderPresets
+        .where((p) => p.id != 'ollama')
+        .toList();
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          MediaQuery.viewInsetsOf(context).bottom + 20,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '配置在线大模型（用于 AI 写源）',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                '推荐使用 DeepSeek / OpenAI / Gemini / Kimi；不影响你在聊天里使用本地模型。',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final p in onlinePresets)
+                    ActionChip(
+                      label: Text(p.name),
+                      onPressed: () => _applyPreset(p),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _baseCtrl,
+                decoration: const InputDecoration(
+                  labelText: '接口地址（Base URL）',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _keyCtrl,
+                obscureText: !_showKey,
+                decoration: InputDecoration(
+                  labelText: 'API Key',
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _showKey
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                    ),
+                    onPressed: () => setState(() => _showKey = !_showKey),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _modelCtrl,
+                decoration: const InputDecoration(
+                  labelText: '模型名',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              if (_statusMsg != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _statusMsg!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _statusMsg!.startsWith('连接成功')
+                        ? Colors.green
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  OutlinedButton(
+                    onPressed: _testing ? null : _test,
+                    child: Text(_testing ? '测试中…' : '测试连接'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pop(false);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => AiSettingsPage(prefs: widget.prefs),
+                        ),
+                      );
+                    },
+                    child: const Text('完整设置'),
+                  ),
+                  const Spacer(),
+                  FilledButton(onPressed: _save, child: const Text('保存并启用')),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

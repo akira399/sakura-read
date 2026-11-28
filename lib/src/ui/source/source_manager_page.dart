@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/prefs.dart';
 import '../../features/book_source/replace_rules_page.dart';
 import '../../features/book_source/source_debugger_page.dart';
 import '../../source/http_client.dart';
@@ -16,9 +17,10 @@ import '../widgets/cute.dart';
 import '../../platform/url_launcher.dart';
 
 class SourceManagerPage extends StatefulWidget {
-  const SourceManagerPage({super.key, required this.store});
+  const SourceManagerPage({super.key, required this.store, this.prefs});
 
   final SourceStore store;
+  final AppPrefs? prefs;
 
   @override
   State<SourceManagerPage> createState() => _SourceManagerPageState();
@@ -42,19 +44,20 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
           if (sources.isEmpty) {
             return _EmptyView(
               onImport: () => _showImportSheet(context),
-              onAiStudio: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      SourceDebuggerPage(store: store, initialTab: 1),
-                ),
-              ),
+              onAiStudio: () => _openAiStudio(context),
             );
           }
           return ListView.separated(
             padding: EdgeInsets.fromLTRB(12, 8, 12, _bulkMode ? 100 : 40),
-            itemCount: sources.length,
+            itemCount: sources.length + (_bulkMode ? 0 : 1),
             separatorBuilder: (_, _) => const SizedBox(height: 2),
-            itemBuilder: (context, i) => _buildTile(context, sources[i]),
+            itemBuilder: (context, i) {
+              if (!_bulkMode && i == 0) {
+                return _buildAiHeroBanner(context);
+              }
+              final idx = _bulkMode ? i : i - 1;
+              return _buildTile(context, sources[idx]);
+            },
           );
         },
       ),
@@ -114,7 +117,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
           constraints: compactConstraints,
           icon: const Icon(Icons.bug_report_outlined, size: 21),
           onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => SourceDebuggerPage(store: store)),
+            MaterialPageRoute(
+              builder: (_) =>
+                  SourceDebuggerPage(store: store, prefs: widget.prefs),
+            ),
           ),
         ),
         IconButton(
@@ -408,6 +414,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                           builder: (_) => SourceDebuggerPage(
                             store: store,
                             initialSource: s,
+                            prefs: widget.prefs,
                           ),
                         ),
                       );
@@ -548,6 +555,18 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               ),
             ),
             ListTile(
+              leading: Icon(
+                Icons.auto_awesome_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              title: const Text('AI 从网址一键写源'),
+              subtitle: const Text('贴入小说网站链接，AI 自动解析验证并导入'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _openAiStudio(context);
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.content_paste_rounded),
               title: const Text('粘贴导入'),
               subtitle: const Text('支持阅读 3.0 格式的书源 JSON（数组或单个对象）'),
@@ -642,6 +661,74 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         invalid: invalid,
         // 至少导入成功过就不展示错误（个别文件失败由 invalid 计数体现）
         error: added + updated > 0 ? null : error,
+      ),
+    );
+  }
+
+  void _openAiStudio(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SourceDebuggerPage(
+          store: store,
+          prefs: widget.prefs,
+          initialTab: 1,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAiHeroBanner(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 8),
+      color: scheme.primaryContainer.withValues(alpha: 0.42),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: scheme.primary.withValues(alpha: 0.25)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _openAiStudio(context),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: scheme.primary.withValues(alpha: 0.16),
+                child: Icon(Icons.auto_awesome_rounded, color: scheme.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'AI 一键写源',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '放入小说网站链接，自动取证、4 阶段实测并导入',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonal(
+                onPressed: () => _openAiStudio(context),
+                child: const Text('立即写源'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

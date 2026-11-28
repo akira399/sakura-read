@@ -111,6 +111,62 @@ class AiCancelToken {
   }
 }
 
+/// 模型返回的一次工具调用（OpenAI `tool_calls` 格式）。
+class AiToolCall {
+  const AiToolCall({
+    required this.id,
+    required this.name,
+    required this.rawArguments,
+    required this.arguments,
+  });
+
+  final String id;
+  final String name;
+  final String rawArguments;
+  final Map<String, dynamic> arguments;
+
+  static AiToolCall? fromJson(Map<dynamic, dynamic> raw) {
+    final fn = raw['function'];
+    if (fn is! Map) return null;
+    final name = fn['name']?.toString().trim() ?? '';
+    if (name.isEmpty) return null;
+    final id = raw['id']?.toString().trim() ?? '';
+    final argRaw = fn['arguments']?.toString() ?? '{}';
+    var parsedArgs = const <String, dynamic>{};
+    try {
+      final decoded = jsonDecode(argRaw);
+      if (decoded is Map) {
+        parsedArgs = decoded.map((k, v) => MapEntry(k.toString(), v));
+      }
+    } catch (_) {
+      parsedArgs = const <String, dynamic>{};
+    }
+    return AiToolCall(
+      id: id.isEmpty ? 'call_$name' : id,
+      name: name,
+      rawArguments: argRaw,
+      arguments: parsedArgs,
+    );
+  }
+}
+
+/// 带工具调用能力的一轮 Chat Completions 响应。
+class AiCompletionResult {
+  const AiCompletionResult({
+    required this.content,
+    this.toolCalls = const [],
+    this.rawToolCalls = const [],
+    this.finishReason,
+  });
+
+  final String content;
+  final List<AiToolCall> toolCalls;
+  final List<Map<String, dynamic>> rawToolCalls;
+  final String? finishReason;
+
+  bool get hasToolCalls => toolCalls.isNotEmpty;
+}
+
 /// 一条对话消息（只保留角色与文本）。
 class AiTurn {
   const AiTurn.user(this.content) : role = 'user';
@@ -398,6 +454,162 @@ class AiService {
         {'role': 'user', 'content': '你好'},
       ],
       maxTokens: 32,
+    );
+  }
+
+  /// 带 Function / Tool Calling 的单轮补全（供 AI 写源 Agent 闭环调用）。
+  Future<AiCompletionResult> completeWithTools({
+    required String baseUrl,
+    required String apiKey,
+    required String model,
+    required List<Map<String, dynamic>> messages,
+    List<Map<String, dynamic>>? tools,
+    double temperature = 0.2,
+    int maxTokens = 3200,
+    Duration timeout = const Duration(seconds: 90),
+    AiCancelToken? cancelToken,
+  }) async {
+    final uri = _validatedUri(baseUrl, model);
+    if (cancelToken?.isCancelled ?? false) {
+      throw AiException('已取消当前操作');
+    }
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (apiKey.trim().isNotEmpty) 'Authorization': 'Bearer ${apiKey.trim()}',
+    };
+    final payload = <String, dynamic>{
+      'model': model.trim(),
+      'messages': messages,
+      'temperature': temperature,
+      'max_tokens': maxTokens,
+      'stream': false,
+      if (tools != null && tools.isNotEmpty) ...{
+        'tools': tools,
+        'tool_choice': 'auto',
+      },
+    };
+
+    late final int statusCode;
+    late final List<int> bodyBytes;
+    if (_customHttpClient) {
+      http.Response resp;
+      try {
+        resp = await _client
+            .post(uri, headers: headers, body: jsonEncode(payload))
+            .timeout(timeout);
+      } on TimeoutException {
+        throw AiException('请求超时了，检查一下网络，或稍后再试');
+      } on FormatException {
+        throw AiException('接口地址格式不对，示例：https://api.openai.com/v1');
+      } catch (_) {
+        throw AiException('网络连接失败，检查网络或接口地址（部分服务需要代理才能直连）');
+      }
+      statusCode = resp.statusCode;
+      bodyBytes = resp.bodyBytes;
+    } else {
+      Response<List<int>> resp;
+      try {
+        resp = await _dio.postUri<List<int>>(
+          uri,
+          data: jsonEncode(payload),
+          cancelToken: cancelToken?.dioToken,
+          options: Options(
+            headers: headers,
+            responseType: ResponseType.bytes,
+            receiveTimeout: timeout,
+            sendTimeout: const Duration(seconds: 30),
+          ),
+        );
+      } on DioException catch (e) {
+        if (CancelToken.isCancel(e) || (cancelToken?.isCancelled ?? false)) {
+          throw AiException('已取消当前操作');
+        }
+        if (e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.sendTimeout) {
+          throw AiException('请求超时了，检查一下网络，或稍后再试');
+        }
+        throw AiException('网络连接失败，检查网络或接口地址（部分服务需要代理才能直连）');
+      } catch (_) {
+        throw AiException('网络连接失败，检查网络或接口地址（部分服务需要代理才能直连）');
+      }
+      statusCode = resp.statusCode ?? 0;
+      bodyBytes = resp.data ?? const <int>[];
+    }
+
+    if (cancelToken?.isCancelled ?? false) {
+      throw AiException('已取消当前操作');
+    }
+    if (statusCode != 200) {
+      throw AiException(
+        _httpError(statusCode, utf8.decode(bodyBytes, allowMalformed: true)),
+      );
+    }
+
+    Object? data;
+    try {
+      data = jsonDecode(utf8.decode(bodyBytes, allowMalformed: true));
+    } on FormatException {
+      throw AiException('接口返回的不是 JSON，可能地址填错了（需要直接指向 API，而不是网页）');
+    }
+    if (data is! Map) {
+      throw AiException('接口返回格式不对，检查接口地址是否为 OpenAI 兼容接口');
+    }
+    final error = data['error'];
+    if (error is Map && error['message'] is String) {
+      throw AiException('AI 返回错误：${error['message']}');
+    }
+    final choices = data['choices'];
+    if (choices is! List || choices.isEmpty || choices.first is! Map) {
+      throw AiException('模型没有返回有效响应，换个模型或稍后再试');
+    }
+    final first = choices.first as Map;
+    final finishReason = first['finish_reason']?.toString();
+    final message = first['message'];
+    if (message is! Map) {
+      final text = first['text']?.toString().trim() ?? '';
+      return AiCompletionResult(content: text, finishReason: finishReason);
+    }
+
+    var content = '';
+    final rawContent = message['content'];
+    if (rawContent is String) {
+      content = rawContent.trim();
+    } else if (rawContent is List) {
+      final buf = StringBuffer();
+      for (final item in rawContent) {
+        if (item is Map && item['text'] is String) {
+          buf.write(item['text'] as String);
+        }
+      }
+      content = buf.toString().trim();
+    }
+
+    final toolCalls = <AiToolCall>[];
+    final rawToolCalls = <Map<String, dynamic>>[];
+    final tcList = message['tool_calls'];
+    if (tcList is List) {
+      for (final item in tcList) {
+        if (item is! Map) continue;
+        final normalized = item.map((k, v) => MapEntry(k.toString(), v));
+        final parsed = AiToolCall.fromJson(normalized);
+        if (parsed != null) {
+          toolCalls.add(parsed);
+          rawToolCalls.add(normalized);
+        }
+      }
+    }
+
+    if (content.isEmpty && toolCalls.isEmpty) {
+      throw AiException('模型没有返回内容或工具调用，换个模型或稍后再试');
+    }
+
+    return AiCompletionResult(
+      content: content,
+      toolCalls: toolCalls,
+      rawToolCalls: rawToolCalls,
+      finishReason: finishReason,
     );
   }
 

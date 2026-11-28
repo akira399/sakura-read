@@ -12,6 +12,8 @@ import '../source/source_store.dart';
 import '../theme/app_theme.dart';
 import 'reader/reader_page.dart';
 import 'folder_picker_page.dart';
+import 'source/online_cover_picker_sheet.dart';
+import 'source/source_search_page.dart';
 import 'source/source_switch_sheet.dart';
 import 'widgets/book_cover.dart';
 import 'widgets/cute.dart';
@@ -180,7 +182,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
     introCtrl.dispose();
   }
 
-  Future<void> _changeCover() async {
+  Future<void> _pickLocalCover() async {
     final picked = await Navigator.of(context).push<List<String>>(
       MaterialPageRoute(
         builder: (_) =>
@@ -206,6 +208,111 @@ class _BookDetailPageState extends State<BookDetailPage> {
             .showSnackBar(const SnackBar(content: Text('封面导入失败')));
       }
     }
+  }
+
+  Future<void> _pickOnlineCover() async {
+    final book = _book;
+    if (book == null) return;
+    final sourceStore = SourceStore.shared;
+    if (sourceStore == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('书源模块尚未初始化')));
+      }
+      return;
+    }
+    final savedPath = await showOnlineCoverPickerSheet(
+      context,
+      book: book,
+      bookStore: store,
+      sourceStore: sourceStore,
+      prefs: widget.prefs,
+    );
+    if (savedPath == null || !mounted) return;
+    final current = _book;
+    if (current == null) return;
+    current
+      ..coverPath = savedPath
+      ..generatedCover = false;
+    await store.flush();
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('已更换在线封面 🎀')));
+  }
+
+  Future<void> _resetCover() async {
+    final book = _book;
+    if (book == null) return;
+    book
+      ..coverPath = null
+      ..generatedCover = true;
+    await store.flush();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _showCoverOptions() async {
+    final book = _book;
+    if (book == null) return;
+    final hasCustomCover = book.coverPath != null && !book.generatedCover;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.public_rounded),
+              title: const Text('在线搜索各书源封面'),
+              subtitle: const Text('从已启用书源搜集本书封面候选'),
+              onTap: () => Navigator.pop(ctx, 'online'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('从本地图片选择封面'),
+              onTap: () => Navigator.pop(ctx, 'local'),
+            ),
+            if (hasCustomCover)
+              ListTile(
+                leading: const Icon(Icons.restore_rounded),
+                title: const Text('恢复默认封面'),
+                onTap: () => Navigator.pop(ctx, 'reset'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case 'online':
+        await _pickOnlineCover();
+      case 'local':
+        await _pickLocalCover();
+      case 'reset':
+        await _resetCover();
+    }
+  }
+
+  void _searchByAuthor(String author) {
+    final trimmed = author.trim();
+    if (trimmed.isEmpty || trimmed == '佚名') return;
+    final sourceStore = SourceStore.shared;
+    if (sourceStore == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('书源模块尚未初始化')));
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SourceSearchPage(
+          store: sourceStore,
+          bookStore: store,
+          prefs: widget.prefs,
+          initialQuery: trimmed,
+        ),
+      ),
+    );
   }
 
   /// 清空本书缓存。
@@ -248,7 +355,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
           floatingActionButton: FloatingActionButton.small(
             heroTag: 'edit-cover-${book.id}',
             tooltip: '更换封面',
-            onPressed: _changeCover,
+            onPressed: _showCoverOptions,
             child: const Icon(Icons.image_outlined),
           ),
           body: CustomScrollView(
@@ -258,6 +365,12 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   book: book,
                   store: store,
                   onEditInfo: _editBookInfo,
+                  onTapCover: _showCoverOptions,
+                  onTapAuthor:
+                      book.author.trim().isNotEmpty &&
+                          book.author.trim() != '佚名'
+                      ? () => _searchByAuthor(book.author)
+                      : null,
                 ),
               ),
               SliverToBoxAdapter(
@@ -389,11 +502,19 @@ class _BookDetailPageState extends State<BookDetailPage> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.book, required this.store, this.onEditInfo});
+  const _Header({
+    required this.book,
+    required this.store,
+    this.onEditInfo,
+    this.onTapCover,
+    this.onTapAuthor,
+  });
 
   final Book book;
   final BookStore store;
   final VoidCallback? onEditInfo;
+  final VoidCallback? onTapCover;
+  final VoidCallback? onTapAuthor;
 
   @override
   Widget build(BuildContext context) {
@@ -473,16 +594,41 @@ class _Header extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Hero(
-                    tag: 'book-cover-${book.id}',
-                    child: SizedBox(
-                      width: 112,
-                      height: 156,
-                      child: BookCover(
-                        book: book,
-                        radius: 14,
-                        elevated: true,
-                        showTextOnGenerated: false,
+                  GestureDetector(
+                    onTap: onTapCover,
+                    child: Hero(
+                      tag: 'book-cover-${book.id}',
+                      child: SizedBox(
+                        width: 112,
+                        height: 156,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            BookCover(
+                              book: book,
+                              radius: 14,
+                              elevated: true,
+                              showTextOnGenerated: false,
+                            ),
+                            if (onTapCover != null)
+                              Positioned(
+                                right: 6,
+                                bottom: 6,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.55),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(
+                                    Icons.photo_camera_outlined,
+                                    size: 13,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -505,15 +651,51 @@ class _Header extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Text(
-                            book.author.isEmpty ? '佚名' : book.author,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: .9),
-                              fontSize: 13,
+                          if (onTapAuthor != null)
+                            InkWell(
+                              onTap: onTapAuthor,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 2,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        book.author.trim(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Colors.white.withValues(
+                                            alpha: .94,
+                                          ),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(
+                                      Icons.search_rounded,
+                                      size: 13,
+                                      color: Colors.white70,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            Text(
+                              book.author.isEmpty ? '佚名' : book.author,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: .9),
+                                fontSize: 13,
+                              ),
                             ),
-                          ),
                           const SizedBox(height: 12),
                           Wrap(
                             spacing: 8,

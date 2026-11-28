@@ -13,6 +13,7 @@ import '../data/tts_voice_catalog.dart';
 import '../data/tts_voice_store.dart';
 import '../features/book_source/replace_rule_store.dart';
 import '../features/book_source/replace_rules_page.dart';
+import '../features/book_source/source_debugger_page.dart';
 import '../features/settings/about_page.dart';
 import '../features/settings/appearance_studio_page.dart';
 import '../features/settings/reading_defaults_page.dart';
@@ -234,13 +235,30 @@ class _SettingsPageState extends State<SettingsPage> {
               preset: preset,
               children: [
                 _SettingsNavRow(
+                  glyph: SakuraGlyph.aiCompanion,
+                  badgeColor: scheme.primary,
+                  title: 'AI 一键写源',
+                  subtitle: '输入小说网站链接，AI 自动写源、4 阶段实测并导入',
+                  onTap: () => _push(
+                    SourceDebuggerPage(
+                      store: widget.sourceStore,
+                      prefs: widget.prefs,
+                      initialTab: 1,
+                    ),
+                  ),
+                ),
+                _SettingsNavRow(
                   glyph: SakuraGlyph.sources,
                   badgeColor: const Color(0xFFD97736),
-                  title: '书源管理与 AI 写源',
+                  title: '书源管理与导入',
                   subtitle:
                       '已启用 ${widget.sourceStore.enabledCount} / ${widget.sourceStore.sources.length} 条兼容书源',
-                  onTap: () =>
-                      _push(SourceManagerPage(store: widget.sourceStore)),
+                  onTap: () => _push(
+                    SourceManagerPage(
+                      store: widget.sourceStore,
+                      prefs: widget.prefs,
+                    ),
+                  ),
                 ),
                 _SettingsNavRow(
                   glyph: SakuraGlyph.purify,

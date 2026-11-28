@@ -416,7 +416,7 @@ void main() {
 
       await tester.tap(find.text('AI 写源工坊'));
       await tester.pumpAndSettle();
-      expect(find.text('抓取页面并生成书源'), findsOneWidget);
+      expect(find.text('AI 一键写源并导入'), findsOneWidget);
     });
   });
 }

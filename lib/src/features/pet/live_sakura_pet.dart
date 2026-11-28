@@ -211,16 +211,23 @@ class _LiveSakuraPetState extends State<LiveSakuraPet>
                   ? 1.0 + math.sin(_moodPop.value * math.pi) * 0.065
                   : 1.0;
 
+              final peekShiftX = _animate && widget.peekingSide != 0
+                  ? -widget.peekingSide * (breathWave * 1.8)
+                  : 0.0;
               final tiltAngle =
                   (_smoothLook.dx * 0.08) +
-                  (widget.peekingSide * -0.14) +
+                  (widget.peekingSide * -0.36) +
                   (widget.mood == PetLiveMood.thinking ? 0.05 : 0.0) +
                   (widget.mood == PetLiveMood.shy ? -0.04 : 0.0);
+
+              final pivot = widget.peekingSide == 0
+                  ? Alignment.bottomCenter
+                  : Alignment(widget.peekingSide < 0 ? -0.9 : 0.9, 0.35);
 
               final matrix = Matrix4.identity()
                 ..setEntry(3, 2, 0.0015)
                 ..translateByDouble(
-                  _smoothLook.dx * 2.2,
+                  _smoothLook.dx * 2.2 + peekShiftX,
                   floatY + _smoothLook.dy * 1.5,
                   0,
                   1,
@@ -234,17 +241,14 @@ class _LiveSakuraPetState extends State<LiveSakuraPet>
                 clipBehavior: Clip.none,
                 fit: StackFit.expand,
                 children: [
-                  Transform(
-                    alignment: Alignment.bottomCenter,
-                    transform: matrix,
-                    child: child,
-                  ),
+                  Transform(alignment: pivot, transform: matrix, child: child),
                   IgnorePointer(
                     child: CustomPaint(
                       painter: _PetAuraParticlesPainter(
                         mood: widget.mood,
                         phase: _animate ? _accent.value : 0.35,
                         showSparkles: widget.showSparkles,
+                        peekingSide: widget.peekingSide,
                         accentColor: accent,
                       ),
                     ),
@@ -278,12 +282,14 @@ class _PetAuraParticlesPainter extends CustomPainter {
     required this.mood,
     required this.phase,
     required this.showSparkles,
+    required this.peekingSide,
     required this.accentColor,
   });
 
   final PetLiveMood mood;
   final double phase;
   final bool showSparkles;
+  final int peekingSide;
   final Color accentColor;
 
   @override
@@ -291,6 +297,10 @@ class _PetAuraParticlesPainter extends CustomPainter {
     final s = size.shortestSide / 100.0;
     canvas.save();
     canvas.scale(s, s);
+
+    if (peekingSide != 0) {
+      _drawEdgeGripPaws(canvas, peekingSide);
+    }
 
     if (showSparkles || mood == PetLiveMood.happy || mood == PetLiveMood.shy) {
       const anchors = [Offset(14, 24), Offset(86, 22), Offset(20, 10)];
@@ -354,6 +364,27 @@ class _PetAuraParticlesPainter extends CustomPainter {
     canvas.restore();
   }
 
+  void _drawEdgeGripPaws(Canvas canvas, int side) {
+    final fill = Paint()..color = const Color(0xFFFFE4D6);
+    final stroke = Paint()
+      ..color = const Color(0xFF8A5A5A)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final edgeX = side < 0 ? 44.0 : 56.0;
+    final dxDir = side < 0 ? 1.0 : -1.0;
+    for (final y in const [40.0, 56.0]) {
+      final paw = Rect.fromCenter(
+        center: Offset(edgeX + dxDir * 4.5, y),
+        width: 11.5,
+        height: 8.5,
+      );
+      canvas.drawOval(paw, fill);
+      canvas.drawOval(paw, stroke);
+    }
+  }
+
   void _drawHeart(Canvas canvas, Offset center, double r, Color color) {
     final p = Path()
       ..moveTo(center.dx, center.dy + r * 0.9)
@@ -393,5 +424,6 @@ class _PetAuraParticlesPainter extends CustomPainter {
       oldDelegate.mood != mood ||
       oldDelegate.phase != phase ||
       oldDelegate.showSparkles != showSparkles ||
+      oldDelegate.peekingSide != peekingSide ||
       oldDelegate.accentColor != accentColor;
 }

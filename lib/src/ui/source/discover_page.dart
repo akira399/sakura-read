@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/sakura_layout.dart';
 import '../../data/book_store.dart';
 import '../../data/prefs.dart';
+import '../../features/book_source/source_debugger_page.dart';
 import '../../source/models.dart';
 import '../../source/online_repo.dart';
 import '../../source/source_store.dart';
@@ -196,6 +197,14 @@ class _DiscoverPageState extends State<DiscoverPage> {
         toolbarHeight: shortLandscape ? 46 : null,
         title: const Text('发现'),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: TextButton.icon(
+              onPressed: _openAiSourceStudio,
+              icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+              label: const Text('AI 写源'),
+            ),
+          ),
           IconButton(
             tooltip: '查找书源',
             icon: const Icon(Icons.search),
@@ -284,6 +293,16 @@ class _DiscoverPageState extends State<DiscoverPage> {
       appBar: AppBar(
         toolbarHeight: shortLandscape ? 46 : null,
         title: const Text('发现'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: TextButton.icon(
+              onPressed: _openAiSourceStudio,
+              icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+              label: const Text('AI 写源'),
+            ),
+          ),
+        ],
       ),
       body: SafeArea(
         top: false,
@@ -299,20 +318,32 @@ class _DiscoverPageState extends State<DiscoverPage> {
               '· 行格式：玄幻::https://站点/list/{{page}}.html\n'
               '· JSON：[{"title":"玄幻","url":"https://..."}]\n'
               '\n'
-              '可在「设置 → 书源管理」导入带此类规则的书源',
+              '可贴入小说网站链接用 AI 一键生成，或在「书源管理」导入规则',
           bottomClearance: bottomClearance,
           actions: [
-            IconButton(
-              tooltip: '查找书源',
-              icon: const Icon(Icons.search),
-              onPressed: _findSource,
-            ),
             FilledButton.icon(
+              onPressed: _openAiSourceStudio,
+              icon: const Icon(Icons.auto_awesome_rounded),
+              label: const Text('AI 一键写源'),
+            ),
+            OutlinedButton.icon(
               onPressed: () => _reloadSources(),
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('重新检测'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _openAiSourceStudio() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SourceDebuggerPage(
+          store: widget.sourceStore,
+          prefs: widget.prefs,
+          initialTab: 1,
         ),
       ),
     );

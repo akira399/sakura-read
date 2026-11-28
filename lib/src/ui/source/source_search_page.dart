@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/book_store.dart';
 import '../../data/prefs.dart';
+import '../../features/book_source/source_debugger_page.dart';
 import '../../source/models.dart';
 import '../../source/online_repo.dart';
 import '../../source/source_store.dart';
@@ -260,6 +261,15 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
       return _IdleView(
         hasSources: !widget.store.isEmpty,
         onHintTap: () => _controller.text.isEmpty ? null : _start(),
+        onOpenAiStudio: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SourceDebuggerPage(
+              store: widget.store,
+              prefs: widget.prefs,
+              initialTab: 1,
+            ),
+          ),
+        ),
       );
     }
     final scheme = Theme.of(context).colorScheme;
@@ -526,10 +536,15 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
 }
 
 class _IdleView extends StatelessWidget {
-  const _IdleView({required this.hasSources, this.onHintTap});
+  const _IdleView({
+    required this.hasSources,
+    this.onHintTap,
+    this.onOpenAiStudio,
+  });
 
   final bool hasSources;
   final VoidCallback? onHintTap;
+  final VoidCallback? onOpenAiStudio;
 
   @override
   Widget build(BuildContext context) {
@@ -543,7 +558,7 @@ class _IdleView extends StatelessWidget {
             const KanbanMascot(size: 150),
             const SizedBox(height: 16),
             Text(
-              hasSources ? '输入关键词，一次搜索所有书源' : '先去「设置 → 书源管理」导入书源吧',
+              hasSources ? '输入关键词，一次搜索所有书源' : '先导入书源，或贴入小说站链接由 AI 一键生成',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13.5,
@@ -551,6 +566,14 @@ class _IdleView extends StatelessWidget {
                 color: scheme.onSurfaceVariant,
               ),
             ),
+            if (onOpenAiStudio != null) ...[
+              const SizedBox(height: 14),
+              FilledButton.tonalIcon(
+                onPressed: onOpenAiStudio,
+                icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                label: const Text('没有想要的站点？试试 AI 一键写源'),
+              ),
+            ],
           ],
         ),
       ),
