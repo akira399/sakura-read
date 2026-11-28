@@ -8,6 +8,7 @@ import 'package:sakura_read/src/data/models.dart';
 import 'package:sakura_read/src/data/prefs.dart';
 import 'package:sakura_read/src/data/shelf_sort.dart';
 import 'package:sakura_read/src/data/stats_store.dart';
+import 'package:sakura_read/src/features/bookshelf/widgets/book_grid_card.dart';
 import 'package:sakura_read/src/features/bookshelf/widgets/book_list_tile.dart';
 import 'package:sakura_read/src/features/bookshelf/widgets/continue_reading_card.dart';
 import 'package:sakura_read/src/features/settings/reading_defaults_page.dart';
@@ -156,6 +157,59 @@ void main() {
     final r2 = tester.getRect(find.byType(BookListTile).at(1));
     expect(r1.top, r2.top);
     expect(r1.left, lessThan(r2.left));
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
+  testWidgets('横屏多本书架网格视图顶部双栏并排且至少 5 列紧凑展示', (tester) async {
+    tester.view.physicalSize = const Size(960 * 2, 540 * 2);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    for (var i = 1; i <= 6; i++) {
+      store.addOnline(
+        Book(
+          id: 'gb$i',
+          title: '书籍 $i',
+          author: '作者 $i',
+          format: BookFormat.epub,
+          path: '/tmp/$i.epub',
+          lastReadAt: i == 1 ? 1700000010000 : 0,
+          chapters: [ChapterRef(title: '1', charCount: 400)],
+        ),
+      );
+    }
+    prefs.setShelfView(ShelfViewMode.grid);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: SakuraTheme.build(prefs.accent, Brightness.light),
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(960, 540),
+            padding: EdgeInsets.only(top: 16),
+            disableAnimations: true,
+          ),
+          child: Scaffold(
+            body: ShelfPage(
+              store: store,
+              prefs: prefs,
+              sourceStore: sourceStore,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ErrorWidget), findsNothing);
+    final continueRect = tester.getRect(find.byType(ContinueReadingCard));
+    final summaryRect = tester.getRect(find.textContaining('藏书 6 本'));
+    expect(continueRect.right, lessThan(summaryRect.left));
+
+    final card0 = tester.getRect(find.byType(BookGridCard).at(0));
+    final card4 = tester.getRect(find.byType(BookGridCard).at(4));
+    expect(card0.top, card4.top);
+    expect(card0.height, lessThanOrEqualTo(260));
     await tester.pump(const Duration(milliseconds: 500));
   });
 

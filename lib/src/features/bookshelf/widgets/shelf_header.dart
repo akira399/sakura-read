@@ -108,15 +108,17 @@ class ShelfHeader extends StatelessWidget {
           );
 
     final hInsets = SakuraLayout.horizontalInsets(context, min: 18);
-    final shortLandscape = SakuraLayout.isShortLandscape(context);
+    final compactV =
+        SakuraLayout.isShortLandscape(context) ||
+        SakuraLayout.isLandscape(context);
 
     return Container(
       decoration: decoration,
       padding: EdgeInsets.fromLTRB(
         hInsets.left,
-        topPad + (shortLandscape ? 8 : 12),
+        topPad + (compactV ? 8 : 12),
         hInsets.right < 18 ? 14 : hInsets.right,
-        shortLandscape ? 10 : 14,
+        compactV ? 8 : 14,
       ),
       child: Center(
         heightFactor: 1.0,
@@ -286,7 +288,9 @@ class _AnimePopHeader extends StatelessWidget {
         ? const Color(0xFF38BDF8)
         : const Color(0xFF0F172A);
     final hInsets = SakuraLayout.horizontalInsets(context, min: 18);
-    final shortLandscape = SakuraLayout.isShortLandscape(context);
+    final compactV =
+        SakuraLayout.isShortLandscape(context) ||
+        SakuraLayout.isLandscape(context);
     return Stack(
       children: [
         Positioned.fill(
@@ -308,9 +312,9 @@ class _AnimePopHeader extends StatelessWidget {
         Padding(
           padding: EdgeInsets.fromLTRB(
             hInsets.left,
-            topPad + (shortLandscape ? 8 : 12),
+            topPad + (compactV ? 8 : 12),
             hInsets.right < 18 ? 14 : hInsets.right,
-            shortLandscape ? 16 : 22,
+            compactV ? 14 : 22,
           ),
           child: Center(
             heightFactor: 1.0,

@@ -7,7 +7,7 @@ class SakuraLayout {
   const SakuraLayout._();
 
   /// 主内容区域最大阅读/浏览宽度（避免横屏平板或桌面端卡片过度拉宽）。
-  static const double contentMaxWidth = 1120;
+  static const double contentMaxWidth = 1200;
 
   /// 设置明细页（单栏卡片列表）的最大宽度。
   static const double detailMaxWidth = 960;

@@ -11,11 +11,11 @@
 支持本地 TXT / EPUB 图文精排、兼容「阅读 3.0」书源（内置 QuickJS 脚本引擎）、离线语音朗读、端侧开源小模型伴读与可关闭的桌面宠物小樱。
 
 <p>
-  <a href="../../releases/latest"><img src="https://img.shields.io/badge/Release-v2.1.0-ec5f8f?style=flat-square&logo=github" alt="Release v2.1.0"/></a>
+  <a href="../../releases/latest"><img src="https://img.shields.io/badge/Release-v2.1.1-ec5f8f?style=flat-square&logo=github" alt="Release v2.1.1"/></a>
   <a href="../../actions/workflows/ci.yml"><img src="https://github.com/akira399/sakura-read/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <img src="https://img.shields.io/badge/Android-7.0%2B%20(API%2024)-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android 7.0+"/>
   <img src="https://img.shields.io/badge/Flutter-3.47%2B-02569B?style=flat-square&logo=flutter" alt="Flutter 3.47+"/>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-7c3aed?style=flat-square" alt="License MIT"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-7c3aed?style=flat-square" alt="License GPL-3.0"/></a>
 </p>
 
 <p>
@@ -112,10 +112,10 @@ AI 助手支持「**云端 API**」与「**手机端侧离线推理**」双模�
 
 | 安装包 | 体积 | `versionCode` | 适用设备 |
 | --- | :---: | :---: | --- |
-| [`SakuraRead-v2.1.0-arm64.apk`](../../releases/download/v2.1.0/SakuraRead-v2.1.0-arm64.apk) | 69.2 MB | `2073` | **绝大多数手机 / 平板首选** |
-| [`SakuraRead-v2.1.0-x86_64.apk`](../../releases/download/v2.1.0/SakuraRead-v2.1.0-x86_64.apk) | 71.6 MB | `4073` | 桌面 Android 模拟器（MuMu / 雷电等） |
+| [`SakuraRead-v2.1.1-arm64.apk`](../../releases/download/v2.1.1/SakuraRead-v2.1.1-arm64.apk) | 69.2 MB | `2074` | **绝大多数手机 / 平板首选** |
+| [`SakuraRead-v2.1.1-x86_64.apk`](../../releases/download/v2.1.1/SakuraRead-v2.1.1-x86_64.apk) | 71.7 MB | `4074` | 桌面 Android 模拟器（MuMu / 雷电等） |
 
-> **无缝覆盖升级**：与 `v1.2.x`、`v1.3.0`、`v2.0.0`、`v2.0.1` 使用同一发布签名证书，直接覆盖安装即可保留全部书架、进度、书源、批注与本地模型文件。
+> **无缝覆盖升级**：与 `v1.2.x`、`v1.3.0`、`v2.0.x`、`v2.1.0` 使用同一发布签名证书，直接覆盖安装即可保留全部书架、进度、书源、批注与本地模型文件。
 
 ---
 
@@ -190,7 +190,7 @@ android/app/src/main/kotlin/   # 原生语音播控、MultiTTS 扫描、Keystore
 
 - **纯阅读工具声明**：本软件仅作为本地文件阅读器与用户自定义规则解析工具，不主动提供、分发或存储任何受版权保护的书籍内容；内置仅包含公版测试源（中文维基文库，CC BY-SA）及规则示例，请支持正版阅读。
 - **独立实现**：兼容「阅读（Legado）3.0」JSON 规则格式与备份数据导入，全套核心逻辑均以 Dart 独立实现，未复用任何 GPL 代码。
-- **开源许可**：源代码遵循 [MIT License](LICENSE)；内置字体「霞鹜文楷 Lite」遵循 SIL OFL-1.1；项目内含配套二次元立绘/UI 素材随仓库按 MIT 协议开放。
+- **开源许可**：源代码遵循 [GNU GPL-3.0](LICENSE)（强传染性开源协议：修改、二次开发或重新分发须同样按 GPL-3.0 开源并保留原作者署名，禁止闭源商用）；内置字体「霞鹜文楷 Lite」遵循 SIL OFL-1.1。
 
 ---
 

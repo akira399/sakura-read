@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_info.dart';
 import '../core/icons/sakura_icons.dart';
 import '../core/motion/sakura_motion.dart';
 import '../core/theme/sakura_layout.dart';
@@ -12,6 +13,7 @@ import '../data/tts_voice_catalog.dart';
 import '../data/tts_voice_store.dart';
 import '../features/book_source/replace_rule_store.dart';
 import '../features/book_source/replace_rules_page.dart';
+import '../features/settings/about_page.dart';
 import '../features/settings/appearance_studio_page.dart';
 import '../features/settings/reading_defaults_page.dart';
 import '../features/settings/system_about_page.dart';
@@ -308,6 +310,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   onTap: () => _push(
                     SystemAboutPage(prefs: widget.prefs, store: widget.store),
                   ),
+                ),
+                _SettingsNavRow(
+                  glyph: SakuraGlyph.about,
+                  badgeColor: const Color(0xFFEC5F8F),
+                  title: '关于樱读',
+                  subtitle:
+                      'v${AppInfo.version} · ${AppInfo.license} · 酷安 / GitHub / 检查更新',
+                  onTap: () => _push(AboutPage(prefs: widget.prefs)),
                 ),
               ],
             ),

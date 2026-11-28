@@ -1,23 +1,14 @@
-// 「发现新版本」更新的公告弹窗：版本对比 + 更新说明 + 下载进度 + 安装引导。
-//
-// 交互细节（参考同类开源项目常见做法，结合本项目无插件约束）：
-//   - 自动检查：仅「有新版 + 该版本未被跳过」时弹出；「以后再说」记住版本；
-//   - 手动检查：无论是否跳过都展示（用户明确要看）；
-//   - 点「立即更新」：镜像下载（进度条 + 取消）→ 完成后调起系统安装；
-//   - 未授权「安装未知来源应用」：引导去系统设置授权；
-//   - 下载失败：给出重试与「打开发布页」兜底。
+// 「发现新版本」更新的公告弹窗：版本对比 + 更新说明 + 多线路优选进度 + 换线 + 安装引导。
 import 'package:flutter/material.dart';
 
 import '../app_info.dart';
 import '../data/prefs.dart';
 import '../platform/native_bridge.dart';
 import '../platform/update_service.dart';
+import '../platform/url_launcher.dart';
 import '../util/format.dart';
 
 /// 弹出「发现新版本」公告。
-///
-/// [isAuto]：自动检查弹出（true）还是设置页手动检查弹出（false）。
-/// 返回 true = 用户点了「立即更新」流程（或已完成安装引导）。
 Future<bool?> showUpdateDialog(
   BuildContext context, {
   required UpdateInfo info,
@@ -26,7 +17,6 @@ Future<bool?> showUpdateDialog(
 }) {
   return showDialog<bool>(
     context: context,
-    // 下载中不允许点外关闭：避免用户以为没在下载
     barrierDismissible: true,
     builder: (_) => _UpdateDialog(info: info, isAuto: isAuto, prefs: prefs),
   );
@@ -54,6 +44,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   int _received = 0;
   int _total = 0;
   bool _cancelled = false;
+  bool _switchRequested = false;
+  UpdateDownloadStatus? _status;
   String? _error;
 
   /// 已下载的安装包路径（done 阶段进入系统安装器）。
@@ -71,6 +63,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       _received = 0;
       _total = widget.info.sizeBytes;
       _cancelled = false;
+      _switchRequested = false;
+      _status = null;
       _error = null;
     });
     final dirs = await NativeBridge.appDirs();
@@ -87,12 +81,20 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           if (total > 0) _total = total;
         });
       },
+      onStatus: (status) {
+        if (!mounted) return;
+        setState(() => _status = status);
+      },
       isCancelled: () => _cancelled,
+      shouldSwitchRoute: () {
+        if (!_switchRequested) return false;
+        _switchRequested = false;
+        return true;
+      },
     );
 
     if (!mounted) return;
     if (_cancelled) {
-      // 取消：回到信息页（不报错）
       setState(() => _phase = _Phase.idle);
       return;
     }
@@ -105,7 +107,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     } else {
       setState(() {
         _phase = _Phase.error;
-        _error = '所有下载线路都失败了，请检查网络后重试';
+        _error = '所有加速线路均下载失败，可尝试重试或前往浏览器下载';
       });
     }
   }
@@ -120,7 +122,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       if (!mounted) return;
       setState(() {
         _error = '需要先允许「安装未知来源应用」，授权后请重新点安装';
-        _phase = _Phase.done; // 保持完成态（可再点安装）
+        _phase = _Phase.done;
       });
       await NativeBridge.openInstallPermission();
       return;
@@ -142,7 +144,6 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     final busy = _phase == _Phase.downloading;
 
     return PopScope(
-      // 下载过程中拦截返回键（防误触丢进度；可先用「取消」）
       canPop: !busy,
       child: AlertDialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
@@ -199,7 +200,6 @@ class _UpdateDialogState extends State<_UpdateDialog> {
 
   List<Widget> _buildInfo(ColorScheme scheme) {
     return [
-      // 更新说明
       Container(
         width: double.infinity,
         constraints: const BoxConstraints(maxHeight: 220),
@@ -218,7 +218,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       if (widget.info.sizeBytes > 0) ...[
         const SizedBox(height: 8),
         Text(
-          '安装包大小：${formatBytes(widget.info.sizeBytes)}',
+          '安装包大小：${formatBytes(widget.info.sizeBytes)} · 支持多线路测速与断点续传',
           style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
         ),
       ],
@@ -256,10 +256,23 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   }
 
   List<Widget> _buildDownloading(ColorScheme scheme) {
-    final percent = _total > 0 ? (_received / _total).clamp(0.0, 1.0) : null;
+    final status = _status;
+    final probing = status?.phase == UpdateDownloadPhase.probing;
+    final percent = probing
+        ? null
+        : (_total > 0 ? (_received / _total).clamp(0.0, 1.0) : null);
+    final speedLabel = (status != null && status.bytesPerSecond > 0)
+        ? '${formatBytes(status.bytesPerSecond)}/s'
+        : '';
+    final headline = status == null
+        ? '正在优选最快下载线路…'
+        : (status.message.isNotEmpty ? status.message : status.mirrorLabel);
+
     return [
       Text(
-        '正在通过国内镜像下载…',
+        headline,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
       ),
       const SizedBox(height: 10),
@@ -268,19 +281,42 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         child: LinearProgressIndicator(value: percent, minHeight: 8),
       ),
       const SizedBox(height: 8),
-      Text(
-        _total > 0
-            ? '${(_received / _total * 100).toStringAsFixed(0)}% · '
-                  '${formatBytes(_received)} / ${formatBytes(_total)}'
-            : formatBytes(_received),
-        style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              _total > 0
+                  ? '${(_received / _total * 100).toStringAsFixed(0)}% · '
+                        '${formatBytes(_received)} / ${formatBytes(_total)}'
+                  : formatBytes(_received),
+              style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+            ),
+          ),
+          if (speedLabel.isNotEmpty)
+            Text(
+              speedLabel,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: scheme.primary,
+              ),
+            ),
+        ],
       ),
     ];
   }
 
   List<Widget> _buildActions() {
     if (_phase == _Phase.downloading) {
+      final canSwitch = _status?.phase == UpdateDownloadPhase.downloading;
       return [
+        if (canSwitch)
+          TextButton(
+            onPressed: () {
+              setState(() => _switchRequested = true);
+            },
+            child: const Text('换条线路'),
+          ),
         TextButton(
           onPressed: () => setState(() => _cancelled = true),
           child: const Text('取消下载'),
@@ -290,7 +326,6 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     return [
       TextButton(
         onPressed: () {
-          // 自动弹窗的「以后再说」记住版本（不再自动弹）；手动检查不记
           if (widget.isAuto) {
             widget.prefs.setSkipUpdateVersion(widget.info.version);
           }
@@ -298,12 +333,15 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         },
         child: Text(widget.isAuto ? '以后再说' : '关闭'),
       ),
-      if (_phase == _Phase.error)
-        FilledButton(onPressed: _startDownload, child: const Text('重试下载'))
-      else
+      if (_phase == _Phase.error) ...[
+        TextButton(
+          onPressed: () => launchUrlString(widget.info.pageUrl),
+          child: const Text('浏览器下载'),
+        ),
+        FilledButton(onPressed: _startDownload, child: const Text('重试下载')),
+      ] else
         FilledButton(
           onPressed: () {
-            // 已下载完成：重新调起安装；否则开始下载
             if (_phase == _Phase.done) {
               _install();
             } else {

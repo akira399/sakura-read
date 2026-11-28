@@ -22,6 +22,7 @@ class ContinueReadingCard extends StatefulWidget {
     this.visualStyle = VisualStylePreset.sakuraAtelier,
     this.plankStyle = ShelfPlankStyle.frostedGlass,
     this.silkBookmarkAndStamp = true,
+    this.compact = false,
     this.margin,
   });
 
@@ -31,6 +32,7 @@ class ContinueReadingCard extends StatefulWidget {
   final VisualStylePreset visualStyle;
   final ShelfPlankStyle plankStyle;
   final bool silkBookmarkAndStamp;
+  final bool compact;
   final EdgeInsetsGeometry? margin;
 
   @override
@@ -171,13 +173,14 @@ class _ContinueReadingCardState extends State<ContinueReadingCard>
           clipBehavior: Clip.none,
           children: [
             Container(
-              padding: const EdgeInsets.all(14),
+              padding: EdgeInsets.all(widget.compact ? 11 : 14),
               decoration: cardDecoration,
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   SizedBox(
-                    width: 64,
-                    height: 92,
+                    width: widget.compact ? 54 : 64,
+                    height: widget.compact ? 78 : 92,
                     child: BookPageEdgesFrame(
                       showEdges: showEdges,
                       popOutline: isAnime,
@@ -191,7 +194,7 @@ class _ContinueReadingCardState extends State<ContinueReadingCard>
                       ),
                     ),
                   ),
-                  const SizedBox(width: 15),
+                  SizedBox(width: widget.compact ? 12 : 15),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -260,7 +263,7 @@ class _ContinueReadingCardState extends State<ContinueReadingCard>
                             ],
                           ],
                         ),
-                        const SizedBox(height: 6),
+                        SizedBox(height: widget.compact ? 4 : 6),
                         Text(
                           book.title,
                           maxLines: 1,
@@ -268,11 +271,11 @@ class _ContinueReadingCardState extends State<ContinueReadingCard>
                           style: TextStyle(
                             color: sakura.inkPrimary,
                             fontFamily: isWashi ? 'serif' : null,
-                            fontSize: 15.5,
+                            fontSize: widget.compact ? 14.5 : 15.5,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-                        const SizedBox(height: 3),
+                        SizedBox(height: widget.compact ? 2 : 3),
                         Text(
                           subtitle,
                           maxLines: 1,
@@ -282,7 +285,7 @@ class _ContinueReadingCardState extends State<ContinueReadingCard>
                             fontSize: 12,
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        SizedBox(height: widget.compact ? 6 : 10),
                         Row(
                           children: [
                             Expanded(

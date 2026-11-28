@@ -1,19 +1,69 @@
-// 检查更新 + 下载新版本安装包（GitHub Release，国内镜像加速）。
-//
-// 为什么独立成服务：网络链路（多端点回退 / 镜像前缀 / 大小校验）需要
-// 可测试，全部走注入的 http.Client，测试用 MockClient 覆盖。
+// 检查更新 + 多线路智能优选与极速下载（GitHub Release + 多镜像自动測速与断点续传）。
 //
 // 链路设计：
-//   - 检查：gh-proxy 透传 GitHub API → 直连 GitHub API → ungh.cc，
-//     任一成功即出结果（返回 200 但数据不完整时继续下一个）；
-//   - 下载：gh-proxy.com → ghproxy.net → ghfast.top → 直连，
-//     「全程成功 + 大小校验通过」才算成功，否则换下一个镜像。
+//   - 检查：并发竞速多个 GitHub Release API 镜像 + 官方 API + ungh.cc，
+//     谁最快返回有效 Release JSON 就用谁（也保留顺序回退选项便于测试）；
+//   - 下载：
+//       1) 开下载前先并发测速 Range 0-0 优选最快健康镜像（过滤 HTML 假响应）；
+//       2) 下载期间支持 HTTP 206 Range 断点续传，同一 .part 临时文件跨线路复用；
+//       3) 遇断流（12s 无数据）、持续低速（< 48 KB/s 持续 8s）或用户点「换条线路」，
+//          保留已下进度自动切到下一条镜像继续下载，全程无需从头再来；
+//       4) 完成后做精确字节校验，防坏包/错误页。
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
 import '../app_info.dart';
+
+/// 一条 GitHub Release 下载线路。
+class UpdateMirror {
+  const UpdateMirror({
+    required this.id,
+    required this.label,
+    required this.prefix,
+  });
+
+  final String id;
+  final String label;
+
+  /// URL 前缀；空串表示直连 GitHub。
+  final String prefix;
+
+  String resolve(String rawUrl) => '$prefix$rawUrl';
+}
+
+/// 下载调度阶段。
+enum UpdateDownloadPhase {
+  /// 正在并发测速各镜像节点。
+  probing,
+
+  /// 正在通过选定节点传输安装包。
+  downloading,
+
+  /// 当前线路较慢或失败，正在带着已下进度切换到下一条线路。
+  switching,
+}
+
+/// 实时下载状态（供更新弹窗显示线路名称、实时速度与切换提示）。
+class UpdateDownloadStatus {
+  const UpdateDownloadStatus({
+    required this.phase,
+    required this.mirrorLabel,
+    this.bytesPerSecond = 0,
+    this.attempt = 1,
+    this.totalMirrors = 1,
+    this.message = '',
+  });
+
+  final UpdateDownloadPhase phase;
+  final String mirrorLabel;
+  final int bytesPerSecond;
+  final int attempt;
+  final int totalMirrors;
+  final String message;
+}
 
 /// 「检查更新」的结果状态。
 enum UpdateCheckStatus {
@@ -61,16 +111,16 @@ class UpdateInfo {
     required this.pageUrl,
   });
 
-  /// 语义版本（去掉前缀 v），如 `1.0.1`。
+  /// 语义版本（去掉前缀 v），如 `2.1.0`。
   final String version;
 
-  /// release 标题（如「樱读 v1.0.1 ── ...」）。
+  /// release 标题（如「樱读 v2.1.0」）。
   final String title;
 
   /// 更新说明（已做 markdown 轻量清洗，可直接展示）。
   final String notes;
 
-  /// GitHub 原始下载地址（下载时依次套用镜像前缀）。
+  /// GitHub 原始下载地址（下载时按测速结果套用最优镜像）。
   final String downloadUrl;
 
   /// 安装包大小（字节；0 = 未知）。
@@ -79,157 +129,468 @@ class UpdateInfo {
   /// 发布时间（ISO8601 字符串，可为空）。
   final String publishedAt;
 
-  /// release 页面地址（浏览器打不开时的兜底去处）。
+  /// release 页面地址（浏览器兜底去处）。
   final String pageUrl;
 }
 
-/// 检查更新 / 下载安装包服务。
-///
-/// 由 [instance] 单例在 App 内共享；测试用 `UpdateService(client: mock)`
-/// 构造独立实例（注入 MockClient）。
+class _SwitchRouteException implements Exception {
+  const _SwitchRouteException(this.reason);
+  final String reason;
+}
+
+/// 检查更新 / 多线路智能下载服务。
 class UpdateService {
-  UpdateService({http.Client? client}) : _client = client ?? http.Client();
+  UpdateService({
+    http.Client? client,
+    this.enableRouteProbe = true,
+    this.raceCheckEndpoints = true,
+    this.probeTimeout = const Duration(seconds: 4),
+    this.stallTimeout = const Duration(seconds: 12),
+    this.minSpeedBytesPerSec = 48 * 1024,
+    this.slowGraceWindow = const Duration(seconds: 8),
+    List<UpdateMirror>? mirrors,
+    List<String>? endpoints,
+  }) : _client = client ?? http.Client(),
+       _mirrors = mirrors ?? defaultMirrors,
+       _customEndpoints = endpoints;
 
   final http.Client _client;
+  final bool enableRouteProbe;
+  final bool raceCheckEndpoints;
+  final Duration probeTimeout;
+  final Duration stallTimeout;
+  final int minSpeedBytesPerSec;
+  final Duration slowGraceWindow;
+  final List<UpdateMirror> _mirrors;
+  final List<String>? _customEndpoints;
+
+  /// 本次会话记住的最快可用线路 id（小幅优先，避免重复踩慢节点）。
+  String? _lastFastestMirrorId;
 
   /// 全局共享实例（App 内使用）。
   static final UpdateService instance = UpdateService();
 
-  /// 单端点超时。
+  /// 单端点检查超时。
   static const Duration _checkTimeout = Duration(seconds: 10);
 
-  /// 检查端点（按顺序回退；由 [AppInfo.repo] 派生，仓库地址只维护一处）。
+  /// 检查端点（由 [AppInfo.repo] 派生）。
   static List<String> get checkEndpoints {
-    final path = Uri.parse(AppInfo.repo).path; // /akira399/sakura-read
+    final path = Uri.parse(AppInfo.repo).path;
     return [
       'https://gh-proxy.com/https://api.github.com/repos$path/releases/latest',
+      'https://hk.gh-proxy.org/https://api.github.com/repos$path/releases/latest',
+      'https://gh-proxy.org/https://api.github.com/repos$path/releases/latest',
       'https://api.github.com/repos$path/releases/latest',
       'https://ungh.cc/repos$path/releases/latest',
     ];
   }
 
-  /// 下载镜像前缀（按顺序回退）；空串 = 直连 GitHub。
-  ///
-  /// 实测（写入项目时）：前三个均能对 release 下载链返回 200；
-  /// 直连兜底通常无效但保留（部分网络环境下可通）。
-  static const List<String> downloadMirrors = [
-    'https://gh-proxy.com/',
-    'https://ghproxy.net/',
-    'https://ghfast.top/',
-    '',
+  /// 默认下载加速线路（均为实测支持 Range 206 的镜像 + GitHub 直连兜底）。
+  static const List<UpdateMirror> defaultMirrors = [
+    UpdateMirror(
+      id: 'gh-proxy',
+      label: '加速线路 · gh-proxy',
+      prefix: 'https://gh-proxy.com/',
+    ),
+    UpdateMirror(
+      id: 'ghfast',
+      label: '极速线路 · ghfast',
+      prefix: 'https://ghfast.top/',
+    ),
+    UpdateMirror(
+      id: 'hk-gh-proxy',
+      label: '香港节点 · hk.gh-proxy',
+      prefix: 'https://hk.gh-proxy.org/',
+    ),
+    UpdateMirror(
+      id: 'gh-proxy-org',
+      label: '备用节点 · gh-proxy.org',
+      prefix: 'https://gh-proxy.org/',
+    ),
+    UpdateMirror(
+      id: 'v6-gh-proxy',
+      label: '双栈节点 · v6.gh-proxy',
+      prefix: 'https://v6.gh-proxy.org/',
+    ),
+    UpdateMirror(id: 'direct', label: 'GitHub 直连', prefix: ''),
   ];
 
+  /// 镜像前缀清单（兼容旧调用方）。
+  static List<String> get downloadMirrors =>
+      defaultMirrors.map((m) => m.prefix).toList(growable: false);
+
   /// 检查是否有新版本。
-  ///
-  /// [currentVersion] 默认取 [AppInfo.version]（测试可传任意版本）。
   Future<UpdateCheckResult> check({
     String currentVersion = AppInfo.version,
   }) async {
+    final endpoints = _customEndpoints ?? checkEndpoints;
+    if (endpoints.isEmpty) return UpdateCheckResult.failed('无可用检查端点');
+
+    if (!raceCheckEndpoints || endpoints.length == 1) {
+      return _checkSequential(endpoints, currentVersion);
+    }
+    return _checkRacing(endpoints, currentVersion);
+  }
+
+  Future<UpdateCheckResult> _checkSequential(
+    List<String> endpoints,
+    String currentVersion,
+  ) async {
     String? lastError;
-    for (final endpoint in checkEndpoints) {
-      try {
-        final resp = await _client
-            .get(
-              Uri.parse(endpoint),
-              headers: const {
-                'Accept': 'application/json',
-                'User-Agent': 'SakuraRead',
-              },
-            )
-            .timeout(_checkTimeout);
-        if (resp.statusCode != 200) {
-          lastError = '$endpoint -> HTTP ${resp.statusCode}';
-          continue;
-        }
-        final info = parseReleaseJson(jsonDecode(utf8.decode(resp.bodyBytes)));
-        if (info == null || info.downloadUrl.isEmpty) {
-          lastError = '$endpoint -> 数据不完整';
-          continue;
-        }
-        return isNewerVersion(info.version, currentVersion)
-            ? UpdateCheckResult.available(info)
-            : UpdateCheckResult.upToDate();
-      } catch (e) {
-        lastError = '$endpoint -> $e';
-      }
+    for (final endpoint in endpoints) {
+      final attempt = await _fetchEndpoint(endpoint, currentVersion);
+      if (attempt.result != null) return attempt.result!;
+      lastError = attempt.error;
     }
     return UpdateCheckResult.failed(lastError);
   }
 
-  /// 下载 APK 到 [targetPath]。
-  ///
-  /// - 按 [downloadMirrors] 顺序尝试：任一镜像「全程成功 + 大小校验
-  ///   通过」即返回 true；
-  /// - [onProgress]：`(已下载字节, 总字节)`（总字节未知时为 0）；
-  /// - [isCancelled]：返回 true 时中止下载（清理半成品），返回 false。
+  Future<UpdateCheckResult> _checkRacing(
+    List<String> endpoints,
+    String currentVersion,
+  ) async {
+    final completer = Completer<UpdateCheckResult>();
+    var remaining = endpoints.length;
+    String? lastError;
+
+    for (final endpoint in endpoints) {
+      _fetchEndpoint(endpoint, currentVersion).then((attempt) {
+        if (completer.isCompleted) return;
+        if (attempt.result != null) {
+          completer.complete(attempt.result!);
+          return;
+        }
+        lastError = attempt.error ?? lastError;
+        remaining--;
+        if (remaining <= 0 && !completer.isCompleted) {
+          completer.complete(UpdateCheckResult.failed(lastError));
+        }
+      });
+    }
+    return completer.future;
+  }
+
+  Future<({UpdateCheckResult? result, String? error})> _fetchEndpoint(
+    String endpoint,
+    String currentVersion,
+  ) async {
+    try {
+      final resp = await _client
+          .get(
+            Uri.parse(endpoint),
+            headers: const {
+              'Accept': 'application/json',
+              'User-Agent': 'SakuraRead',
+            },
+          )
+          .timeout(_checkTimeout);
+      if (resp.statusCode != 200) {
+        return (result: null, error: '$endpoint -> HTTP ${resp.statusCode}');
+      }
+      final info = parseReleaseJson(jsonDecode(utf8.decode(resp.bodyBytes)));
+      if (info == null || info.downloadUrl.isEmpty) {
+        return (result: null, error: '$endpoint -> 数据不完整');
+      }
+      final result = isNewerVersion(info.version, currentVersion)
+          ? UpdateCheckResult.available(info)
+          : UpdateCheckResult.upToDate();
+      return (result: result, error: null);
+    } catch (e) {
+      return (result: null, error: '$endpoint -> $e');
+    }
+  }
+
+  /// 下载 APK 到 [targetPath]：测速优选 + 断点续传 + 慢速/断流自动切源。
   Future<bool> download(
     UpdateInfo info,
     String targetPath, {
     void Function(int received, int total)? onProgress,
+    void Function(UpdateDownloadStatus status)? onStatus,
     bool Function()? isCancelled,
+    bool Function()? shouldSwitchRoute,
   }) async {
-    for (final mirror in downloadMirrors) {
-      if (isCancelled?.call() == true) return false;
+    if (_mirrors.isEmpty) return false;
+
+    List<UpdateMirror> ordered = _mirrors;
+    if (enableRouteProbe && _mirrors.length > 1) {
+      onStatus?.call(
+        UpdateDownloadStatus(
+          phase: UpdateDownloadPhase.probing,
+          mirrorLabel: '多线路并发测速',
+          totalMirrors: _mirrors.length,
+          message: '正在并发测速并优选最快下载线路…',
+        ),
+      );
+      ordered = await _rankMirrors(info.downloadUrl);
+    }
+
+    if (isCancelled?.call() == true) {
+      await _quietDelete(File('$targetPath.part'));
+      return false;
+    }
+
+    final tmp = File('$targetPath.part');
+    for (var i = 0; i < ordered.length; i++) {
+      if (isCancelled?.call() == true) {
+        await _quietDelete(tmp);
+        return false;
+      }
+      final mirror = ordered[i];
+      final hasNext = i + 1 < ordered.length;
+      onStatus?.call(
+        UpdateDownloadStatus(
+          phase: UpdateDownloadPhase.downloading,
+          mirrorLabel: mirror.label,
+          attempt: i + 1,
+          totalMirrors: ordered.length,
+          message: '正在连接 ${mirror.label}…',
+        ),
+      );
+
       try {
         final ok = await _downloadOnce(
-          url: '$mirror${info.downloadUrl}',
+          mirror: mirror,
+          url: mirror.resolve(info.downloadUrl),
           targetPath: targetPath,
           expectedBytes: info.sizeBytes,
+          attempt: i + 1,
+          totalMirrors: ordered.length,
+          hasNextMirror: hasNext,
           onProgress: onProgress,
+          onStatus: onStatus,
           isCancelled: isCancelled,
+          shouldSwitchRoute: shouldSwitchRoute,
         );
-        if (ok) return true;
-        if (isCancelled?.call() == true) return false;
-      } catch (_) {
-        // 本镜像失败：继续下一个
-      }
-    }
-    return false;
-  }
-
-  /// 单镜像下载：先写 `.part` 临时文件，完成后做大小校验并改名。
-  Future<bool> _downloadOnce({
-    required String url,
-    required String targetPath,
-    required int expectedBytes,
-    void Function(int received, int total)? onProgress,
-    bool Function()? isCancelled,
-  }) async {
-    final req = http.Request('GET', Uri.parse(url));
-    final resp = await _client.send(req).timeout(const Duration(seconds: 20));
-    if (resp.statusCode != 200) {
-      throw HttpException('HTTP ${resp.statusCode}', uri: Uri.parse(url));
-    }
-    final file = File(targetPath);
-    await file.parent.create(recursive: true);
-    final tmp = File('$targetPath.part');
-    final sink = tmp.openWrite();
-    var received = 0;
-    final total = resp.contentLength ?? expectedBytes;
-    try {
-      await for (final chunk in resp.stream.timeout(
-        const Duration(seconds: 60),
-      )) {
+        if (ok) {
+          _lastFastestMirrorId = mirror.id;
+          return true;
+        }
         if (isCancelled?.call() == true) {
-          await sink.close();
           await _quietDelete(tmp);
           return false;
         }
-        sink.add(chunk);
-        received += chunk.length;
-        onProgress?.call(received, total);
+      } on _SwitchRouteException catch (e) {
+        if (hasNext) {
+          onStatus?.call(
+            UpdateDownloadStatus(
+              phase: UpdateDownloadPhase.switching,
+              mirrorLabel: ordered[i + 1].label,
+              attempt: i + 2,
+              totalMirrors: ordered.length,
+              message: '${e.reason}，切换至 ${ordered[i + 1].label}…',
+            ),
+          );
+        }
+      } catch (_) {
+        if (hasNext) {
+          onStatus?.call(
+            UpdateDownloadStatus(
+              phase: UpdateDownloadPhase.switching,
+              mirrorLabel: ordered[i + 1].label,
+              attempt: i + 2,
+              totalMirrors: ordered.length,
+              message: '${mirror.label} 连接中断，正在断点续传切换下一条线路…',
+            ),
+          );
+        }
       }
-      await sink.close();
-    } catch (e) {
-      await sink.close();
-      await _quietDelete(tmp);
-      rethrow;
     }
-    // 大小校验：镜像返回错误页 / 传输截断时拒绝（防止装到坏包）
+
+    await _quietDelete(tmp);
+    return false;
+  }
+
+  Future<List<UpdateMirror>> _rankMirrors(String downloadUrl) async {
+    final results = await Future.wait(
+      _mirrors.map((mirror) async {
+        final sw = Stopwatch()..start();
+        try {
+          final uri = Uri.parse(mirror.resolve(downloadUrl));
+          final req = http.Request('GET', uri)
+            ..headers.addAll(const {
+              'Range': 'bytes=0-0',
+              'User-Agent': 'SakuraRead',
+            });
+          final resp = await _client.send(req).timeout(probeTimeout);
+          final ct = (resp.headers['content-type'] ?? '').toLowerCase();
+          // 尽快释放测速探测流，不额外拉取数据
+          unawaited(resp.stream.drain<void>().catchError((_) {}));
+          sw.stop();
+          final okStatus = resp.statusCode == 206 || resp.statusCode == 200;
+          final looksLikeWebPage =
+              ct.contains('text/html') || ct.contains('application/json');
+          if (okStatus && !looksLikeWebPage) {
+            final bias = mirror.id == _lastFastestMirrorId ? -80 : 0;
+            return (
+              mirror: mirror,
+              ok: true,
+              score: sw.elapsedMilliseconds + bias,
+            );
+          }
+        } catch (_) {}
+        return (mirror: mirror, ok: false, score: 1 << 30);
+      }),
+    );
+
+    final healthy = results.where((r) => r.ok).toList()
+      ..sort((a, b) => a.score.compareTo(b.score));
+    final fallback = results.where((r) => !r.ok);
+    return [
+      for (final r in healthy) r.mirror,
+      for (final r in fallback) r.mirror,
+    ];
+  }
+
+  /// 单线路下载：支持 HTTP 206 断点续传、断流与低速检测。
+  ///
+  /// 切换线路或网络抖动时保留 `.part` 临时文件以便下一条线路继续传；
+  /// 仅当校验损坏、用户取消或全部线路均失败时删掉 `.part`。
+  Future<bool> _downloadOnce({
+    required UpdateMirror mirror,
+    required String url,
+    required String targetPath,
+    required int expectedBytes,
+    required int attempt,
+    required int totalMirrors,
+    required bool hasNextMirror,
+    void Function(int received, int total)? onProgress,
+    void Function(UpdateDownloadStatus status)? onStatus,
+    bool Function()? isCancelled,
+    bool Function()? shouldSwitchRoute,
+  }) async {
+    final file = File(targetPath);
+    await file.parent.create(recursive: true);
+    final tmp = File('$targetPath.part');
+
+    var resumeFrom = 0;
+    if (await tmp.exists()) {
+      final len = await tmp.length();
+      if (expectedBytes > 0 && len > expectedBytes) {
+        await _quietDelete(tmp);
+      } else if (expectedBytes > 0 && len == expectedBytes) {
+        await _quietDelete(file);
+        await tmp.rename(targetPath);
+        return true;
+      } else if (len > 0) {
+        resumeFrom = len;
+      }
+    }
+
+    final req = http.Request('GET', Uri.parse(url))
+      ..headers['User-Agent'] = 'SakuraRead';
+    if (resumeFrom > 0) {
+      req.headers['Range'] = 'bytes=$resumeFrom-';
+    }
+
+    final resp = await _client.send(req).timeout(const Duration(seconds: 15));
+    final contentType = (resp.headers['content-type'] ?? '').toLowerCase();
+    final isHtmlOrJson =
+        contentType.contains('text/html') ||
+        contentType.contains('application/json');
+    if ((resp.statusCode != 200 && resp.statusCode != 206) || isHtmlOrJson) {
+      await resp.stream.drain<void>().catchError((_) {});
+      throw HttpException(
+        'HTTP ${resp.statusCode}${isHtmlOrJson ? ' ($contentType)' : ''}',
+        uri: Uri.parse(url),
+      );
+    }
+
+    final contentRange = (resp.headers['content-range'] ?? '').toLowerCase();
+    final canAppend =
+        resumeFrom > 0 &&
+        resp.statusCode == 206 &&
+        (contentRange.isEmpty || contentRange.startsWith('bytes $resumeFrom-'));
+
+    var received = canAppend ? resumeFrom : 0;
+    final total = expectedBytes > 0
+        ? expectedBytes
+        : ((resp.contentLength ?? 0) + (canAppend ? resumeFrom : 0));
+
+    final sink = tmp.openWrite(
+      mode: canAppend ? FileMode.append : FileMode.write,
+    );
+    final iter = StreamIterator<List<int>>(resp.stream);
+
+    var speedWindowBytes = 0;
+    var lastSpeedAt = DateTime.now();
+    var lastStatusAt = DateTime.fromMillisecondsSinceEpoch(0);
+    DateTime? lowSpeedSince;
+    var currentBps = 0;
+    var cancelled = false;
+
+    try {
+      while (await iter.moveNext().timeout(stallTimeout)) {
+        if (isCancelled?.call() == true) {
+          cancelled = true;
+          break;
+        }
+        if (hasNextMirror && shouldSwitchRoute?.call() == true) {
+          throw const _SwitchRouteException('已手动换线');
+        }
+
+        final chunk = iter.current;
+        if (chunk.isNotEmpty) {
+          sink.add(chunk);
+          received += chunk.length;
+          speedWindowBytes += chunk.length;
+          onProgress?.call(received, total);
+        }
+
+        final now = DateTime.now();
+        final elapsedMs = now.difference(lastSpeedAt).inMilliseconds;
+        if (elapsedMs >= 500) {
+          currentBps = (speedWindowBytes * 1000 / elapsedMs).round();
+          speedWindowBytes = 0;
+          lastSpeedAt = now;
+
+          final remainingBytes = total > 0 ? total - received : (1 << 20);
+          if (hasNextMirror &&
+              minSpeedBytesPerSec > 0 &&
+              remainingBytes > 256 * 1024) {
+            if (currentBps < minSpeedBytesPerSec) {
+              lowSpeedSince ??= now;
+              if (now.difference(lowSpeedSince) >= slowGraceWindow) {
+                throw const _SwitchRouteException('当前线路速度较慢');
+              }
+            } else {
+              lowSpeedSince = null;
+            }
+          }
+        }
+
+        if (now.difference(lastStatusAt).inMilliseconds >= 350) {
+          lastStatusAt = now;
+          onStatus?.call(
+            UpdateDownloadStatus(
+              phase: UpdateDownloadPhase.downloading,
+              mirrorLabel: mirror.label,
+              bytesPerSecond: currentBps,
+              attempt: attempt,
+              totalMirrors: totalMirrors,
+              message: canAppend && resumeFrom > 0
+                  ? '已断点续传 ${mirror.label}'
+                  : mirror.label,
+            ),
+          );
+        }
+      }
+    } finally {
+      await iter.cancel().catchError((_) {});
+      await sink.flush().catchError((_) {});
+      await sink.close().catchError((_) {});
+    }
+
+    if (cancelled || isCancelled?.call() == true) {
+      await _quietDelete(tmp);
+      return false;
+    }
+
+    // 大小校验：镜像返回截断或异常包时删掉损坏的 .part 并换下一条线
     if (expectedBytes > 0 && received != expectedBytes) {
       await _quietDelete(tmp);
       throw const FileSystemException('安装包大小校验失败');
     }
+
     await _quietDelete(file);
     await tmp.rename(targetPath);
     return true;
@@ -243,10 +604,6 @@ class UpdateService {
 }
 
 /// 语义版本比较：`candidate` 是否比 `current` 新。
-///
-/// - 容忍 `v` 前缀与 `1.2.3-beta.1` 这类预发布后缀（只比较数字段）；
-/// - 逐段比较，缺失段按 0 处理（`1.0` vs `1.0.1` 视作更旧）；
-/// - 完全相同时返回 false（避免每次启动重复提示同一版本）。
 bool isNewerVersion(String candidate, String current) {
   final a = _versionParts(candidate);
   final b = _versionParts(current);
@@ -265,12 +622,7 @@ List<int> _versionParts(String raw) {
   return core.split('.').map((p) => int.tryParse(p.trim()) ?? 0).toList();
 }
 
-/// 解析 release JSON（同时兼容 GitHub API 与 ungh.cc 两种格式）：
-///
-/// - GitHub API：`tag_name` / `name` / `body` / `assets[].browser_download_url`
-///   / `published_at` / `html_url`；
-/// - ungh.cc：`{"release": {tag / name / markdown / assets[].downloadUrl
-///   / publishedAt / htmlUrl}}`。
+/// 解析 release JSON（同时兼容 GitHub API 与 ungh.cc 两种格式）。
 UpdateInfo? parseReleaseJson(Object? json) {
   if (json is! Map) return null;
   final release = json['release'] is Map ? json['release'] as Map : json;
@@ -300,12 +652,7 @@ UpdateInfo? parseReleaseJson(Object? json) {
   );
 }
 
-/// 从 release 的 `assets[]` 里挑出「应该给这台手机装」的那个 APK。
-///
-/// 一个 release 同时挂 arm64 与 x86_64 两个包时，GitHub 按**文件名**返回，
-/// `…-x86_64.apk` 会排在 `…-arm64.apk` 前面——直接取 `assets[0]` 会让手机
-/// 下到只能跑在模拟器上的包（安装报 INSTALL_FAILED_NO_MATCHING_ABIS）。
-/// 因此按架构打分：arm64 / aarch64 > universal > 无架构标记 > x86 / x64。
+/// 从 release 的 `assets[]` 里挑出适配当前手机架构（arm64 优先）的 APK。
 Map? _pickApkAsset(Object? assets) {
   if (assets is! List) return null;
   Map? best;
@@ -353,28 +700,21 @@ int _firstInt(Map map, List<String> keys) {
 }
 
 /// 轻量清洗 release 说明（markdown → 纯文本）：保留结构与换行，去掉装饰。
-///
-/// 只做「阅读友好」处理，不追求完整 markdown 渲染（详情可跳 release 页）。
 String cleanReleaseNotes(String markdown) {
   var s = markdown.replaceAll('\r\n', '\n');
-  // 图片 ![alt](url) 与链接 [text](url)
   s = s.replaceAll(RegExp(r'!\[[^\]]*\]\([^)]*\)'), '');
   s = s.replaceAllMapped(
     RegExp(r'\[([^\]]*)\]\([^)]*\)'),
     (m) => m.group(1) ?? '',
   );
-  // HTML 标签与行内代码标记
   s = s.replaceAll(RegExp(r'<[^>]+>'), '');
   s = s.replaceAll('`', '');
-  // 行首标题 # / 引用 > / 列表符（- * + 与数字序号）
   s = s.replaceAll(RegExp(r'^\s{0,3}#{1,6}\s*', multiLine: true), '');
   s = s.replaceAll(RegExp(r'^\s{0,3}>\s?', multiLine: true), '');
   s = s.replaceAll(RegExp(r'^\s{0,3}[-*+]\s+', multiLine: true), '· ');
   s = s.replaceAll(RegExp(r'^\s{0,3}\d+\.\s+', multiLine: true), '· ');
-  // 加粗 / 斜体 / 水平线
   s = s.replaceAll('**', '').replaceAll('__', '');
   s = s.replaceAll(RegExp(r'^\s*[-*_]{3,}\s*$', multiLine: true), '');
-  // 连续空行压缩（最多保留一个空行）
   s = s.replaceAll(RegExp(r'\n{3,}'), '\n\n');
   return s.trim();
 }

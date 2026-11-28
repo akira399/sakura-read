@@ -12,6 +12,7 @@ import '../../platform/update_service.dart';
 import '../../platform/url_launcher.dart';
 import '../../ui/update_dialog.dart';
 import '../../util/format.dart';
+import 'about_page.dart';
 
 /// 系统、性能、存储清理、更新检查与关于页。
 class SystemAboutPage extends StatefulWidget {
@@ -265,18 +266,44 @@ class _SystemAboutPageState extends State<SystemAboutPage> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            TextButton(
-                              onPressed: () async {
-                                final ok = await launchUrlString(AppInfo.repo);
-                                if (!context.mounted || ok) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('没有找到可用的浏览器')),
-                                );
-                              },
-                              child: Text(
-                                'github.com/akira399/sakura-read',
-                                style: TextStyle(color: accent, fontSize: 12),
-                              ),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              alignment: WrapAlignment.center,
+                              children: [
+                                TextButton(
+                                  onPressed: () async {
+                                    final ok = await launchUrlString(
+                                      AppInfo.repo,
+                                    );
+                                    if (!context.mounted || ok) return;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('没有找到可用的浏览器'),
+                                      ),
+                                    );
+                                  },
+                                  child: Text(
+                                    'github.com/akira399/sakura-read',
+                                    style: TextStyle(
+                                      color: accent,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) =>
+                                          AboutPage(prefs: widget.prefs),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    '更多（酷安 / 开源协议 / 免责声明）',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),

@@ -175,7 +175,7 @@ class _AgreementViewState extends State<_AgreementView> {
                               '1. 樱读是阅读工具，本身不提供、不分发、不存储任何书籍内容。\n'
                               '2. 通过书源获取的正文来自第三方网站，版权归原作者与相应站点所有。\n'
                               '3. 请支持正版阅读；自行导入的书源与内容请确认合规。\n'
-                              '4. 本软件以 MIT 协议开源，作者 akira399，欢迎反馈问题。',
+                              '4. 本软件遵循 GNU GPL-3.0 协议开源（衍生分发须同样开源并保留署名），作者 akira399。',
                               style: TextStyle(
                                 fontSize: 12,
                                 height: 1.85,
